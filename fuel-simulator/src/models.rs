@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct FuelReading {
     pub device_id: String,
     pub timestamp: DateTime<Utc>,
@@ -18,4 +18,11 @@ pub enum SimulationMode {
     Theft,
     Leak,
     Refill,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ReadingBatch {
+    pub device_id: String,
+    pub synced_at: DateTime<Utc>,
+    pub readings: Vec<FuelReading>,
 }
