@@ -1,0 +1,94 @@
+use chrono::{Duration, Utc};
+use rand::Rng;
+
+use crate::models::{FuelReading, SimulationMode};
+
+pub struct FuelSimulator {
+    device_id: String,
+    tank_capacity_litres: f64,
+    current_fuel_litres: f64,
+    current_time: chrono::DateTime<Utc>,
+    reading_count: i32,
+    latitude: f64,
+    longitude: f64,
+}
+
+impl FuelSimulator {
+    pub fn new() -> Self {
+        Self {
+            device_id: "DEV001".to_string(),
+            tank_capacity_litres: 200.0,
+            current_fuel_litres: 180.0,
+            current_time: Utc::now(),
+            reading_count: 0,
+            latitude: 5.6037,
+            longitude: -0.1870,
+        }
+    }
+
+    pub fn next_reading(&mut self) -> FuelReading {
+        self.reading_count += 1;
+
+        let mode = self.select_simulation_mode();
+        let fuel_change = self.generate_fuel_change(mode);
+
+        self.current_fuel_litres += fuel_change;
+        self.current_fuel_litres = self
+            .current_fuel_litres
+            .clamp(0.0, self.tank_capacity_litres);
+
+        let reading = FuelReading {
+            device_id: self.device_id.clone(),
+            timestamp: self.current_time,
+            fuel_level_litres: round_2(self.current_fuel_litres),
+            fuel_level_percentage: round_2(
+                (self.current_fuel_litres / self.tank_capacity_litres) * 100.0,
+            ),
+            latitude: self.latitude,
+            longitude: self.longitude,
+            simulation_mode: format!("{:?}", mode),
+        };
+
+        self.current_time += Duration::minutes(1);
+
+        reading
+    }
+
+    fn select_simulation_mode(&self) -> SimulationMode {
+        match self.reading_count {
+            10 => SimulationMode::Theft,
+            20..=25 => SimulationMode::Leak,
+            35 => SimulationMode::Refill,
+            _ => SimulationMode::Normal,
+        }
+    }
+
+    fn generate_fuel_change(&self, mode: SimulationMode) -> f64 {
+        match mode {
+            SimulationMode::Normal => -generate_normal_consumption(),
+            SimulationMode::Theft => -generate_theft_drop(),
+            SimulationMode::Leak => -generate_leak_loss(),
+            SimulationMode::Refill => generate_refill_amount(),
+        }
+    }
+}
+
+fn generate_normal_consumption() -> f64 {
+    rand::thread_rng().gen_range(0.2..1.0)
+}
+
+fn generate_theft_drop() -> f64 {
+    rand::thread_rng().gen_range(25.0..50.0)
+}
+
+fn generate_leak_loss() -> f64 {
+    rand::thread_rng().gen_range(2.0..4.0)
+}
+
+fn generate_refill_amount() -> f64 {
+    rand::thread_rng().gen_range(40.0..80.0)
+}
+
+fn round_2(value: f64) -> f64 {
+    (value * 100.0).round() / 100.0
+}
