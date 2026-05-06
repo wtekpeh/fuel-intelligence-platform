@@ -1,28 +1,41 @@
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use rand::Rng;
 
-use crate::models::{FuelReading, SimulationMode};
+use crate::{
+    config::AppConfig,
+    models::{FuelReading, SimulationMode},
+};
 
 pub struct FuelSimulator {
     device_id: String,
     tank_capacity_litres: f64,
     current_fuel_litres: f64,
-    current_time: chrono::DateTime<Utc>,
+    current_time: DateTime<Utc>,
     reading_count: i32,
     latitude: f64,
     longitude: f64,
+
+    theft_reading_number: i32,
+    leak_start_reading: i32,
+    leak_end_reading: i32,
+    refill_reading_number: i32,
 }
 
 impl FuelSimulator {
-    pub fn new() -> Self {
+    pub fn new(config: &AppConfig) -> Self {
         Self {
-            device_id: "DEV001".to_string(),
-            tank_capacity_litres: 200.0,
-            current_fuel_litres: 180.0,
+            device_id: config.device_id.clone(),
+            tank_capacity_litres: config.tank_capacity_litres,
+            current_fuel_litres: config.initial_fuel_litres,
             current_time: Utc::now(),
             reading_count: 0,
-            latitude: 5.6037,
-            longitude: -0.1870,
+            latitude: config.latitude,
+            longitude: config.longitude,
+
+            theft_reading_number: config.theft_reading_number,
+            leak_start_reading: config.leak_start_reading,
+            leak_end_reading: config.leak_end_reading,
+            refill_reading_number: config.refill_reading_number,
         }
     }
 
@@ -55,11 +68,16 @@ impl FuelSimulator {
     }
 
     fn select_simulation_mode(&self) -> SimulationMode {
-        match self.reading_count {
-            10 => SimulationMode::Theft,
-            20..=25 => SimulationMode::Leak,
-            35 => SimulationMode::Refill,
-            _ => SimulationMode::Normal,
+        if self.reading_count == self.theft_reading_number {
+            SimulationMode::Theft
+        } else if self.reading_count >= self.leak_start_reading
+            && self.reading_count <= self.leak_end_reading
+        {
+            SimulationMode::Leak
+        } else if self.reading_count == self.refill_reading_number {
+            SimulationMode::Refill
+        } else {
+            SimulationMode::Normal
         }
     }
 
