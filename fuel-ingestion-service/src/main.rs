@@ -1,20 +1,29 @@
+mod config;
+mod db;
 mod handlers;
 mod models;
+mod repository;
 mod routes;
 
+use config::AppConfig;
+use db::create_db_pool;
 use routes::app_routes;
 
 #[tokio::main]
-async fn main() {
-    let app = app_routes();
+async fn main() -> anyhow::Result<()> {
+    let config = AppConfig::from_env()?;
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:8080")
-        .await
-        .expect("Failed to bind server");
+    let db_pool = create_db_pool(&config.database_url).await?;
 
-    println!("Fuel ingestion service running on http://127.0.0.1:8080");
+    let app = app_routes(db_pool);
 
-    axum::serve(listener, app)
-        .await
-        .expect("Server failed");
+    let address = format!("{}:{}", config.server_host, config.server_port);
+
+    let listener = tokio::net::TcpListener::bind(&address).await?;
+
+    println!("Fuel ingestion service running on http://{}", address);
+
+    axum::serve(listener, app).await?;
+
+    Ok(())
 }
