@@ -4,7 +4,7 @@ use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::models::FuelReading;
+use crate::models::{FuelEventResponse, FuelReading};
 
 pub struct NewSensorReading {
     pub sensor_id: Uuid,
@@ -15,6 +15,15 @@ pub struct NewSensorReading {
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
     pub raw_payload: Value,
+}
+
+#[derive(Debug)]
+pub struct StoredSensorReading {
+    pub id: Uuid,
+    pub recorded_at: DateTime<Utc>,
+    pub value: f64,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
 }
 
 pub async fn get_or_create_demo_sensor(
@@ -213,4 +222,253 @@ async fn insert_sensor_reading(db_pool: &PgPool, new_reading: NewSensorReading) 
     .await?;
 
     Ok(())
+}
+
+pub async fn get_previous_sensor_reading(
+    db_pool: &PgPool,
+    sensor_id: Uuid,
+) -> Result<Option<(StoredSensorReading, StoredSensorReading)>> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT
+            id,
+            recorded_at,
+            value,
+            latitude,
+            longitude
+        FROM sensor_readings
+        WHERE sensor_id = $1
+        ORDER BY recorded_at DESC
+        LIMIT 2
+        "#,
+        sensor_id
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    if rows.len() < 2 {
+        return Ok(None);
+    }
+
+    let current = StoredSensorReading {
+        id: rows[0].id,
+        recorded_at: rows[0].recorded_at,
+        value: rows[0].value,
+        latitude: rows[0].latitude,
+        longitude: rows[0].longitude,
+    };
+
+    let previous = StoredSensorReading {
+        id: rows[1].id,
+        recorded_at: rows[1].recorded_at,
+        value: rows[1].value,
+        latitude: rows[1].latitude,
+        longitude: rows[1].longitude,
+    };
+
+    Ok(Some((previous, current)))
+}
+
+pub async fn create_fuel_event(
+    db_pool: &PgPool,
+    device_id: Uuid,
+    sensor_id: Uuid,
+    event_type: &str,
+    event_time: DateTime<Utc>,
+    fuel_before: f64,
+    fuel_after: f64,
+    fuel_difference: f64,
+    duration_seconds: i64,
+    latitude: Option<f64>,
+    longitude: Option<f64>,
+    is_delayed_detection: bool,
+    sync_delay_seconds: i64,
+    severity: &str,
+    message: String,
+) -> Result<()> {
+    sqlx::query!(
+        r#"
+        INSERT INTO fuel_events (
+            device_id,
+            sensor_id,
+            event_type,
+            event_time,
+            fuel_before,
+            fuel_after,
+            fuel_difference,
+            duration_seconds,
+            latitude,
+            longitude,
+            is_delayed_detection,
+            sync_delay_seconds,
+            severity,
+            message
+        )
+        VALUES (
+            $1, $2, $3, $4, $5, $6, $7,
+            $8, $9, $10, $11, $12, $13, $14
+        )
+        "#,
+        device_id,
+        sensor_id,
+        event_type,
+        event_time,
+        fuel_before,
+        fuel_after,
+        fuel_difference,
+        duration_seconds,
+        latitude,
+        longitude,
+        is_delayed_detection,
+        sync_delay_seconds,
+        severity,
+        message
+    )
+    .execute(db_pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn get_recent_sensor_readings(
+    db_pool: &PgPool,
+    sensor_id: Uuid,
+    limit: i64,
+) -> Result<Vec<StoredSensorReading>> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT
+            id,
+            recorded_at,
+            value,
+            latitude,
+            longitude
+        FROM sensor_readings
+        WHERE sensor_id = $1
+        ORDER BY recorded_at DESC
+        LIMIT $2
+        "#,
+        sensor_id,
+        limit
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    let readings = rows
+        .into_iter()
+        .map(|row| StoredSensorReading {
+            id: row.id,
+            recorded_at: row.recorded_at,
+            value: row.value,
+            latitude: row.latitude,
+            longitude: row.longitude,
+        })
+        .collect();
+
+    Ok(readings)
+}
+
+pub async fn recent_similar_event_exists(
+    db_pool: &PgPool,
+    sensor_id: Uuid,
+    event_type: &str,
+    window_seconds: i64,
+) -> Result<bool> {
+    let row = sqlx::query!(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM fuel_events
+            WHERE sensor_id = $1
+              AND event_type = $2
+              AND detected_at >= NOW() - ($3 * INTERVAL '1 second')
+        ) as "exists!"
+        "#,
+        sensor_id,
+        event_type,
+        window_seconds as f64
+    )
+    .fetch_one(db_pool)
+    .await?;
+
+    Ok(row.exists)
+}
+
+pub async fn recent_event_type_exists(
+    db_pool: &PgPool,
+    sensor_id: Uuid,
+    event_type: &str,
+    within_seconds: i64,
+) -> Result<bool> {
+    let row = sqlx::query!(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM fuel_events
+            WHERE sensor_id = $1
+              AND event_type = $2
+              AND event_time >= NOW() - ($3 * INTERVAL '1 second')
+        ) as "exists!"
+        "#,
+        sensor_id,
+        event_type,
+        within_seconds as f64
+    )
+    .fetch_one(db_pool)
+    .await?;
+
+    Ok(row.exists)
+}
+
+pub async fn get_recent_fuel_events(
+    db_pool: &PgPool,
+    limit: i64,
+) -> Result<Vec<FuelEventResponse>> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT
+            id,
+            event_type,
+            event_time,
+            detected_at,
+            fuel_before,
+            fuel_after,
+            fuel_difference,
+            duration_seconds,
+            latitude,
+            longitude,
+            is_delayed_detection,
+            sync_delay_seconds,
+            severity,
+            message
+        FROM fuel_events
+        ORDER BY created_at DESC
+        LIMIT $1
+        "#,
+        limit
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    let events = rows
+        .into_iter()
+        .map(|row| FuelEventResponse {
+            id: row.id.to_string(),
+            event_type: row.event_type,
+            event_time: row.event_time,
+            detected_at: row.detected_at,
+            fuel_before: row.fuel_before,
+            fuel_after: row.fuel_after,
+            fuel_difference: row.fuel_difference,
+            duration_seconds: row.duration_seconds,
+            latitude: row.latitude,
+            longitude: row.longitude,
+            is_delayed_detection: row.is_delayed_detection,
+            sync_delay_seconds: row.sync_delay_seconds,
+            severity: row.severity,
+            message: row.message,
+        })
+        .collect();
+
+    Ok(events)
 }

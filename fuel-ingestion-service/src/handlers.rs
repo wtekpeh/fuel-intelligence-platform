@@ -5,9 +5,12 @@ use axum::{
 };
 use sqlx::PgPool;
 
+use crate::services::fuel_detection::{detect_fuel_event, detect_possible_leak};
 use crate::{
     models::{ApiResponse, ReadingBatch},
-    repository::{get_or_create_demo_sensor, save_fuel_reading_as_sensor_reading},
+    repository::{
+        get_or_create_demo_sensor, get_recent_fuel_events, save_fuel_reading_as_sensor_reading,
+    },
 };
 
 pub async fn ingest_reading_batch(
@@ -26,6 +29,10 @@ pub async fn ingest_reading_batch(
 
         for reading in &payload.readings {
             save_fuel_reading_as_sensor_reading(&db_pool, device_id, sensor_id, reading).await?;
+
+            detect_fuel_event(&db_pool, device_id, sensor_id).await?;
+
+            detect_possible_leak(&db_pool, device_id, sensor_id).await?;
         }
 
         anyhow::Ok(())
@@ -53,6 +60,24 @@ pub async fn ingest_reading_batch(
                     message: format!("Failed to store batch: {}", err),
                     received_count: 0,
                 }),
+            )
+                .into_response()
+        }
+    }
+}
+
+pub async fn list_recent_fuel_events(State(db_pool): State<PgPool>) -> impl IntoResponse {
+    match get_recent_fuel_events(&db_pool, 50).await {
+        Ok(events) => (StatusCode::OK, Json(events)).into_response(),
+        Err(err) => {
+            eprintln!("Failed to fetch fuel events: {}", err);
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "success": false,
+                    "message": "Failed to fetch fuel events"
+                })),
             )
                 .into_response()
         }

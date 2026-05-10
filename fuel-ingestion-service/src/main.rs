@@ -4,6 +4,7 @@ mod handlers;
 mod models;
 mod repository;
 mod routes;
+mod services;
 
 use config::AppConfig;
 use db::create_db_pool;
