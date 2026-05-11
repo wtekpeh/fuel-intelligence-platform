@@ -4,7 +4,9 @@ use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::models::{DeviceHealthEventResponse, FuelEventResponse, FuelReading};
+use crate::models::{
+    DeviceHealthEventResponse, FuelEventResponse, FuelReading, SensorHealthEventResponse,
+};
 use crate::services::device_health::classify_device_status;
 
 pub struct NewSensorReading {
@@ -657,6 +659,112 @@ pub async fn get_recent_device_health_events(
             previous_status: row.previous_status,
             new_status: row.new_status,
             reason: row.reason,
+            detected_at: row.detected_at,
+        })
+        .collect();
+
+    Ok(events)
+}
+
+pub async fn create_sensor_health_event(
+    db_pool: &PgPool,
+    device_id: Uuid,
+    sensor_id: Uuid,
+    event_type: &str,
+    severity: &str,
+    reason: &str,
+    first_seen_at: Option<DateTime<Utc>>,
+    last_seen_at: Option<DateTime<Utc>>,
+) -> Result<()> {
+    sqlx::query!(
+        r#"
+        INSERT INTO sensor_health_events (
+            device_id,
+            sensor_id,
+            event_type,
+            severity,
+            reason,
+            first_seen_at,
+            last_seen_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        "#,
+        device_id,
+        sensor_id,
+        event_type,
+        severity,
+        reason,
+        first_seen_at,
+        last_seen_at
+    )
+    .execute(db_pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn recent_sensor_health_event_exists(
+    db_pool: &PgPool,
+    sensor_id: Uuid,
+    event_type: &str,
+    window_seconds: i64,
+) -> Result<bool> {
+    let row = sqlx::query!(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM sensor_health_events
+            WHERE sensor_id = $1
+              AND event_type = $2
+              AND detected_at >= NOW() - ($3 * INTERVAL '1 second')
+        ) as "exists!"
+        "#,
+        sensor_id,
+        event_type,
+        window_seconds as f64
+    )
+    .fetch_one(db_pool)
+    .await?;
+
+    Ok(row.exists)
+}
+
+pub async fn get_recent_sensor_health_events(
+    db_pool: &PgPool,
+    limit: i64,
+) -> Result<Vec<SensorHealthEventResponse>> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT
+            id,
+            device_id,
+            sensor_id,
+            event_type,
+            severity,
+            reason,
+            first_seen_at,
+            last_seen_at,
+            detected_at
+        FROM sensor_health_events
+        ORDER BY detected_at DESC
+        LIMIT $1
+        "#,
+        limit
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    let events = rows
+        .into_iter()
+        .map(|row| SensorHealthEventResponse {
+            id: row.id.to_string(),
+            device_id: row.device_id.to_string(),
+            sensor_id: row.sensor_id.to_string(),
+            event_type: row.event_type,
+            severity: row.severity,
+            reason: row.reason,
+            first_seen_at: row.first_seen_at,
+            last_seen_at: row.last_seen_at,
             detected_at: row.detected_at,
         })
         .collect();

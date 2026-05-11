@@ -8,6 +8,7 @@ pub struct AppConfig {
     pub server_port: u16,
     pub device_stale_after_seconds: i64,
     pub device_offline_after_seconds: i64,
+    pub device_health_refresh_interval_seconds: u64,
 }
 
 impl AppConfig {
@@ -33,12 +34,19 @@ impl AppConfig {
             .parse::<i64>()
             .context("DEVICE_OFFLINE_AFTER_SECONDS must be a valid number")?;
 
+        let device_health_refresh_interval_seconds =
+            env::var("DEVICE_HEALTH_REFRESH_INTERVAL_SECONDS")
+                .unwrap_or_else(|_| "30".to_string())
+                .parse::<u64>()
+                .context("DEVICE_HEALTH_REFRESH_INTERVAL_SECONDS must be a valid number")?;
+
         Ok(Self {
             database_url,
             server_host,
             server_port,
             device_stale_after_seconds,
             device_offline_after_seconds,
+            device_health_refresh_interval_seconds,
         })
     }
 }

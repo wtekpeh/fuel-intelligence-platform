@@ -66,3 +66,16 @@ pub struct DeviceHealthEventResponse {
     pub reason: String,
     pub detected_at: DateTime<Utc>,
 }
+
+#[derive(Debug, Serialize)]
+pub struct SensorHealthEventResponse {
+    pub id: String,
+    pub device_id: String,
+    pub sensor_id: String,
+    pub event_type: String,
+    pub severity: String,
+    pub reason: String,
+    pub first_seen_at: Option<DateTime<Utc>>,
+    pub last_seen_at: Option<DateTime<Utc>>,
+    pub detected_at: DateTime<Utc>,
+}

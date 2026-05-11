@@ -6,12 +6,13 @@ use axum::{
 };
 
 use crate::services::fuel_detection::{detect_fuel_event, detect_possible_leak};
+use crate::services::sensor_health::detect_frozen_fuel_sensor;
 use crate::{
     models::{ApiResponse, HeartbeatRequest, HeartbeatResponse, ReadingBatch},
     repository::{
         get_or_create_demo_sensor, get_recent_device_health_events, get_recent_fuel_events,
-        mark_device_heartbeat_seen, mark_device_payload_seen, refresh_device_statuses,
-        save_fuel_reading_as_sensor_reading,
+        get_recent_sensor_health_events, mark_device_heartbeat_seen, mark_device_payload_seen,
+        refresh_device_statuses, save_fuel_reading_as_sensor_reading,
     },
 };
 
@@ -27,17 +28,18 @@ pub async fn ingest_reading_batch(
 
     let db_pool = &app_state.db_pool;
     let result = async {
-        let (device_id, sensor_id) =
-            get_or_create_demo_sensor(&db_pool, &payload.device_id).await?;
+        let (device_id, sensor_id) = get_or_create_demo_sensor(db_pool, &payload.device_id).await?;
 
-        mark_device_payload_seen(&db_pool, device_id).await?;
+        mark_device_payload_seen(db_pool, device_id).await?;
 
         for reading in &payload.readings {
-            save_fuel_reading_as_sensor_reading(&db_pool, device_id, sensor_id, reading).await?;
+            save_fuel_reading_as_sensor_reading(db_pool, device_id, sensor_id, reading).await?;
 
-            detect_fuel_event(&db_pool, device_id, sensor_id).await?;
+            detect_fuel_event(db_pool, device_id, sensor_id).await?;
 
-            detect_possible_leak(&db_pool, device_id, sensor_id).await?;
+            detect_possible_leak(db_pool, device_id, sensor_id).await?;
+
+            detect_frozen_fuel_sensor(db_pool, device_id, sensor_id).await?;
         }
 
         anyhow::Ok(())
@@ -173,6 +175,29 @@ pub async fn list_recent_device_health_events(
                 Json(serde_json::json!({
                     "success": false,
                     "message": "Failed to fetch device health events"
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+pub async fn list_recent_sensor_health_events(
+    State(app_state): State<AppState>,
+) -> impl IntoResponse {
+    let db_pool = &app_state.db_pool;
+
+    match get_recent_sensor_health_events(db_pool, 50).await {
+        Ok(events) => (StatusCode::OK, Json(events)).into_response(),
+
+        Err(err) => {
+            eprintln!("Failed to fetch sensor health events: {}", err);
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "success": false,
+                    "message": "Failed to fetch sensor health events"
                 })),
             )
                 .into_response()

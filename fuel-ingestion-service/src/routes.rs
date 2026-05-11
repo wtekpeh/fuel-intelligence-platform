@@ -7,7 +7,7 @@ use sqlx::PgPool;
 
 use crate::handlers::{
     ingest_reading_batch, list_recent_device_health_events, list_recent_fuel_events,
-    receive_heartbeat, refresh_device_health,
+    list_recent_sensor_health_events, receive_heartbeat, refresh_device_health,
 };
 
 #[derive(Clone)]
@@ -27,6 +27,10 @@ pub fn app_routes(db_pool: PgPool, config: AppConfig) -> Router {
         .route(
             "/api/device-health-events",
             get(list_recent_device_health_events),
+        )
+        .route(
+            "/api/sensor-health-events",
+            get(list_recent_sensor_health_events),
         )
         .with_state(app_state)
 }

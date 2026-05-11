@@ -124,7 +124,7 @@ Implemented:
 
 ## Device Health Intelligence
 
-The service now supports device operational health tracking.
+The service supports device operational health tracking.
 
 Implemented:
 
@@ -136,58 +136,38 @@ Implemented:
 - device status classification
 - device health event persistence
 - configurable health thresholds
+- automatic background health refresh
 
 Device status values:
 
-````text
+```text
 ONLINE
 STALE
 OFFLINE
 UNKNOWN
+```
 
-Status logic is based on last_seen_at.
+Status logic is based on `last_seen_at`.
 
 Configuration:
 
+```env
 DEVICE_STALE_AFTER_SECONDS=120
 DEVICE_OFFLINE_AFTER_SECONDS=600
+DEVICE_HEALTH_REFRESH_INTERVAL_SECONDS=30
+```
 
 For development testing, smaller values can be used:
 
+```env
 DEVICE_STALE_AFTER_SECONDS=5
 DEVICE_OFFLINE_AFTER_SECONDS=15
+DEVICE_HEALTH_REFRESH_INTERVAL_SECONDS=5
+```
 
-Also add these under **Current API Endpoints**:
+The backend automatically refreshes device health in the background using `DEVICE_HEALTH_REFRESH_INTERVAL_SECONDS`.
 
-```md
-## Device Heartbeat
-
-```http
-POST /api/heartbeat
-
-Receives device heartbeat messages and marks the device as online.
-
-Refresh Device Health
-POST /api/devices/refresh-health
-
-Reclassifies device health using the configured thresholds.
-
-List Device Health Events
-GET /api/device-health-events
-
-Returns recent device health transitions such as:
-
-ONLINE → STALE
-STALE → OFFLINE
-OFFLINE → ONLINE
-
-Then update **Current Development Status → Implemented** with:
-
-```md
-- heartbeat endpoint
-- device health status tracking
-- configurable health thresholds
-- device health event history
+Manual refresh is still available for testing, but production does not depend on manually calling the refresh endpoint.
 
 # Current API Endpoints
 
@@ -195,7 +175,7 @@ Then update **Current Development Status → Implemented** with:
 
 ```http
 POST /api/fuel-readings/batch
-````
+```
 
 ---
 
@@ -208,6 +188,44 @@ GET /api/fuel-events
 Returns recent operational events as JSON.
 
 ---
+
+---
+
+## Device Heartbeat
+
+```http
+POST /api/heartbeat
+```
+
+Receives device heartbeat messages and marks the device as online.
+
+---
+
+## Refresh Device Health
+
+```http
+POST /api/devices/refresh-health
+```
+
+Manually reclassifies device health using the configured thresholds.
+
+This is useful for testing, but background refresh runs automatically.
+
+---
+
+## List Device Health Events
+
+```http
+GET /api/device-health-events
+```
+
+Returns recent device health transitions such as:
+
+```text
+ONLINE → STALE
+STALE → OFFLINE
+OFFLINE → ONLINE
+```
 
 # Current Architecture
 
@@ -242,6 +260,11 @@ Implemented:
 - leak/theft/refill detection
 - suppression logic
 - event APIs
+- heartbeat endpoint
+- device health status tracking
+- configurable health thresholds
+- automatic background device health refresh
+- device health event history
 
 Pending:
 
