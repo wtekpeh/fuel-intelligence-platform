@@ -9,7 +9,8 @@ use crate::services::fuel_detection::{detect_fuel_event, detect_possible_leak};
 use crate::{
     models::{ApiResponse, ReadingBatch},
     repository::{
-        get_or_create_demo_sensor, get_recent_fuel_events, save_fuel_reading_as_sensor_reading,
+        get_or_create_demo_sensor, get_recent_fuel_events, mark_device_payload_seen,
+        save_fuel_reading_as_sensor_reading,
     },
 };
 
@@ -26,6 +27,8 @@ pub async fn ingest_reading_batch(
     let result = async {
         let (device_id, sensor_id) =
             get_or_create_demo_sensor(&db_pool, &payload.device_id).await?;
+
+        mark_device_payload_seen(&db_pool, device_id).await?;
 
         for reading in &payload.readings {
             save_fuel_reading_as_sensor_reading(&db_pool, device_id, sensor_id, reading).await?;

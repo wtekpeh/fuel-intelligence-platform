@@ -472,3 +472,22 @@ pub async fn get_recent_fuel_events(
 
     Ok(events)
 }
+
+pub async fn mark_device_payload_seen(db_pool: &PgPool, device_id: Uuid) -> Result<()> {
+    sqlx::query!(
+        r#"
+        UPDATE devices
+        SET
+            status = 'ONLINE',
+            last_seen_at = NOW(),
+            last_payload_at = NOW(),
+            updated_at = NOW()
+        WHERE id = $1
+        "#,
+        device_id
+    )
+    .execute(db_pool)
+    .await?;
+
+    Ok(())
+}
