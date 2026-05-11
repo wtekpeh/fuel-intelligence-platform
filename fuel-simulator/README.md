@@ -17,6 +17,9 @@ It currently simulates:
 - offline network periods
 - delayed batch syncing
 - local file logging
+- device heartbeat transmission
+- device online/offline recovery behaviour
+- heartbeat vs telemetry separation
 
 ## Current System Flow
 
@@ -26,6 +29,7 @@ FuelSimulator
 → stores reading locally
 → adds reading to SyncQueue
 → checks NetworkSimulator
+→ sends heartbeat when online
 → syncs ReadingBatch when online
 → logs synced batch to file
 Project Structure
@@ -152,19 +156,49 @@ Example:
 Fuel theft happened at 02:00
 Device synced data at 05:00
 System must still detect the theft at 02:00
+
+Heartbeat vs Telemetry
+
+The simulator now separates:
+
+Heartbeat
+→ "device is alive"
+
+Telemetry Batch
+→ actual fuel readings
+
+This mirrors real deployed telemetry systems where:
+
+- a device may be online
+- but telemetry batching may not yet be ready
+- or sensors may temporarily fail
+
+Heartbeat updates operational health status independently from telemetry synchronization.
+
 Current Limitations
 
 This simulator does not yet:
 
-send data to an API
+does not yet use WebSockets/live streaming
 store data in PostgreSQL
 run backend anomaly detection
 use real hardware
 use GSM/WiFi
 use real fuel sensors
+
 Next Phase
 
-The next phase is to build the Rust ingestion service.
+The next phase is expanding operational intelligence in the Rust ingestion service.
+
+Current ingestion capabilities include:
+
+- batch ingestion
+- offline-safe synchronization
+- fuel event detection
+- heartbeat ingestion
+- device health tracking
+- ONLINE/STALE/OFFLINE state transitions
+- operational event persistence
 
 Planned endpoint:
 

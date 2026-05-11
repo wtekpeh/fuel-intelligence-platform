@@ -122,13 +122,80 @@ Implemented:
 
 ---
 
+## Device Health Intelligence
+
+The service now supports device operational health tracking.
+
+Implemented:
+
+- heartbeat ingestion
+- payload seen tracking
+- `last_seen_at`
+- `last_payload_at`
+- `last_heartbeat_at`
+- device status classification
+- device health event persistence
+- configurable health thresholds
+
+Device status values:
+
+````text
+ONLINE
+STALE
+OFFLINE
+UNKNOWN
+
+Status logic is based on last_seen_at.
+
+Configuration:
+
+DEVICE_STALE_AFTER_SECONDS=120
+DEVICE_OFFLINE_AFTER_SECONDS=600
+
+For development testing, smaller values can be used:
+
+DEVICE_STALE_AFTER_SECONDS=5
+DEVICE_OFFLINE_AFTER_SECONDS=15
+
+Also add these under **Current API Endpoints**:
+
+```md
+## Device Heartbeat
+
+```http
+POST /api/heartbeat
+
+Receives device heartbeat messages and marks the device as online.
+
+Refresh Device Health
+POST /api/devices/refresh-health
+
+Reclassifies device health using the configured thresholds.
+
+List Device Health Events
+GET /api/device-health-events
+
+Returns recent device health transitions such as:
+
+ONLINE → STALE
+STALE → OFFLINE
+OFFLINE → ONLINE
+
+Then update **Current Development Status → Implemented** with:
+
+```md
+- heartbeat endpoint
+- device health status tracking
+- configurable health thresholds
+- device health event history
+
 # Current API Endpoints
 
 ## Batch Ingestion
 
 ```http
 POST /api/fuel-readings/batch
-```
+````
 
 ---
 

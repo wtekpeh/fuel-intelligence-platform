@@ -18,6 +18,7 @@ pub struct AppConfig {
     pub refill_reading_number: i32,
 
     pub ingestion_url: String,
+    pub heartbeat_url: String,
 }
 
 impl AppConfig {

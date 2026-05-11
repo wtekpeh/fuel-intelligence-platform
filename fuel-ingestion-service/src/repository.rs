@@ -4,7 +4,8 @@ use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::models::{FuelEventResponse, FuelReading};
+use crate::models::{DeviceHealthEventResponse, FuelEventResponse, FuelReading};
+use crate::services::device_health::classify_device_status;
 
 pub struct NewSensorReading {
     pub sensor_id: Uuid,
@@ -490,4 +491,175 @@ pub async fn mark_device_payload_seen(db_pool: &PgPool, device_id: Uuid) -> Resu
     .await?;
 
     Ok(())
+}
+
+pub async fn mark_device_heartbeat_seen(db_pool: &PgPool, device_code: &str) -> Result<Uuid> {
+    let (device_id, _sensor_id) = get_or_create_demo_sensor(db_pool, device_code).await?;
+
+    let device = sqlx::query!(
+        r#"
+        SELECT
+            status,
+            last_seen_at,
+            last_heartbeat_at,
+            last_payload_at
+        FROM devices
+        WHERE id = $1
+        "#,
+        device_id
+    )
+    .fetch_one(db_pool)
+    .await?;
+
+    sqlx::query!(
+        r#"
+        UPDATE devices
+        SET
+            status = 'ONLINE',
+            last_seen_at = NOW(),
+            last_heartbeat_at = NOW(),
+            updated_at = NOW()
+        WHERE id = $1
+        "#,
+        device_id
+    )
+    .execute(db_pool)
+    .await?;
+
+    if device.status != "ONLINE" {
+        sqlx::query!(
+            r#"
+            INSERT INTO device_health_events (
+                device_id,
+                previous_status,
+                new_status,
+                reason,
+                last_seen_at,
+                last_heartbeat_at,
+                last_payload_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            "#,
+            device_id,
+            device.status,
+            "ONLINE",
+            "heartbeat_received",
+            device.last_seen_at,
+            device.last_heartbeat_at,
+            device.last_payload_at
+        )
+        .execute(db_pool)
+        .await?;
+    }
+
+    Ok(device_id)
+}
+
+pub async fn refresh_device_statuses(
+    db_pool: &PgPool,
+    stale_after_seconds: i64,
+    offline_after_seconds: i64,
+) -> Result<()> {
+    let devices = sqlx::query!(
+        r#"
+    SELECT
+        id,
+        status,
+        last_seen_at,
+        last_heartbeat_at,
+        last_payload_at
+    FROM devices
+    "#
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    for device in devices {
+        let new_status = classify_device_status(
+            device.last_seen_at,
+            stale_after_seconds,
+            offline_after_seconds,
+        );
+
+        if new_status == device.status {
+            continue;
+        }
+
+        sqlx::query!(
+            r#"
+        UPDATE devices
+        SET
+            status = $1,
+            updated_at = NOW()
+        WHERE id = $2
+        "#,
+            new_status,
+            device.id
+        )
+        .execute(db_pool)
+        .await?;
+
+        sqlx::query!(
+            r#"
+        INSERT INTO device_health_events (
+            device_id,
+            previous_status,
+            new_status,
+            reason,
+            last_seen_at,
+            last_heartbeat_at,
+            last_payload_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        "#,
+            device.id,
+            device.status,
+            new_status,
+            "status_changed_by_health_refresh",
+            device.last_seen_at,
+            device.last_heartbeat_at,
+            device.last_payload_at
+        )
+        .execute(db_pool)
+        .await?;
+    }
+
+    Ok(())
+}
+
+pub async fn get_recent_device_health_events(
+    db_pool: &PgPool,
+    limit: i64,
+) -> Result<Vec<DeviceHealthEventResponse>> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT
+            id,
+            device_id,
+            previous_status,
+            new_status,
+            reason,
+            detected_at
+        FROM device_health_events
+        ORDER BY detected_at DESC
+        LIMIT $1
+        "#,
+        limit
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    let events = rows
+        .into_iter()
+        .map(|row| DeviceHealthEventResponse {
+            id: row.id.to_string(),
+            device_id: row.device_id.to_string(),
+            previous_status: row.previous_status,
+            new_status: row.new_status,
+            reason: row.reason,
+            detected_at: row.detected_at,
+        })
+        .collect();
+
+    Ok(events)
 }

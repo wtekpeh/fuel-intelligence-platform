@@ -12,3 +12,5 @@ leak_end_reading = 25
 refill_reading_number = 35
 
 ingestion_url = "http://127.0.0.1:8080/api/fuel-readings/batch"
+
+heartbeat_url = "http://127.0.0.1:8080/api/heartbeat"

@@ -7,7 +7,9 @@ mod storage;
 mod sync_queue;
 
 use api_client::ApiClient;
+use chrono::Utc;
 use config::AppConfig;
+use models::HeartbeatRequest;
 use network::{NetworkSimulator, NetworkStatus};
 use simulator::FuelSimulator;
 use storage::FileStorage;
@@ -22,7 +24,7 @@ async fn main() -> anyhow::Result<()> {
     let mut simulator = FuelSimulator::new(&config);
     let mut network = NetworkSimulator::new();
     let storage = FileStorage::new()?;
-    let api_client = ApiClient::new(config.ingestion_url.clone());
+    let api_client = ApiClient::new(config.ingestion_url.clone(), config.heartbeat_url.clone());
 
     let mut sync_queue = SyncQueue::new(config.device_id.clone(), config.batch_size);
 
@@ -47,6 +49,20 @@ async fn main() -> anyhow::Result<()> {
 
         match network_status {
             NetworkStatus::Online => {
+                let heartbeat = HeartbeatRequest {
+                    device_id: config.device_id.clone(),
+                    timestamp: Utc::now(),
+                };
+
+                match api_client.send_heartbeat(&heartbeat).await {
+                    Ok(_) => {
+                        println!("Heartbeat sent successfully.");
+                    }
+                    Err(err) => {
+                        println!("Failed to send heartbeat: {}", err);
+                    }
+                }
+
                 if sync_queue.is_ready_to_sync() {
                     let batch = sync_queue.build_batch();
 

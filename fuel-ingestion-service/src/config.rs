@@ -6,6 +6,8 @@ pub struct AppConfig {
     pub database_url: String,
     pub server_host: String,
     pub server_port: u16,
+    pub device_stale_after_seconds: i64,
+    pub device_offline_after_seconds: i64,
 }
 
 impl AppConfig {
@@ -21,10 +23,22 @@ impl AppConfig {
             .parse::<u16>()
             .context("SERVER_PORT must be a valid number")?;
 
+        let device_stale_after_seconds = env::var("DEVICE_STALE_AFTER_SECONDS")
+            .unwrap_or_else(|_| "120".to_string())
+            .parse::<i64>()
+            .context("DEVICE_STALE_AFTER_SECONDS must be a valid number")?;
+
+        let device_offline_after_seconds = env::var("DEVICE_OFFLINE_AFTER_SECONDS")
+            .unwrap_or_else(|_| "600".to_string())
+            .parse::<i64>()
+            .context("DEVICE_OFFLINE_AFTER_SECONDS must be a valid number")?;
+
         Ok(Self {
             database_url,
             server_host,
             server_port,
+            device_stale_after_seconds,
+            device_offline_after_seconds,
         })
     }
 }

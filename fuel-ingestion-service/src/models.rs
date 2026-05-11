@@ -43,3 +43,26 @@ pub struct FuelEventResponse {
     pub severity: String,
     pub message: String,
 }
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct HeartbeatRequest {
+    pub device_id: String,
+    pub timestamp: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct HeartbeatResponse {
+    pub success: bool,
+    pub message: String,
+    pub device_id: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeviceHealthEventResponse {
+    pub id: String,
+    pub device_id: String,
+    pub previous_status: Option<String>,
+    pub new_status: String,
+    pub reason: String,
+    pub detected_at: DateTime<Utc>,
+}

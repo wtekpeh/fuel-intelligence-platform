@@ -16,7 +16,7 @@ async fn main() -> anyhow::Result<()> {
 
     let db_pool = create_db_pool(&config.database_url).await?;
 
-    let app = app_routes(db_pool);
+    let app = app_routes(db_pool, config.clone());
 
     let address = format!("{}:{}", config.server_host, config.server_port);
 

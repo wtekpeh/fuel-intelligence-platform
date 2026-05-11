@@ -26,3 +26,9 @@ pub struct ReadingBatch {
     pub synced_at: DateTime<Utc>,
     pub readings: Vec<FuelReading>,
 }
+
+#[derive(Debug, Serialize)]
+pub struct HeartbeatRequest {
+    pub device_id: String,
+    pub timestamp: DateTime<Utc>,
+}
