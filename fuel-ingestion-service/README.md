@@ -227,6 +227,52 @@ STALE → OFFLINE
 OFFLINE → ONLINE
 ```
 
+---
+
+## List Sensor Health Events
+
+```http
+GET /api/sensor-health-events
+```
+
+Returns recent sensor operational health issues such as:
+
+```text
+SENSOR_FROZEN
+```
+
+## Sensor Health Intelligence
+
+The service now supports independent sensor operational health monitoring.
+
+Current implemented sensor health events:
+
+```text
+SENSOR_FROZEN
+```
+
+Frozen sensor detection identifies situations where:
+
+- the device is still online
+- heartbeats continue arriving
+- but sensor values remain suspiciously unchanged
+
+Possible causes include:
+
+- RS485 communication failure
+- disconnected sensor
+- stuck sensor value
+- replayed/static telemetry
+- wiring issues
+- sensor malfunction
+
+Current capabilities:
+
+- frozen sensor detection
+- duplicate suppression
+- sensor health event persistence
+- sensor health event APIs
+
 # Current Architecture
 
 ```text
@@ -235,8 +281,10 @@ Device / Simulator
 → Batch Synchronization
 → Axum API
 → PostgreSQL
-→ Detection Engine
-→ Fuel Events
+→ Operational Intelligence Layer
+    ├── Fuel Event Detection
+    ├── Device Health Intelligence
+    └── Sensor Health Intelligence
 ```
 
 ---
