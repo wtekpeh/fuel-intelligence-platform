@@ -20,12 +20,16 @@ It currently simulates:
 - device heartbeat transmission
 - device online/offline recovery behaviour
 - heartbeat vs telemetry separation
+- vibration telemetry
+- motion detection
+- fuel + GPS + vibration telemetry per reading
+- GPS movement simulation during moving conditions
 
 ## Current System Flow
 
 ````text
 FuelSimulator
-→ generates FuelReading
+→ generates FuelReading with fuel, GPS, vibration, and motion telemetry
 → stores reading locally
 → adds reading to SyncQueue
 → checks NetworkSimulator
@@ -59,6 +63,18 @@ ReadingBatch
 
 FuelReading is one time-based reading.
 
+Each FuelReading currently includes:
+
+- device ID
+- timestamp
+- fuel level in litres
+- fuel level percentage
+- latitude
+- longitude
+- vibration level
+- motion detected status
+- simulation mode
+
 ReadingBatch is a group of readings sent together.
 
 simulator.rs
@@ -75,8 +91,20 @@ device ID
 tank capacity
 location
 event schedule
+GPS movement simulation state
 
 It produces FuelReading records over time.
+
+During normal movement simulation, the simulator now slightly updates latitude and longitude values over time.
+
+This allows the ingestion service to test:
+
+- GPS-aware movement detection
+- operational state classification
+- previous vs current location comparison
+- movement reconstruction logic
+
+GPS coordinates are rounded to 6 decimal places for clean telemetry output.
 
 sync_queue.rs
 
@@ -179,12 +207,11 @@ Current Limitations
 
 This simulator does not yet:
 
-does not yet use WebSockets/live streaming
-store data in PostgreSQL
-run backend anomaly detection
-use real hardware
-use GSM/WiFi
-use real fuel sensors
+- use WebSockets/live streaming
+- use real hardware
+- use GSM/WiFi
+- use real fuel sensors
+- perform intelligence detection locally
 
 Next Phase
 

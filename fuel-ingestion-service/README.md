@@ -32,6 +32,10 @@ The service currently supports:
 - delayed synchronization
 - timestamp preservation
 - PostgreSQL persistence
+- fuel telemetry persistence
+- GPS telemetry persistence
+- vibration telemetry persistence
+- motion detected telemetry persistence
 
 ---
 
@@ -241,6 +245,19 @@ Returns recent sensor operational health issues such as:
 SENSOR_FROZEN
 ```
 
+---
+
+## List Device State Events
+
+````http
+GET /api/device-state-events
+
+Returns recent classified operational states such as:
+
+MOVING
+IDLE
+PARKED
+
 ## Sensor Health Intelligence
 
 The service now supports independent sensor operational health monitoring.
@@ -249,7 +266,7 @@ Current implemented sensor health events:
 
 ```text
 SENSOR_FROZEN
-```
+````
 
 Frozen sensor detection identifies situations where:
 
@@ -273,6 +290,66 @@ Current capabilities:
 - sensor health event persistence
 - sensor health event APIs
 
+---
+
+# Device State Engine
+
+The service now supports operational device state classification using incoming telemetry.
+
+Current implemented states:
+
+````text
+MOVING
+IDLE
+PARKED
+OFFLINE
+UNKNOWN
+
+The Device State Engine currently uses:
+
+- vibration telemetry
+- motion detection
+- device health status
+- previous GPS location
+- current GPS location
+
+to classify operational behavior.
+
+The engine now supports GPS-aware movement classification by comparing previous and current coordinates during telemetry ingestion.
+
+Movement detection now uses estimated GPS distance in meters instead of raw coordinate subtraction.
+
+Example correlations:
+
+high vibration
++ motion detected
+=================
+MOVING
+low vibration
++ no motion
+=================
+PARKED
+
+Current capabilities:
+
+deterministic state classification
+operational state persistence
+historical state reconstruction
+operational state API endpoint
+
+State history is stored in:
+
+device_state_events
+
+This provides the foundation for:
+
+trip reconstruction
+fleet monitoring
+operational analytics
+tamper reasoning
+future GPS-aware intelligence
+future ML-assisted behavioral analysis
+
 # Current Architecture
 
 ```text
@@ -281,11 +358,17 @@ Device / Simulator
 → Batch Synchronization
 → Axum API
 → PostgreSQL
+→ Stored Telemetry Layer
+    ├── Fuel Telemetry
+    ├── GPS Telemetry
+    ├── Vibration Telemetry
+    └── Motion Telemetry
 → Operational Intelligence Layer
     ├── Fuel Event Detection
     ├── Device Health Intelligence
-    └── Sensor Health Intelligence
-```
+    ├── Sensor Health Intelligence
+    └── Device State Engine
+````
 
 ---
 
@@ -303,7 +386,7 @@ Device / Simulator
 Implemented:
 
 - modular ingestion architecture
-- PostgreSQL persistence
+- PostgreSQL persistence for fuel, GPS, vibration, and motion telemetry
 - operational event generation
 - leak/theft/refill detection
 - suppression logic
@@ -318,8 +401,6 @@ Pending:
 
 - WebSocket broadcasting
 - live dashboard
-- GPS-aware logic
-- engine-state-aware logic
 - ML-assisted anomaly scoring
 - Redis/Kafka streaming
 - industrial hardware integration

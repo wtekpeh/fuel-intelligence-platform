@@ -6,8 +6,9 @@ use axum::{
 use sqlx::PgPool;
 
 use crate::handlers::{
-    ingest_reading_batch, list_recent_device_health_events, list_recent_fuel_events,
-    list_recent_sensor_health_events, receive_heartbeat, refresh_device_health,
+    ingest_reading_batch, list_device_state_events, list_recent_device_health_events,
+    list_recent_fuel_events, list_recent_sensor_health_events, receive_heartbeat,
+    refresh_device_health,
 };
 
 #[derive(Clone)]
@@ -32,5 +33,6 @@ pub fn app_routes(db_pool: PgPool, config: AppConfig) -> Router {
             "/api/sensor-health-events",
             get(list_recent_sensor_health_events),
         )
+        .route("/api/device-state-events", get(list_device_state_events))
         .with_state(app_state)
 }

@@ -5,9 +5,13 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::models::{
-    DeviceHealthEventResponse, FuelEventResponse, FuelReading, SensorHealthEventResponse,
+    DeviceHealthEventResponse, DeviceStateEventResponse, FuelEventResponse, FuelReading,
+    SensorHealthEventResponse,
 };
 use crate::services::device_health::classify_device_status;
+use crate::services::device_state::{
+    calculate_distance_meters, calculate_speed_kmh, classify_device_state,
+};
 
 pub struct NewSensorReading {
     pub sensor_id: Uuid,
@@ -25,6 +29,27 @@ pub struct NewSensorReading {
     pub raw_payload: Value,
 }
 
+pub struct NewDeviceStateEvent {
+    pub device_id: Uuid,
+    pub sensor_id: Option<Uuid>,
+
+    pub state: String,
+
+    pub recorded_at: DateTime<Utc>,
+
+    pub vibration_level: Option<f64>,
+    pub motion_detected: Option<bool>,
+
+    pub distance_meters: Option<f64>,
+    pub speed_kmh: Option<f64>,
+
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+
+    pub source: String,
+    pub message: Option<String>,
+}
+
 #[derive(Debug)]
 pub struct StoredSensorReading {
     pub id: Uuid,
@@ -32,6 +57,12 @@ pub struct StoredSensorReading {
     pub value: f64,
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
+}
+
+pub struct PreviousLocationReading {
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+    pub recorded_at: DateTime<Utc>,
 }
 
 pub async fn get_or_create_demo_sensor(
@@ -181,7 +212,71 @@ pub async fn save_fuel_reading_as_sensor_reading(
     device_id: Uuid,
     sensor_id: Uuid,
     reading: &FuelReading,
+    previous_reading: Option<&FuelReading>,
 ) -> Result<()> {
+    let (previous_latitude, previous_longitude, distance_meters, speed_kmh) = match previous_reading
+    {
+        Some(prev) => {
+            let distance_meters = calculate_distance_meters(
+                prev.latitude,
+                prev.longitude,
+                reading.latitude,
+                reading.longitude,
+            );
+
+            let time_seconds = (reading.timestamp - prev.timestamp).num_seconds().max(0) as f64;
+
+            let speed_kmh = calculate_speed_kmh(distance_meters, time_seconds);
+
+            (
+                Some(prev.latitude),
+                Some(prev.longitude),
+                Some(distance_meters),
+                Some(speed_kmh),
+            )
+        }
+        None => (None, None, None, None),
+    };
+
+    let device_state = classify_device_state(
+        Some("ONLINE"),
+        Some(reading.vibration_level),
+        Some(reading.motion_detected),
+        previous_latitude,
+        previous_longitude,
+        Some(reading.latitude),
+        Some(reading.longitude),
+    );
+
+    create_device_state_event(
+        db_pool,
+        NewDeviceStateEvent {
+            device_id,
+            sensor_id: Some(sensor_id),
+
+            state: device_state.as_str().to_string(),
+
+            recorded_at: reading.timestamp,
+
+            vibration_level: Some(reading.vibration_level),
+            motion_detected: Some(reading.motion_detected),
+
+            distance_meters,
+            speed_kmh,
+
+            latitude: Some(reading.latitude),
+            longitude: Some(reading.longitude),
+
+            source: "telemetry".to_string(),
+
+            message: Some(format!(
+                "State classified from telemetry: {:?}",
+                device_state
+            )),
+        },
+    )
+    .await?;
+
     let raw_payload: Value = serde_json::to_value(reading)?;
 
     insert_sensor_reading(
@@ -785,4 +880,119 @@ pub async fn get_recent_sensor_health_events(
         .collect();
 
     Ok(events)
+}
+
+pub async fn create_device_state_event(
+    db_pool: &PgPool,
+    new_event: NewDeviceStateEvent,
+) -> Result<()> {
+    sqlx::query!(
+        r#"
+        INSERT INTO device_state_events (
+            device_id,
+            sensor_id,
+            state,
+            recorded_at,
+            vibration_level,
+            motion_detected,
+            distance_meters,
+            speed_kmh,
+            latitude,
+            longitude,
+            source,
+            message
+        )
+        VALUES (
+            $1, $2, $3, $4, $5,
+            $6, $7, $8, $9, $10,
+            $11, $12
+        )
+        "#,
+        new_event.device_id,
+        new_event.sensor_id,
+        new_event.state,
+        new_event.recorded_at,
+        new_event.vibration_level,
+        new_event.motion_detected,
+        new_event.distance_meters,
+        new_event.speed_kmh,
+        new_event.latitude,
+        new_event.longitude,
+        new_event.source,
+        new_event.message
+    )
+    .execute(db_pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn get_recent_device_state_events(
+    db_pool: &PgPool,
+    limit: i64,
+) -> Result<Vec<DeviceStateEventResponse>> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT
+            state,
+            vibration_level,
+            motion_detected,
+            latitude,
+            longitude,
+            recorded_at
+        FROM device_state_events
+        ORDER BY created_at DESC
+        LIMIT $1
+        "#,
+        limit
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    let events = rows
+        .into_iter()
+        .map(|row| DeviceStateEventResponse {
+            state: row.state,
+            vibration_level: row.vibration_level,
+            motion_detected: row.motion_detected,
+            latitude: row.latitude,
+            longitude: row.longitude,
+            recorded_at: row.recorded_at,
+        })
+        .collect();
+
+    Ok(events)
+}
+
+async fn get_previous_location_reading(
+    db_pool: &PgPool,
+    device_id: Uuid,
+    sensor_id: Uuid,
+    recorded_at: DateTime<Utc>,
+) -> Result<Option<PreviousLocationReading>> {
+    let row = sqlx::query!(
+        r#"
+        SELECT
+            latitude,
+            longitude,
+            recorded_at
+        FROM sensor_readings
+        WHERE device_id = $1
+            AND sensor_id = $2
+            AND recorded_at < $3
+        ORDER BY recorded_at DESC
+        LIMIT 1
+        "#,
+        device_id,
+        sensor_id,
+        recorded_at
+    )
+    .fetch_optional(db_pool)
+    .await?;
+
+    Ok(row.map(|row| PreviousLocationReading {
+        latitude: row.latitude,
+        longitude: row.longitude,
+        recorded_at: row.recorded_at,
+    }))
 }

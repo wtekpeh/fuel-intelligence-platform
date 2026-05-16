@@ -83,3 +83,16 @@ pub struct SensorHealthEventResponse {
     pub last_seen_at: Option<DateTime<Utc>>,
     pub detected_at: DateTime<Utc>,
 }
+
+#[derive(Debug, Serialize)]
+pub struct DeviceStateEventResponse {
+    pub state: String,
+
+    pub vibration_level: Option<f64>,
+    pub motion_detected: Option<bool>,
+
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+
+    pub recorded_at: DateTime<Utc>,
+}

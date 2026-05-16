@@ -45,6 +45,7 @@ impl FuelSimulator {
         let mode = self.select_simulation_mode();
         let fuel_change = self.generate_fuel_change(mode);
         let (vibration_level, motion_detected) = self.generate_vibration(mode);
+        self.update_location(mode);
 
         self.current_fuel_litres += fuel_change;
         self.current_fuel_litres = self
@@ -105,6 +106,20 @@ impl FuelSimulator {
 
         (round_2(vibration_level), motion_detected)
     }
+
+    fn update_location(&mut self, mode: SimulationMode) {
+        match mode {
+            SimulationMode::Normal => {
+                self.latitude = round_6(self.latitude + 0.00025);
+                self.longitude = round_6(self.longitude + 0.00020);
+            }
+
+            SimulationMode::Theft | SimulationMode::Leak | SimulationMode::Refill => {
+                // Keep location stable for now during special fuel events.
+                // Later, we can make this configurable per scenario.
+            }
+        }
+    }
 }
 
 fn generate_normal_consumption() -> f64 {
@@ -125,4 +140,8 @@ fn generate_refill_amount() -> f64 {
 
 fn round_2(value: f64) -> f64 {
     (value * 100.0).round() / 100.0
+}
+
+fn round_6(value: f64) -> f64 {
+    (value * 1_000_000.0).round() / 1_000_000.0
 }

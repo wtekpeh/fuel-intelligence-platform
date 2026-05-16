@@ -45,10 +45,6 @@ CREATE TABLE sensor_readings (
     unit TEXT NOT NULL,
     latitude DOUBLE PRECISION,
     longitude DOUBLE PRECISION,
-
-    vibration_level DOUBLE PRECISION,
-    motion_detected BOOLEAN,
-
     raw_payload JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

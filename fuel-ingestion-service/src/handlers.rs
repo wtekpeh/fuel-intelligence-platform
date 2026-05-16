@@ -8,11 +8,13 @@ use axum::{
 use crate::services::fuel_detection::{detect_fuel_event, detect_possible_leak};
 use crate::services::sensor_health::detect_frozen_fuel_sensor;
 use crate::{
-    models::{ApiResponse, HeartbeatRequest, HeartbeatResponse, ReadingBatch},
+    models::{
+        ApiResponse, DeviceStateEventResponse, HeartbeatRequest, HeartbeatResponse, ReadingBatch,
+    },
     repository::{
-        get_or_create_demo_sensor, get_recent_device_health_events, get_recent_fuel_events,
-        get_recent_sensor_health_events, mark_device_heartbeat_seen, mark_device_payload_seen,
-        refresh_device_statuses, save_fuel_reading_as_sensor_reading,
+        get_or_create_demo_sensor, get_recent_device_health_events, get_recent_device_state_events,
+        get_recent_fuel_events, get_recent_sensor_health_events, mark_device_heartbeat_seen,
+        mark_device_payload_seen, refresh_device_statuses, save_fuel_reading_as_sensor_reading,
     },
 };
 
@@ -32,14 +34,25 @@ pub async fn ingest_reading_batch(
 
         mark_device_payload_seen(db_pool, device_id).await?;
 
+        let mut previous_reading = None;
+
         for reading in &payload.readings {
-            save_fuel_reading_as_sensor_reading(db_pool, device_id, sensor_id, reading).await?;
+            save_fuel_reading_as_sensor_reading(
+                db_pool,
+                device_id,
+                sensor_id,
+                reading,
+                previous_reading,
+            )
+            .await?;
 
             detect_fuel_event(db_pool, device_id, sensor_id).await?;
 
             detect_possible_leak(db_pool, device_id, sensor_id).await?;
 
             detect_frozen_fuel_sensor(db_pool, device_id, sensor_id).await?;
+
+            previous_reading = Some(reading);
         }
 
         anyhow::Ok(())
@@ -203,4 +216,14 @@ pub async fn list_recent_sensor_health_events(
                 .into_response()
         }
     }
+}
+
+pub async fn list_device_state_events(
+    State(app_state): State<AppState>,
+) -> Result<Json<Vec<DeviceStateEventResponse>>, StatusCode> {
+    let events = get_recent_device_state_events(&app_state.db_pool, 100)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(events))
 }
