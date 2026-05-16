@@ -9,9 +9,13 @@ pub struct FuelReading {
     pub fuel_level_percentage: f64,
     pub latitude: f64,
     pub longitude: f64,
+
+    // Motion / vibration telemetry
+    pub vibration_level: f64,
+    pub motion_detected: bool,
+
     pub simulation_mode: String,
 }
-
 #[derive(Debug, Clone, Copy)]
 pub enum SimulationMode {
     Normal,

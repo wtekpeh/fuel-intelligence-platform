@@ -9,6 +9,10 @@ pub struct FuelReading {
     pub fuel_level_percentage: f64,
     pub latitude: f64,
     pub longitude: f64,
+
+    pub vibration_level: f64,
+    pub motion_detected: bool,
+
     pub simulation_mode: String,
 }
 

@@ -2804,3 +2804,7 @@
 {"device_id":"DEV001","timestamp":"2026-05-11T23:15:58.219684167Z","fuel_level_litres":136.81,"fuel_level_percentage":68.41,"latitude":5.6037,"longitude":-0.187,"simulation_mode":"Normal"}
 {"device_id":"DEV001","timestamp":"2026-05-11T23:16:58.219684167Z","fuel_level_litres":136.36,"fuel_level_percentage":68.18,"latitude":5.6037,"longitude":-0.187,"simulation_mode":"Normal"}
 {"device_id":"DEV001","timestamp":"2026-05-11T23:17:58.219684167Z","fuel_level_litres":135.52,"fuel_level_percentage":67.76,"latitude":5.6037,"longitude":-0.187,"simulation_mode":"Normal"}
+{"device_id":"DEV001","timestamp":"2026-05-16T14:17:22.113305624Z","fuel_level_litres":179.37,"fuel_level_percentage":89.68,"latitude":5.6037,"longitude":-0.187,"vibration_level":7.34,"motion_detected":true,"simulation_mode":"Normal"}
+{"device_id":"DEV001","timestamp":"2026-05-16T14:18:22.113305624Z","fuel_level_litres":178.61,"fuel_level_percentage":89.3,"latitude":5.6037,"longitude":-0.187,"vibration_level":6.79,"motion_detected":true,"simulation_mode":"Normal"}
+{"device_id":"DEV001","timestamp":"2026-05-16T14:19:22.113305624Z","fuel_level_litres":178.25,"fuel_level_percentage":89.13,"latitude":5.6037,"longitude":-0.187,"vibration_level":5.41,"motion_detected":true,"simulation_mode":"Normal"}
+{"device_id":"DEV001","timestamp":"2026-05-16T14:20:22.113305624Z","fuel_level_litres":177.61,"fuel_level_percentage":88.8,"latitude":5.6037,"longitude":-0.187,"vibration_level":5.28,"motion_detected":true,"simulation_mode":"Normal"}

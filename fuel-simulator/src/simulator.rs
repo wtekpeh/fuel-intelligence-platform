@@ -44,6 +44,7 @@ impl FuelSimulator {
 
         let mode = self.select_simulation_mode();
         let fuel_change = self.generate_fuel_change(mode);
+        let (vibration_level, motion_detected) = self.generate_vibration(mode);
 
         self.current_fuel_litres += fuel_change;
         self.current_fuel_litres = self
@@ -59,6 +60,8 @@ impl FuelSimulator {
             ),
             latitude: self.latitude,
             longitude: self.longitude,
+            vibration_level,
+            motion_detected,
             simulation_mode: format!("{:?}", mode),
         };
 
@@ -88,6 +91,19 @@ impl FuelSimulator {
             SimulationMode::Leak => -generate_leak_loss(),
             SimulationMode::Refill => generate_refill_amount(),
         }
+    }
+
+    fn generate_vibration(&self, mode: SimulationMode) -> (f64, bool) {
+        let vibration_level = match mode {
+            SimulationMode::Normal => rand::thread_rng().gen_range(4.0..12.0),
+            SimulationMode::Theft => rand::thread_rng().gen_range(0.0..2.0),
+            SimulationMode::Leak => rand::thread_rng().gen_range(3.0..8.0),
+            SimulationMode::Refill => rand::thread_rng().gen_range(1.0..5.0),
+        };
+
+        let motion_detected = vibration_level >= 3.0;
+
+        (round_2(vibration_level), motion_detected)
     }
 }
 

@@ -15,8 +15,13 @@ pub struct NewSensorReading {
     pub recorded_at: DateTime<Utc>,
     pub value: f64,
     pub unit: String,
+
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
+
+    pub vibration_level: Option<f64>,
+    pub motion_detected: Option<bool>,
+
     pub raw_payload: Value,
 }
 
@@ -189,6 +194,10 @@ pub async fn save_fuel_reading_as_sensor_reading(
             unit: "litres".to_string(),
             latitude: Some(reading.latitude),
             longitude: Some(reading.longitude),
+
+            vibration_level: Some(reading.vibration_level),
+            motion_detected: Some(reading.motion_detected),
+
             raw_payload,
         },
     )
@@ -206,9 +215,13 @@ async fn insert_sensor_reading(db_pool: &PgPool, new_reading: NewSensorReading) 
         unit,
         latitude,
         longitude,
+
+        vibration_level,
+        motion_detected,
+
         raw_payload
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
     ON CONFLICT (sensor_id, recorded_at)
     DO NOTHING
     "#,
@@ -219,6 +232,8 @@ async fn insert_sensor_reading(db_pool: &PgPool, new_reading: NewSensorReading) 
         new_reading.unit,
         new_reading.latitude,
         new_reading.longitude,
+        new_reading.vibration_level,
+        new_reading.motion_detected,
         new_reading.raw_payload
     )
     .execute(db_pool)
