@@ -65,6 +65,23 @@ pub struct PreviousLocationReading {
     pub recorded_at: DateTime<Utc>,
 }
 
+pub async fn get_latest_device_state(db_pool: &PgPool, device_id: Uuid) -> Result<Option<String>> {
+    let row = sqlx::query!(
+        r#"
+        SELECT state
+        FROM device_state_events
+        WHERE device_id = $1
+        ORDER BY recorded_at DESC
+        LIMIT 1
+        "#,
+        device_id
+    )
+    .fetch_optional(db_pool)
+    .await?;
+
+    Ok(row.map(|row| row.state))
+}
+
 pub async fn get_or_create_demo_sensor(
     db_pool: &PgPool,
     device_code: &str,

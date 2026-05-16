@@ -332,14 +332,14 @@ PARKED
 
 Current capabilities:
 
-deterministic state classification
-operational state persistence
-historical state reconstruction
-operational state API endpoint
-
 State history is stored in:
 
 device_state_events
+
+Each state event can also store:
+
+- estimated distance moved
+- approximate speed in km/h
 
 This provides the foundation for:
 

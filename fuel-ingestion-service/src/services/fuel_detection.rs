@@ -4,8 +4,8 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::repository::{
-    create_fuel_event, get_previous_sensor_reading, get_recent_sensor_readings,
-    recent_event_type_exists, recent_similar_event_exists,
+    create_fuel_event, get_latest_device_state, get_previous_sensor_reading,
+    get_recent_sensor_readings, recent_event_type_exists, recent_similar_event_exists,
 };
 
 const THEFT_DROP_THRESHOLD: f64 = 20.0;
@@ -29,6 +29,10 @@ pub async fn detect_fuel_event(db_pool: &PgPool, device_id: Uuid, sensor_id: Uui
     let sync_delay_seconds = (Utc::now() - current.recorded_at).num_seconds().max(0);
 
     let is_delayed_detection = sync_delay_seconds > 300;
+
+    let latest_device_state = get_latest_device_state(db_pool, device_id)
+        .await?
+        .unwrap_or_else(|| "UNKNOWN".to_string());
 
     if difference <= -THEFT_DROP_THRESHOLD {
         let already_exists = recent_similar_event_exists(
@@ -59,7 +63,8 @@ pub async fn detect_fuel_event(db_pool: &PgPool, device_id: Uuid, sensor_id: Uui
             sync_delay_seconds,
             "high",
             format!(
-                "Possible fuel theft detected. Fuel dropped by {:.2} litres.",
+                "Possible fuel theft detected while device state was {}. Fuel dropped by {:.2} litres.",
+                latest_device_state,
                 difference.abs()
             ),
         )
@@ -97,7 +102,8 @@ pub async fn detect_fuel_event(db_pool: &PgPool, device_id: Uuid, sensor_id: Uui
             sync_delay_seconds,
             "medium",
             format!(
-                "Fuel refill detected. Fuel increased by {:.2} litres.",
+                "Fuel refill detected while device state was {}. Fuel increased by {:.2} litres.",
+                latest_device_state,
                 difference.abs()
             ),
         )
@@ -164,6 +170,10 @@ pub async fn detect_possible_leak(
 
     let is_delayed_detection = sync_delay_seconds > 300;
 
+    let latest_device_state = get_latest_device_state(db_pool, device_id)
+        .await?
+        .unwrap_or_else(|| "UNKNOWN".to_string());
+
     let already_exists =
         recent_similar_event_exists(db_pool, sensor_id, "LEAK", EVENT_SUPPRESSION_WINDOW_SECONDS)
             .await?;
@@ -188,7 +198,8 @@ pub async fn detect_possible_leak(
         sync_delay_seconds,
         "medium",
         format!(
-            "Possible fuel leak detected. Fuel gradually dropped by {:.2} litres.",
+            "Possible fuel leak detected while device state was {}. Fuel gradually dropped by {:.2} litres.",
+            latest_device_state,
             total_drop.abs()
         ),
     )
