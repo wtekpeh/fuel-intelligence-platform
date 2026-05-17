@@ -90,6 +90,31 @@ not guaranteed confirmation.
 
 ---
 
+## Confidence Scoring
+
+Fuel events now include deterministic confidence scoring.
+
+Current confidence levels:
+
+````text
+Low
+Medium
+High
+Critical
+
+Confidence is based on:
+
+event type
+device operational state
+telemetry outlier count
+candidate count
+suspicious fuel jump status
+delayed detection status
+
+The confidence value is stored separately on fuel events and exposed through the fuel events API.
+
+---
+
 # Offline-Safe Detection Philosophy
 
 The platform distinguishes:
@@ -110,7 +135,7 @@ Example:
 event occurs at 02:00
 device reconnects at 05:00
 backend still detects event correctly at 05:00
-```
+````
 
 ---
 
@@ -189,7 +214,14 @@ POST /api/fuel-readings/batch
 GET /api/fuel-events
 ```
 
-Returns recent operational events as JSON.
+Fuel event responses include:
+
+- severity
+- confidence
+- message
+- fuel difference
+- delayed detection metadata
+  Returns recent operational events as JSON.
 
 ---
 
@@ -285,6 +317,15 @@ Possible causes include:
 
 Current capabilities:
 
+- deterministic state classification
+- GPS-aware movement classification
+- vibration-aware classification
+- batch-sequential movement analysis
+- distance estimation in meters
+- approximate speed estimation
+- operational state persistence
+- historical state reconstruction
+- operational state API endpoint
 - frozen sensor detection
 - duplicate suppression
 - sensor health event persistence
@@ -350,6 +391,50 @@ tamper reasoning
 future GPS-aware intelligence
 future ML-assisted behavioral analysis
 
+---
+
+# Telemetry Quality Layer
+
+The service now supports statistical telemetry quality analysis before operational intelligence processing.
+
+Current implemented telemetry quality tools:
+
+- fuel range validation
+- impossible jump detection
+- median calculation
+- rolling median windows
+- interquartile range (IQR) calculation
+- IQR-based outlier detection
+- persistent outlier counting
+- telemetry quality window summaries
+
+The filtering layer is designed to distinguish between:
+
+- real operational events
+- sensor spikes
+- noisy telemetry
+- suspicious abnormal patterns
+
+Outliers are not automatically discarded.
+
+Instead, the platform supports persistence-aware anomaly reasoning to avoid suppressing legitimate operational incidents such as:
+
+- real fuel theft
+- real fuel leaks
+- legitimate fuel refills
+
+---
+
+## Telemetry Detection Configuration
+
+Current configurable telemetry intelligence settings:
+
+```env
+DEFAULT_TANK_CAPACITY_LITRES=200
+MAX_ALLOWED_FUEL_JUMP_LITRES=80
+FUEL_ROLLING_WINDOW_SIZE=5
+FUEL_IQR_MULTIPLIER=1.5
+
 # Current Architecture
 
 ```text
@@ -396,6 +481,8 @@ Implemented:
 - configurable health thresholds
 - automatic background device health refresh
 - device health event history
+- deterministic confidence scoring for fuel events
+- confidence field on fuel event API responses
 
 Pending:
 

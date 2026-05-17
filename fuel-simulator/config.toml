@@ -1,4 +1,4 @@
-device_id = "DEV001"
+device_id = "DEV_CONF_TEST_002"
 tank_capacity_litres = 200.0
 initial_fuel_litres = 180.0
 latitude = 5.6037
@@ -6,10 +6,10 @@ longitude = -0.1870
 batch_size = 5
 reading_sleep_seconds = 2
 
-theft_reading_number = 10
-leak_start_reading = 20
-leak_end_reading = 25
-refill_reading_number = 35
+theft_reading_number = 5
+refill_reading_number = 10
+leak_start_reading = 15
+leak_end_reading = 20
 
 ingestion_url = "http://127.0.0.1:8080/api/fuel-readings/batch"
 

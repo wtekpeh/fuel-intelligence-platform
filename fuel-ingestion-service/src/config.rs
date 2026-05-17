@@ -9,6 +9,10 @@ pub struct AppConfig {
     pub device_stale_after_seconds: i64,
     pub device_offline_after_seconds: i64,
     pub device_health_refresh_interval_seconds: u64,
+    pub default_tank_capacity_litres: f64,
+    pub max_allowed_fuel_jump_litres: f64,
+    pub fuel_rolling_window_size: usize,
+    pub fuel_iqr_multiplier: f64,
 }
 
 impl AppConfig {
@@ -39,6 +43,25 @@ impl AppConfig {
                 .unwrap_or_else(|_| "30".to_string())
                 .parse::<u64>()
                 .context("DEVICE_HEALTH_REFRESH_INTERVAL_SECONDS must be a valid number")?;
+        let default_tank_capacity_litres = env::var("DEFAULT_TANK_CAPACITY_LITRES")
+            .unwrap_or_else(|_| "200".to_string())
+            .parse::<f64>()
+            .context("DEFAULT_TANK_CAPACITY_LITRES must be a valid number")?;
+
+        let max_allowed_fuel_jump_litres = env::var("MAX_ALLOWED_FUEL_JUMP_LITRES")
+            .unwrap_or_else(|_| "80".to_string())
+            .parse::<f64>()
+            .context("MAX_ALLOWED_FUEL_JUMP_LITRES must be a valid number")?;
+
+        let fuel_rolling_window_size = env::var("FUEL_ROLLING_WINDOW_SIZE")
+            .unwrap_or_else(|_| "5".to_string())
+            .parse::<usize>()
+            .context("FUEL_ROLLING_WINDOW_SIZE must be a valid number")?;
+
+        let fuel_iqr_multiplier = env::var("FUEL_IQR_MULTIPLIER")
+            .unwrap_or_else(|_| "1.5".to_string())
+            .parse::<f64>()
+            .context("FUEL_IQR_MULTIPLIER must be a valid number")?;
 
         Ok(Self {
             database_url,
@@ -47,6 +70,10 @@ impl AppConfig {
             device_stale_after_seconds,
             device_offline_after_seconds,
             device_health_refresh_interval_seconds,
+            default_tank_capacity_litres,
+            max_allowed_fuel_jump_litres,
+            fuel_rolling_window_size,
+            fuel_iqr_multiplier,
         })
     }
 }

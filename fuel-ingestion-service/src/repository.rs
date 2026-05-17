@@ -59,12 +59,6 @@ pub struct StoredSensorReading {
     pub longitude: Option<f64>,
 }
 
-pub struct PreviousLocationReading {
-    pub latitude: Option<f64>,
-    pub longitude: Option<f64>,
-    pub recorded_at: DateTime<Utc>,
-}
-
 pub async fn get_latest_device_state(db_pool: &PgPool, device_id: Uuid) -> Result<Option<String>> {
     let row = sqlx::query!(
         r#"
@@ -415,6 +409,7 @@ pub async fn create_fuel_event(
     sync_delay_seconds: i64,
     severity: &str,
     message: String,
+    confidence: Option<String>,
 ) -> Result<()> {
     sqlx::query!(
         r#"
@@ -432,11 +427,12 @@ pub async fn create_fuel_event(
             is_delayed_detection,
             sync_delay_seconds,
             severity,
-            message
+            message,
+            confidence
         )
         VALUES (
             $1, $2, $3, $4, $5, $6, $7,
-            $8, $9, $10, $11, $12, $13, $14
+            $8, $9, $10, $11, $12, $13, $14, $15
         )
         "#,
         device_id,
@@ -452,7 +448,8 @@ pub async fn create_fuel_event(
         is_delayed_detection,
         sync_delay_seconds,
         severity,
-        message
+        message,
+        confidence
     )
     .execute(db_pool)
     .await?;
@@ -570,6 +567,7 @@ pub async fn get_recent_fuel_events(
             is_delayed_detection,
             sync_delay_seconds,
             severity,
+            confidence,
             message
         FROM fuel_events
         ORDER BY created_at DESC
@@ -596,6 +594,7 @@ pub async fn get_recent_fuel_events(
             is_delayed_detection: row.is_delayed_detection,
             sync_delay_seconds: row.sync_delay_seconds,
             severity: row.severity,
+            confidence: row.confidence,
             message: row.message,
         })
         .collect();
@@ -979,37 +978,4 @@ pub async fn get_recent_device_state_events(
         .collect();
 
     Ok(events)
-}
-
-async fn get_previous_location_reading(
-    db_pool: &PgPool,
-    device_id: Uuid,
-    sensor_id: Uuid,
-    recorded_at: DateTime<Utc>,
-) -> Result<Option<PreviousLocationReading>> {
-    let row = sqlx::query!(
-        r#"
-        SELECT
-            latitude,
-            longitude,
-            recorded_at
-        FROM sensor_readings
-        WHERE device_id = $1
-            AND sensor_id = $2
-            AND recorded_at < $3
-        ORDER BY recorded_at DESC
-        LIMIT 1
-        "#,
-        device_id,
-        sensor_id,
-        recorded_at
-    )
-    .fetch_optional(db_pool)
-    .await?;
-
-    Ok(row.map(|row| PreviousLocationReading {
-        latitude: row.latitude,
-        longitude: row.longitude,
-        recorded_at: row.recorded_at,
-    }))
 }

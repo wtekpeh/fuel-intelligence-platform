@@ -45,6 +45,7 @@ pub struct FuelEventResponse {
     pub is_delayed_detection: bool,
     pub sync_delay_seconds: i64,
     pub severity: String,
+    pub confidence: Option<String>,
     pub message: String,
 }
 

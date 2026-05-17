@@ -46,9 +46,9 @@ pub async fn ingest_reading_batch(
             )
             .await?;
 
-            detect_fuel_event(db_pool, device_id, sensor_id).await?;
+            detect_fuel_event(db_pool, &app_state.config, device_id, sensor_id).await?;
 
-            detect_possible_leak(db_pool, device_id, sensor_id).await?;
+            detect_possible_leak(db_pool, &app_state.config, device_id, sensor_id).await?;
 
             detect_frozen_fuel_sensor(db_pool, device_id, sensor_id).await?;
 
