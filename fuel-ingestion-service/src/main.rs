@@ -5,7 +5,9 @@ mod models;
 mod repository;
 mod routes;
 mod services;
+mod ws;
 
+use crate::services::alert_hub::AlertHub;
 use config::AppConfig;
 use db::create_db_pool;
 use repository::refresh_device_statuses;
@@ -49,7 +51,9 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    let app = app_routes(db_pool, config.clone());
+    let alert_hub = AlertHub::new();
+
+    let app = app_routes(db_pool, config.clone(), alert_hub);
 
     let address = format!("{}:{}", config.server_host, config.server_port);
 

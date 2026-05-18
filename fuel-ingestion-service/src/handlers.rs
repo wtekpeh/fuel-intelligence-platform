@@ -1,6 +1,6 @@
 use crate::routes::AppState;
 use axum::{
-    extract::{Json, State},
+    extract::{Json, Path, State},
     http::StatusCode,
     response::IntoResponse,
 };
@@ -9,12 +9,14 @@ use crate::services::fuel_detection::{detect_fuel_event, detect_possible_leak};
 use crate::services::sensor_health::detect_frozen_fuel_sensor;
 use crate::{
     models::{
-        ApiResponse, DeviceStateEventResponse, HeartbeatRequest, HeartbeatResponse, ReadingBatch,
+        AlertResponse, ApiResponse, DeviceStateEventResponse, HeartbeatRequest, HeartbeatResponse,
+        ReadingBatch,
     },
     repository::{
-        get_or_create_demo_sensor, get_recent_device_health_events, get_recent_device_state_events,
-        get_recent_fuel_events, get_recent_sensor_health_events, mark_device_heartbeat_seen,
-        mark_device_payload_seen, refresh_device_statuses, save_fuel_reading_as_sensor_reading,
+        acknowledge_alert, get_or_create_demo_sensor, get_recent_alerts,
+        get_recent_device_health_events, get_recent_device_state_events, get_recent_fuel_events,
+        get_recent_sensor_health_events, mark_device_heartbeat_seen, mark_device_payload_seen,
+        refresh_device_statuses, save_fuel_reading_as_sensor_reading,
     },
 };
 
@@ -46,9 +48,23 @@ pub async fn ingest_reading_batch(
             )
             .await?;
 
-            detect_fuel_event(db_pool, &app_state.config, device_id, sensor_id).await?;
+            detect_fuel_event(
+                db_pool,
+                &app_state.alert_hub,
+                &app_state.config,
+                device_id,
+                sensor_id,
+            )
+            .await?;
 
-            detect_possible_leak(db_pool, &app_state.config, device_id, sensor_id).await?;
+            detect_possible_leak(
+                db_pool,
+                &app_state.alert_hub,
+                &app_state.config,
+                device_id,
+                sensor_id,
+            )
+            .await?;
 
             detect_frozen_fuel_sensor(db_pool, device_id, sensor_id).await?;
 
@@ -226,4 +242,32 @@ pub async fn list_device_state_events(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(events))
+}
+
+pub async fn list_alerts(
+    State(app_state): State<AppState>,
+) -> Result<Json<Vec<AlertResponse>>, StatusCode> {
+    let alerts: Vec<AlertResponse> = get_recent_alerts(&app_state.db_pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(alerts))
+}
+
+pub async fn acknowledge_alert_handler(
+    State(app_state): State<AppState>,
+    Path(alert_id): Path<uuid::Uuid>,
+) -> Result<Json<crate::models::AlertAcknowledgementResponse>, StatusCode> {
+    let acknowledged_alert = acknowledge_alert(&app_state.db_pool, alert_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    match acknowledged_alert {
+        Some(alert) => {
+            app_state.alert_hub.broadcast_acknowledgement(alert.clone());
+
+            Ok(Json(alert))
+        }
+        None => Err(StatusCode::NOT_FOUND),
+    }
 }

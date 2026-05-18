@@ -5,7 +5,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::repository::{
-    create_fuel_event, get_latest_device_state, get_previous_sensor_reading,
+    create_alert, create_fuel_event, get_latest_device_state, get_previous_sensor_reading,
     get_recent_sensor_readings, recent_event_type_exists, recent_similar_event_exists,
 };
 
@@ -14,7 +14,10 @@ use crate::services::telemetry_filter::{
     validate_fuel_range,
 };
 
+use crate::services::alert_hub::AlertHub;
+use crate::services::alert_rules::evaluate_alert_rule;
 use crate::services::confidence_scoring::score_fuel_event_confidence;
+use crate::services::fuel_event_correlation::correlate_fuel_event;
 
 const THEFT_DROP_THRESHOLD: f64 = 20.0;
 const REFILL_INCREASE_THRESHOLD: f64 = 20.0;
@@ -25,6 +28,7 @@ const THEFT_LEAK_CORRELATION_WINDOW_SECONDS: i64 = 900;
 
 pub async fn detect_fuel_event(
     db_pool: &PgPool,
+    alert_hub: &AlertHub,
     config: &AppConfig,
     device_id: Uuid,
     sensor_id: Uuid,
@@ -105,7 +109,13 @@ pub async fn detect_fuel_event(
             is_delayed_detection,
         );
 
-        create_fuel_event(
+        let correlation = correlate_fuel_event(
+            "THEFT",
+            &latest_device_state,
+            latest_device_state == "MOVING",
+        );
+
+        let fuel_event_id = create_fuel_event(
             db_pool,
             device_id,
             sensor_id,
@@ -132,8 +142,29 @@ pub async fn detect_fuel_event(
                 confidence,
             ),
             Some(format!("{:?}", confidence)),
+            Some(format!("{:?}", correlation.status)),
+Some(correlation.reason),
         )
         .await?;
+
+        let alert_decision = evaluate_alert_rule(
+            "THEFT",
+            &format!("{:?}", confidence),
+            &format!("{:?}", correlation.status),
+        );
+
+        if alert_decision.should_alert {
+            let alert = create_alert(
+                db_pool,
+                Some(fuel_event_id),
+                "THEFT".to_string(),
+                format!("{:?}", alert_decision.severity),
+                alert_decision.reason,
+            )
+            .await?;
+
+            alert_hub.broadcast_alert(alert);
+        }
 
         println!("THEFT EVENT DETECTED");
     }
@@ -167,7 +198,13 @@ pub async fn detect_fuel_event(
             _ => "Fuel increase detected",
         };
 
-        create_fuel_event(
+        let correlation = correlate_fuel_event(
+            "REFILL",
+            &latest_device_state,
+            latest_device_state == "MOVING",
+        );
+
+        let fuel_event_id = create_fuel_event(
             db_pool,
             device_id,
             sensor_id,
@@ -195,8 +232,29 @@ pub async fn detect_fuel_event(
                 confidence,
             ),
             Some(format!("{:?}", confidence)),
+            Some(format!("{:?}", correlation.status)),
+Some(correlation.reason),
         )
         .await?;
+
+        let alert_decision = evaluate_alert_rule(
+            "REFILL",
+            &format!("{:?}", confidence),
+            &format!("{:?}", correlation.status),
+        );
+
+        if alert_decision.should_alert {
+            let alert = create_alert(
+                db_pool,
+                Some(fuel_event_id),
+                "REFILL".to_string(),
+                format!("{:?}", alert_decision.severity),
+                alert_decision.reason,
+            )
+            .await?;
+
+            alert_hub.broadcast_alert(alert);
+        }
 
         println!("REFILL EVENT DETECTED");
     }
@@ -206,6 +264,7 @@ pub async fn detect_fuel_event(
 
 pub async fn detect_possible_leak(
     db_pool: &PgPool,
+    alert_hub: &AlertHub,
     config: &AppConfig,
     device_id: Uuid,
     sensor_id: Uuid,
@@ -296,7 +355,13 @@ pub async fn detect_possible_leak(
         is_delayed_detection,
     );
 
-    create_fuel_event(
+    let correlation = correlate_fuel_event(
+        "LEAK",
+        &latest_device_state,
+        latest_device_state == "MOVING",
+    );
+
+    let fuel_event_id = create_fuel_event(
         db_pool,
         device_id,
         sensor_id,
@@ -322,8 +387,28 @@ pub async fn detect_possible_leak(
             confidence,
         ),
         Some(format!("{:?}", confidence)),
+        Some(format!("{:?}", correlation.status)),
+Some(correlation.reason),
     )
     .await?;
+
+    let alert_decision = evaluate_alert_rule(
+        "LEAK",
+        &format!("{:?}", confidence),
+        &format!("{:?}", correlation.status),
+    );
+
+    if alert_decision.should_alert {
+        let alert = create_alert(
+            db_pool,
+            Some(fuel_event_id),
+            "LEAK".to_string(),
+            format!("{:?}", alert_decision.severity),
+            alert_decision.reason,
+        )
+        .await?;
+        alert_hub.broadcast_alert(alert);
+    }
 
     println!("LEAK EVENT DETECTED");
 

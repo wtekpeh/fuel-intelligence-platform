@@ -46,6 +46,8 @@ pub struct FuelEventResponse {
     pub sync_delay_seconds: i64,
     pub severity: String,
     pub confidence: Option<String>,
+    pub correlation_status: Option<String>,
+    pub correlation_reason: Option<String>,
     pub message: String,
 }
 
@@ -96,4 +98,24 @@ pub struct DeviceStateEventResponse {
     pub longitude: Option<f64>,
 
     pub recorded_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AlertResponse {
+    pub id: uuid::Uuid,
+    pub fuel_event_id: Option<uuid::Uuid>,
+    pub alert_type: String,
+    pub severity: String,
+    pub reason: String,
+    pub is_acknowledged: bool,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AlertAcknowledgementResponse {
+    pub id: uuid::Uuid,
+    pub alert_type: String,
+    pub severity: String,
+    pub is_acknowledged: bool,
+    pub created_at: DateTime<Utc>,
 }

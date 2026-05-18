@@ -5,8 +5,8 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::models::{
-    DeviceHealthEventResponse, DeviceStateEventResponse, FuelEventResponse, FuelReading,
-    SensorHealthEventResponse,
+    AlertAcknowledgementResponse, AlertResponse, DeviceHealthEventResponse,
+    DeviceStateEventResponse, FuelEventResponse, FuelReading, SensorHealthEventResponse,
 };
 use crate::services::device_health::classify_device_status;
 use crate::services::device_state::{
@@ -410,8 +410,10 @@ pub async fn create_fuel_event(
     severity: &str,
     message: String,
     confidence: Option<String>,
-) -> Result<()> {
-    sqlx::query!(
+    correlation_status: Option<String>,
+    correlation_reason: Option<String>,
+) -> Result<Uuid, sqlx::Error> {
+    let row = sqlx::query!(
         r#"
         INSERT INTO fuel_events (
             device_id,
@@ -428,12 +430,15 @@ pub async fn create_fuel_event(
             sync_delay_seconds,
             severity,
             message,
-            confidence
+            confidence,
+            correlation_status,
+            correlation_reason
         )
         VALUES (
             $1, $2, $3, $4, $5, $6, $7,
-            $8, $9, $10, $11, $12, $13, $14, $15
+            $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
         )
+        RETURNING id
         "#,
         device_id,
         sensor_id,
@@ -449,12 +454,14 @@ pub async fn create_fuel_event(
         sync_delay_seconds,
         severity,
         message,
-        confidence
+        confidence,
+        correlation_status,
+        correlation_reason
     )
-    .execute(db_pool)
+    .fetch_one(db_pool)
     .await?;
 
-    Ok(())
+    Ok(row.id)
 }
 
 pub async fn get_recent_sensor_readings(
@@ -568,6 +575,8 @@ pub async fn get_recent_fuel_events(
             sync_delay_seconds,
             severity,
             confidence,
+            correlation_status,
+            correlation_reason,
             message
         FROM fuel_events
         ORDER BY created_at DESC
@@ -595,6 +604,8 @@ pub async fn get_recent_fuel_events(
             sync_delay_seconds: row.sync_delay_seconds,
             severity: row.severity,
             confidence: row.confidence,
+            correlation_status: row.correlation_status,
+            correlation_reason: row.correlation_reason,
             message: row.message,
         })
         .collect();
@@ -978,4 +989,150 @@ pub async fn get_recent_device_state_events(
         .collect();
 
     Ok(events)
+}
+
+pub async fn create_alert(
+    db_pool: &PgPool,
+    fuel_event_id: Option<Uuid>,
+    alert_type: String,
+    severity: String,
+    reason: String,
+) -> Result<AlertResponse, sqlx::Error> {
+    let row = sqlx::query!(
+        r#"
+        INSERT INTO alerts (
+            fuel_event_id,
+            alert_type,
+            severity,
+            reason
+        )
+        VALUES ($1, $2, $3, $4)
+        RETURNING
+            id,
+            fuel_event_id,
+            alert_type,
+            severity,
+            reason,
+            is_acknowledged,
+            created_at
+        "#,
+        fuel_event_id,
+        alert_type,
+        severity,
+        reason
+    )
+    .fetch_one(db_pool)
+    .await?;
+
+    Ok(AlertResponse {
+        id: row.id,
+        fuel_event_id: row.fuel_event_id,
+        alert_type: row.alert_type,
+        severity: row.severity,
+        reason: row.reason,
+        is_acknowledged: row.is_acknowledged,
+        created_at: row.created_at,
+    })
+}
+
+pub async fn get_recent_alerts(db_pool: &PgPool) -> Result<Vec<AlertResponse>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT
+            id,
+            fuel_event_id,
+            alert_type,
+            severity,
+            reason,
+            is_acknowledged,
+            created_at
+        FROM alerts
+        ORDER BY created_at DESC
+        LIMIT 100
+        "#
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| AlertResponse {
+            id: row.id,
+            fuel_event_id: row.fuel_event_id,
+            alert_type: row.alert_type,
+            severity: row.severity,
+            reason: row.reason,
+            is_acknowledged: row.is_acknowledged,
+            created_at: row.created_at,
+        })
+        .collect())
+}
+
+pub async fn list_alerts_since(
+    db_pool: &PgPool,
+    since: chrono::DateTime<chrono::Utc>,
+) -> Result<Vec<AlertResponse>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT
+            id,
+            fuel_event_id,
+            alert_type,
+            severity,
+            reason,
+            is_acknowledged,
+            created_at
+        FROM alerts
+        WHERE created_at > $1
+        ORDER BY created_at ASC
+        "#,
+        since
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    let alerts = rows
+        .into_iter()
+        .map(|row| AlertResponse {
+            id: row.id,
+            fuel_event_id: row.fuel_event_id,
+            alert_type: row.alert_type,
+            severity: row.severity,
+            reason: row.reason,
+            is_acknowledged: row.is_acknowledged,
+            created_at: row.created_at,
+        })
+        .collect();
+
+    Ok(alerts)
+}
+
+pub async fn acknowledge_alert(
+    db_pool: &PgPool,
+    alert_id: Uuid,
+) -> Result<Option<AlertAcknowledgementResponse>, sqlx::Error> {
+    let row = sqlx::query!(
+        r#"
+        UPDATE alerts
+        SET is_acknowledged = true
+        WHERE id = $1
+        RETURNING
+            id,
+            alert_type,
+            severity,
+            is_acknowledged,
+            created_at
+        "#,
+        alert_id
+    )
+    .fetch_optional(db_pool)
+    .await?;
+
+    Ok(row.map(|row| AlertAcknowledgementResponse {
+        id: row.id,
+        alert_type: row.alert_type,
+        severity: row.severity,
+        is_acknowledged: row.is_acknowledged,
+        created_at: row.created_at,
+    }))
 }

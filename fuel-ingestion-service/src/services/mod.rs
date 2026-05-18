@@ -1,6 +1,9 @@
+pub mod alert_hub;
+pub mod alert_rules;
 pub mod confidence_scoring;
 pub mod device_health;
 pub mod device_state;
 pub mod fuel_detection;
+pub mod fuel_event_correlation;
 pub mod sensor_health;
 pub mod telemetry_filter;

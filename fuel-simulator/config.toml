@@ -1,4 +1,4 @@
-device_id = "DEV_CONF_TEST_002"
+device_id = "DEV_CORR_TEST_006"
 tank_capacity_litres = 200.0
 initial_fuel_litres = 180.0
 latitude = 5.6037

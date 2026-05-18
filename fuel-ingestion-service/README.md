@@ -277,6 +277,14 @@ Returns recent sensor operational health issues such as:
 SENSOR_FROZEN
 ```
 
+## Live Alerts WebSocket
+
+```http
+GET /ws/alerts
+```
+
+Provides live operational alert streaming for dashboards and monitoring systems.
+
 ---
 
 ## List Device State Events
@@ -289,6 +297,18 @@ Returns recent classified operational states such as:
 MOVING
 IDLE
 PARKED
+
+---
+
+## List Alerts
+
+```http
+GET /api/alerts
+
+Returns operationally escalated alerts generated from fuel event intelligence.
+
+
+
 
 ## Sensor Health Intelligence
 
@@ -393,6 +413,319 @@ future ML-assisted behavioral analysis
 
 ---
 
+---
+
+# Multi-Sensor Correlation Layer
+
+The platform now supports deterministic multi-sensor operational correlation.
+
+This layer does not only detect events.
+
+It also evaluates whether detected operational events logically align with:
+
+- operational device state
+- movement conditions
+- motion behavior
+- telemetry quality context
+
+The correlation layer helps distinguish between:
+
+- operationally consistent events
+- suspicious contradictions
+- conflicting telemetry patterns
+- insufficient operational context
+
+Current correlation statuses:
+
+```text
+Consistent
+Suspicious
+Conflicting
+Unknown
+
+Current implemented examples:
+
+THEFT + PARKED
+→ Consistent
+
+THEFT + IDLE
+→ Consistent
+
+REFILL + IDLE
+→ Consistent
+
+REFILL + MOVING
+→ Conflicting
+
+Each fuel event can now include:
+
+confidence
+correlation_status
+correlation_reason
+
+Example:
+
+{
+  "event_type": "THEFT",
+  "confidence": "High",
+  "correlation_status": "Consistent",
+  "correlation_reason": "Fuel theft pattern aligns with parked stationary vehicle."
+}
+
+This provides the foundation for:
+
+forensic operational reasoning
+explainable anomaly detection
+tamper investigation
+operational evidence reconstruction
+future ML-assisted behavioral intelligence
+
+---
+
+# Alert Rules Engine
+
+The platform now supports deterministic operational alert escalation.
+
+Not every detected fuel event automatically becomes an operational alert.
+
+The Alert Rules Engine evaluates:
+
+- event type
+- confidence level
+- operational correlation status
+
+before deciding whether an alert should be escalated.
+
+Current alert severities:
+
+```text
+Info
+Warning
+Critical
+
+Current implemented examples:
+
+THEFT
++ High confidence
++ Consistent operational correlation
+====================================
+Critical alert
+
+REFILL
++ Medium confidence
++ Conflicting operational correlation
+====================================
+Warning alert
+
+Alerts are persisted independently from raw fuel events.
+
+This allows:
+
+operational escalation
+alert acknowledgment workflows
+dashboard alert feeds
+future SMS/email escalation
+future WebSocket live notifications
+
+Current alert fields:
+
+alert_type
+severity
+reason
+is_acknowledged
+created_at
+
+Current alert endpoint:
+
+GET /api/alerts
+
+Example response:
+
+[
+  {
+    "alert_type": "THEFT",
+    "severity": "Critical",
+    "reason": "High-confidence theft with operationally consistent correlation."
+  }
+]
+
+This layer provides the operational foundation for:
+
+incident escalation
+fleet operations monitoring
+forensic operational analysis
+future enterprise alert workflows
+
+# Live Operational Alert Streaming
+
+The platform now supports real-time operational alert broadcasting using WebSockets.
+
+Current implementation:
+
+```text
+fuel event detected
+→ alert rule evaluation
+→ alert persistence
+→ immediate WebSocket broadcast
+```
+
+Current endpoint:
+
+```http
+GET /ws/alerts
+```
+
+Current capabilities:
+
+- event-driven broadcasting
+- zero polling architecture
+- shared in-memory alert hub
+- live operational alert feeds
+- heartbeat keepalive messages
+- real-time dashboard support
+
+Heartbeat messages are periodically sent to connected clients to support unstable or intermittent network environments.
+
+Example heartbeat:
+
+```json
+{
+  "type": "heartbeat",
+  "message": "alerts_ws_alive"
+}
+```
+
+## WebSocket Recovery Synchronization
+
+Dashboards can reconnect with a `since` timestamp to recover missed alerts.
+
+Example:
+
+```http
+GET /ws/alerts?since=2026-05-18T19:30:00Z
+```
+
+Recovery flow:
+
+```text
+dashboard reconnects
+→ backend loads alerts created after `since`
+→ missed alerts are sent first
+→ WebSocket then continues with live alerts
+→ heartbeat messages continue
+```
+
+This protects dashboards from temporary network drops while keeping PostgreSQL as the source of truth.
+
+## WebSocket Message Envelope Types
+
+The WebSocket stream now uses typed message envelopes to distinguish between:
+
+- historical recovery replay
+- live operational alerts
+- connection heartbeat events
+
+Current message types:
+
+### Recovery Alert
+
+```json
+{
+  "type": "recovery_alert",
+  "data": {
+    "alert_type": "THEFT"
+  }
+}
+```
+
+### Live Alert
+
+```json
+{
+  "type": "live_alert",
+  "data": {
+    "alert_type": "REFILL"
+  }
+}
+```
+
+### Heartbeat
+
+```json
+{
+  "type": "heartbeat",
+  "message": "alerts_ws_alive"
+}
+```
+
+This structure allows frontend dashboards to safely route messages into:
+
+- recovery synchronization flows
+- real-time alert feeds
+- connection health monitoring
+
+## Alert Acknowledgment Workflow
+
+The platform now supports operational alert acknowledgment workflows.
+
+Current acknowledgment endpoint:
+
+```http
+PATCH /api/alerts/{alert_id}/acknowledge
+```
+
+Acknowledgment flow:
+
+```text
+operator receives live alert
+→ operator acknowledges alert
+→ alert state updates in PostgreSQL
+→ acknowledgment broadcasts live to dashboards
+```
+
+This enables dashboards to distinguish between:
+
+- active operational incidents
+- acknowledged incidents
+- handled operational alerts
+
+Current acknowledgment WebSocket message:
+
+```json
+{
+  "type": "alert_acknowledged",
+  "data": {
+    "alert_type": "THEFT",
+    "is_acknowledged": true
+  }
+}
+```
+
+Operational acknowledgment events are broadcast through the same shared WebSocket operational stream used for live alerts.
+
+This provides the foundation for:
+
+- multi-operator operational coordination
+- incident handling workflows
+- future escalation management
+- future role-based operational control
+
+Operational design philosophy:
+
+- PostgreSQL remains the source of truth
+- WebSocket delivery is transient
+- alerts are persisted before broadcast
+- forensic reconstruction remains possible even if clients disconnect
+
+Current implementation uses a single-process in-memory broadcaster.
+
+Future scaling roadmap:
+
+- Redis Pub/Sub
+- Kafka/NATS streaming
+- distributed event fanout
+- enterprise escalation pipelines
+
 # Telemetry Quality Layer
 
 The service now supports statistical telemetry quality analysis before operational intelligence processing.
@@ -455,6 +788,11 @@ Device / Simulator
     └── Device State Engine
 ````
 
+→ Live Distribution Layer
+├── In-Memory Alert Hub
+├── WebSocket Alert Streaming
+└── Heartbeat Keepalive
+
 ---
 
 # Technology Stack
@@ -483,10 +821,21 @@ Implemented:
 - device health event history
 - deterministic confidence scoring for fuel events
 - confidence field on fuel event API responses
+- multi-sensor operational correlation layer
+- correlation status persistence
+- correlation reasoning persistence
+- forensic operational interpretation
+- operational alert rules engine
+- alert persistence
+- alert severity classification
+- alert API endpoint
+- WebSocket broadcasting
+- event-driven live alert streaming
+- heartbeat keepalive support
+- WebSocket operational feeds
 
 Pending:
 
-- WebSocket broadcasting
 - live dashboard
 - ML-assisted anomaly scoring
 - Redis/Kafka streaming
