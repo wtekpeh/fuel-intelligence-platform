@@ -15,8 +15,9 @@ use crate::{
     repository::{
         acknowledge_alert, get_or_create_demo_sensor, get_recent_alerts,
         get_recent_device_health_events, get_recent_device_state_events, get_recent_fuel_events,
-        get_recent_sensor_health_events, mark_device_heartbeat_seen, mark_device_payload_seen,
-        refresh_device_statuses, resolve_alert, save_fuel_reading_as_sensor_reading,
+        get_recent_sensor_health_events, get_recent_telemetry_stream, mark_device_heartbeat_seen,
+        mark_device_payload_seen, refresh_device_statuses, resolve_alert,
+        save_fuel_reading_as_sensor_reading,
     },
 };
 
@@ -289,4 +290,14 @@ pub async fn resolve_alert_handler(
 
         None => Err(StatusCode::NOT_FOUND),
     }
+}
+
+pub async fn list_recent_telemetry_stream(
+    State(app_state): State<AppState>,
+) -> Result<Json<Vec<crate::models::TelemetryStreamResponse>>, StatusCode> {
+    let readings = get_recent_telemetry_stream(&app_state.db_pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(readings))
 }

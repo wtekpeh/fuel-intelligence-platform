@@ -1,4 +1,4 @@
-device_id = "DEV_CORR_TEST_006"
+device_id = "DEV_CORR_TEST_004"
 tank_capacity_litres = 200.0
 initial_fuel_litres = 180.0
 latitude = 5.6037
@@ -11,6 +11,6 @@ refill_reading_number = 10
 leak_start_reading = 15
 leak_end_reading = 20
 
-ingestion_url = "http://127.0.0.1:8080/api/fuel-readings/batch"
+ingestion_url = "http://127.0.0.1:9000/api/fuel-readings/batch"
 
-heartbeat_url = "http://127.0.0.1:8080/api/heartbeat"
+heartbeat_url = "http://127.0.0.1:9000/api/heartbeat"

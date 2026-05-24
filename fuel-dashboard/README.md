@@ -1,73 +1,205 @@
-# React + TypeScript + Vite
+# Fuel Dashboard
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+## Overview
 
-Currently, two official plugins are available:
+The Fuel Dashboard is the React + TypeScript frontend for the Fuel Intelligence Platform.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+It provides a professional operational interface for:
 
-## React Compiler
+- live fuel telemetry visibility
+- operational alert monitoring
+- incident acknowledgment
+- incident resolution
+- device health monitoring
+- mobile-friendly field usage
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+The dashboard is designed to support both:
 
-## Expanding the ESLint configuration
+- desktop operations centres
+- mobile field supervisors through future Capacitor Android/iOS packaging
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+---
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+# Current Stack
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+- React
+- TypeScript
+- Vite
+- Zustand
+- Axios
+- WebSocket
+- CSS
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+---
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+# Current Features
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Live Operations Dashboard
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+The main dashboard provides:
+
+- connection status
+- open alert count
+- critical alert count
+- resolved alert count
+- live telemetry preview
+- operational alert list
+- incident detail panel
+
+---
+
+## Alert Workflow
+
+The dashboard supports the current backend alert lifecycle:
+
+```text
+OPEN
+→ ACKNOWLEDGED
+→ RESOLVED
+
+Supported actions:
+
+PATCH /api/alerts/{alert_id}/acknowledge
+PATCH /api/alerts/{alert_id}/resolve
+WebSocket Alert Streaming
+
+The dashboard connects to:
+
+/ws/alerts
+
+Supported WebSocket message types:
+
+live_alert
+recovery_alert
+alert_acknowledged
+heartbeat
+
+The frontend automatically reconnects if the backend or network drops.
+
+Live Telemetry Stream
+
+The telemetry stream is read-only and uses polling:
+
+GET /api/fuel-readings/recent
+
+Current polling interval:
+
+5 seconds
+
+Telemetry is collapsed by default to keep the dashboard clean.
+
+Device Health
+
+Device health is available as a separate dashboard tab.
+
+It uses:
+
+GET /api/device-health-events
+
+Current statuses:
+
+ONLINE
+STALE
+OFFLINE
+UNKNOWN
+Dashboard Sections
+
+Current sections:
+
+Operations
+Device Health
+Investigation
+Analytics
+
+Implemented:
+
+Operations
+Device Health
+
+Planned:
+
+Investigation timeline replay
+Analytics charts and trends
+Responsive Design
+
+The dashboard is designed for:
+
+desktop monitoring
+tablet review
+mobile field usage
+future Capacitor packaging
+
+Mobile behavior includes:
+
+horizontal dashboard tabs
+horizontal status cards
+mobile alert cards instead of wide tables
+incident detail bottom-sheet panel
+collapsible telemetry section
+Environment Variables
+
+Example:
+
+VITE_API_BASE_URL=https://rust-api.williamtekpeh.com
+VITE_WS_BASE_URL=wss://rust-api.williamtekpeh.com
+
+Local development example:
+
+VITE_API_BASE_URL=http://127.0.0.1:9000
+VITE_WS_BASE_URL=ws://127.0.0.1:9000
+Current Development Status
+
+Implemented:
+
+React + TypeScript setup
+shared API client
+alert API module
+telemetry API module
+device health API module
+Zustand alert store
+Zustand telemetry store
+Zustand device health store
+WebSocket alert manager
+automatic WebSocket reconnect
+live operations dashboard
+responsive tabs/menu
+telemetry polling
+alert table
+mobile alert cards
+alert detail panel
+acknowledge/resolve actions
+device health tab
+
+Pending:
+
+landing page / company overview
+company/device/sensor selection
+alert filters
+investigation timeline
+event replay
+map view
+analytics charts
+authentication
+Capacitor Android/iOS packaging
+Product Direction
+
+The frontend is being built as an operational fuel monitoring interface first.
+
+The goal is not to build a generic admin dashboard.
+
+The goal is to support:
+
+sensor data
+→ operational intelligence
+→ live alert workflow
+→ investigation
+→ resolution
+
+The next major product direction is:
+
+landing page
+→ company/device/sensor overview
+→ selected operational dashboard
+
+Then commit mentally that every time we add a major frontend capability, we update this README.
 ```

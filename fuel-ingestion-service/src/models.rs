@@ -121,3 +121,19 @@ pub struct AlertAcknowledgementResponse {
     pub status: String,
     pub created_at: DateTime<Utc>,
 }
+
+#[derive(Debug, Serialize)]
+pub struct TelemetryStreamResponse {
+    pub device_id: String,
+
+    pub fuel_level_litres: f64,
+
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+
+    pub vibration_level: Option<f64>,
+    pub motion_detected: Option<bool>,
+
+    pub recorded_at: DateTime<Utc>,
+    pub received_at: DateTime<Utc>,
+}

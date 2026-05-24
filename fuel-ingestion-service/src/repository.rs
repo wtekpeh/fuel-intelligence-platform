@@ -7,6 +7,7 @@ use uuid::Uuid;
 use crate::models::{
     AlertAcknowledgementResponse, AlertResponse, DeviceHealthEventResponse,
     DeviceStateEventResponse, FuelEventResponse, FuelReading, SensorHealthEventResponse,
+    TelemetryStreamResponse,
 };
 use crate::services::device_health::classify_device_status;
 use crate::services::device_state::{
@@ -1179,4 +1180,43 @@ pub async fn resolve_alert(
         status: row.status,
         created_at: row.created_at,
     }))
+}
+
+pub async fn get_recent_telemetry_stream(
+    db_pool: &PgPool,
+) -> Result<Vec<TelemetryStreamResponse>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT
+            device_id,
+            value AS fuel_level_litres,
+            latitude,
+            longitude,
+            vibration_level,
+            motion_detected,
+            recorded_at,
+            received_at
+        FROM sensor_readings
+        ORDER BY received_at DESC
+        LIMIT 5
+        "#
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    let readings = rows
+        .into_iter()
+        .map(|row| TelemetryStreamResponse {
+            device_id: row.device_id.to_string(),
+            fuel_level_litres: row.fuel_level_litres,
+            latitude: row.latitude,
+            longitude: row.longitude,
+            vibration_level: row.vibration_level,
+            motion_detected: row.motion_detected,
+            recorded_at: row.recorded_at,
+            received_at: row.received_at,
+        })
+        .collect();
+
+    Ok(readings)
 }

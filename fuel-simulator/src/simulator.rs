@@ -48,6 +48,15 @@ impl FuelSimulator {
         self.update_location(mode);
 
         self.current_fuel_litres += fuel_change;
+
+        if self.current_fuel_litres <= 10.0 {
+            let refill_amount = generate_refill_amount();
+
+            self.current_fuel_litres += refill_amount;
+
+            self.current_fuel_litres = self.current_fuel_litres.min(self.tank_capacity_litres);
+        }
+
         self.current_fuel_litres = self
             .current_fuel_litres
             .clamp(0.0, self.tank_capacity_litres);
