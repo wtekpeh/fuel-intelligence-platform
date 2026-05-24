@@ -308,6 +308,37 @@ GET /api/alerts
 Returns operationally escalated alerts generated from fuel event intelligence.
 
 
+## Acknowledge Alert
+
+```http
+PATCH /api/alerts/{alert_id}/acknowledge
+```
+
+Marks an operational alert as acknowledged.
+
+This updates:
+
+```text
+is_acknowledged = true
+status = ACKNOWLEDGED
+```
+
+---
+
+## Resolve Alert
+
+```http
+PATCH /api/alerts/{alert_id}/resolve
+```
+
+Marks an operational alert as resolved.
+
+This updates:
+
+```text
+is_acknowledged = true
+status = RESOLVED
+```
 
 
 ## Sensor Health Intelligence
@@ -757,6 +788,36 @@ Instead, the platform supports persistence-aware anomaly reasoning to avoid supp
 - legitimate fuel refills
 
 ---
+
+## Alert Lifecycle States
+
+Alerts now support a basic operational lifecycle:
+
+```text
+OPEN
+→ ACKNOWLEDGED
+→ RESOLVED
+
+Lifecycle meaning:
+
+OPEN: alert has been created and still requires attention
+ACKNOWLEDGED: operator has seen and accepted the alert
+RESOLVED: incident has been handled or closed
+
+Resolved alerts are also treated as acknowledged.
+
+Current resolve endpoint:
+
+PATCH /api/alerts/{alert_id}/resolve
+
+Resolve flow:
+
+operator investigates alert
+→ operator resolves incident
+→ alert status updates in PostgreSQL
+→ resolution update broadcasts live to dashboards
+
+This README update is important because alerts now have operational state, not just a boolean ackno
 
 ## Telemetry Detection Configuration
 

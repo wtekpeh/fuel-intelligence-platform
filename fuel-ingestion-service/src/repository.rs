@@ -1014,6 +1014,7 @@ pub async fn create_alert(
             severity,
             reason,
             is_acknowledged,
+            status,
             created_at
         "#,
         fuel_event_id,
@@ -1031,6 +1032,7 @@ pub async fn create_alert(
         severity: row.severity,
         reason: row.reason,
         is_acknowledged: row.is_acknowledged,
+        status: row.status,
         created_at: row.created_at,
     })
 }
@@ -1045,6 +1047,7 @@ pub async fn get_recent_alerts(db_pool: &PgPool) -> Result<Vec<AlertResponse>, s
             severity,
             reason,
             is_acknowledged,
+            status,
             created_at
         FROM alerts
         ORDER BY created_at DESC
@@ -1063,6 +1066,7 @@ pub async fn get_recent_alerts(db_pool: &PgPool) -> Result<Vec<AlertResponse>, s
             severity: row.severity,
             reason: row.reason,
             is_acknowledged: row.is_acknowledged,
+            status: row.status,
             created_at: row.created_at,
         })
         .collect())
@@ -1081,6 +1085,7 @@ pub async fn list_alerts_since(
             severity,
             reason,
             is_acknowledged,
+            status,
             created_at
         FROM alerts
         WHERE created_at > $1
@@ -1100,6 +1105,7 @@ pub async fn list_alerts_since(
             severity: row.severity,
             reason: row.reason,
             is_acknowledged: row.is_acknowledged,
+            status: row.status,
             created_at: row.created_at,
         })
         .collect();
@@ -1114,13 +1120,16 @@ pub async fn acknowledge_alert(
     let row = sqlx::query!(
         r#"
         UPDATE alerts
-        SET is_acknowledged = true
+        SET
+            is_acknowledged = true,
+            status = 'ACKNOWLEDGED'
         WHERE id = $1
         RETURNING
             id,
             alert_type,
             severity,
             is_acknowledged,
+            status,
             created_at
         "#,
         alert_id
@@ -1133,6 +1142,41 @@ pub async fn acknowledge_alert(
         alert_type: row.alert_type,
         severity: row.severity,
         is_acknowledged: row.is_acknowledged,
+        status: row.status,
+        created_at: row.created_at,
+    }))
+}
+
+pub async fn resolve_alert(
+    db_pool: &PgPool,
+    alert_id: Uuid,
+) -> Result<Option<AlertAcknowledgementResponse>, sqlx::Error> {
+    let row = sqlx::query!(
+        r#"
+        UPDATE alerts
+        SET
+            is_acknowledged = true,
+            status = 'RESOLVED'
+        WHERE id = $1
+        RETURNING
+            id,
+            alert_type,
+            severity,
+            is_acknowledged,
+            status,
+            created_at
+        "#,
+        alert_id
+    )
+    .fetch_optional(db_pool)
+    .await?;
+
+    Ok(row.map(|row| AlertAcknowledgementResponse {
+        id: row.id,
+        alert_type: row.alert_type,
+        severity: row.severity,
+        is_acknowledged: row.is_acknowledged,
+        status: row.status,
         created_at: row.created_at,
     }))
 }

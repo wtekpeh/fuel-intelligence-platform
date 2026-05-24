@@ -108,6 +108,7 @@ pub struct AlertResponse {
     pub severity: String,
     pub reason: String,
     pub is_acknowledged: bool,
+    pub status: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -117,5 +118,6 @@ pub struct AlertAcknowledgementResponse {
     pub alert_type: String,
     pub severity: String,
     pub is_acknowledged: bool,
+    pub status: String,
     pub created_at: DateTime<Utc>,
 }

@@ -16,7 +16,7 @@ use crate::{
         acknowledge_alert, get_or_create_demo_sensor, get_recent_alerts,
         get_recent_device_health_events, get_recent_device_state_events, get_recent_fuel_events,
         get_recent_sensor_health_events, mark_device_heartbeat_seen, mark_device_payload_seen,
-        refresh_device_statuses, save_fuel_reading_as_sensor_reading,
+        refresh_device_statuses, resolve_alert, save_fuel_reading_as_sensor_reading,
     },
 };
 
@@ -268,6 +268,25 @@ pub async fn acknowledge_alert_handler(
 
             Ok(Json(alert))
         }
+        None => Err(StatusCode::NOT_FOUND),
+    }
+}
+
+pub async fn resolve_alert_handler(
+    State(app_state): State<AppState>,
+    Path(alert_id): Path<uuid::Uuid>,
+) -> Result<Json<crate::models::AlertAcknowledgementResponse>, StatusCode> {
+    let resolved_alert = resolve_alert(&app_state.db_pool, alert_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    match resolved_alert {
+        Some(alert) => {
+            app_state.alert_hub.broadcast_acknowledgement(alert.clone());
+
+            Ok(Json(alert))
+        }
+
         None => Err(StatusCode::NOT_FOUND),
     }
 }

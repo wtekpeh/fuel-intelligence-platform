@@ -2,7 +2,7 @@ use crate::config::AppConfig;
 use crate::handlers::{
     acknowledge_alert_handler, ingest_reading_batch, list_alerts, list_device_state_events,
     list_recent_device_health_events, list_recent_fuel_events, list_recent_sensor_health_events,
-    receive_heartbeat, refresh_device_health,
+    receive_heartbeat, refresh_device_health, resolve_alert_handler,
 };
 use crate::services::alert_hub::AlertHub;
 use crate::ws::alerts_ws_handler;
@@ -44,6 +44,10 @@ pub fn app_routes(db_pool: PgPool, config: AppConfig, alert_hub: AlertHub) -> Ro
         .route(
             "/api/alerts/:alert_id/acknowledge",
             patch(acknowledge_alert_handler),
+        )
+        .route(
+            "/api/alerts/:alert_id/resolve",
+            patch(resolve_alert_handler),
         )
         .route("/ws/alerts", get(alerts_ws_handler))
         .with_state(app_state)
