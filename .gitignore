@@ -15,3 +15,66 @@ target/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+.pnp.mjs
+.yarn/install-state.gz
+
+# testing
+/coverage
+/cypress-coverage
+/cy-report
+/.nyc_output
+
+# production builds
+/build
+/dist
+/.next
+/out
+/.cache
+/.docusaurus
+/public
+/es/
+/esm/
+/cjs/
+/lib/
+
+# development & local env files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env*.local
+
+# debug & runtime logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+lerna-debug.log*
+
+# IDE and editor files
+.vscode/
+.idea/
+.project
+.classpath
+*.swp
+*.swo
+*.swn
+*.swo
+.DS_Store
+.bs-config.json
+
+# TypeScript cache
+*.tsbuildinfo
+
+# ESLint & Prettier caches
+.eslintcache
+.prettiercache
+
+# Optional: if using pnpm, uncomment the line below
+# pnpm-lock.yaml
