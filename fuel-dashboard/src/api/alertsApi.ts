@@ -1,8 +1,13 @@
 import { httpClient } from "./httpClient";
 import type { AlertLifecycleResponse, AlertResponse } from "../types";
 
-export async function fetchAlerts(): Promise<AlertResponse[]> {
-  const response = await httpClient.get<AlertResponse[]>("/api/alerts");
+export async function fetchAlerts(deviceId?: string): Promise<AlertResponse[]> {
+  const response = await httpClient.get<AlertResponse[]>("/api/alerts", {
+    params: {
+      device_id: deviceId,
+    },
+  });
+
   return response.data;
 }
 

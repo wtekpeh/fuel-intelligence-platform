@@ -9,6 +9,7 @@ import { useDeviceHealthPolling } from "../services/useDeviceHealthPolling";
 import { DeviceHealthPanel } from "../components/device-health/DeviceHealthPanel";
 import { DashboardTabs } from "../components/layout/DashboardTabs";
 import { useDashboardSectionStore } from "../store/dashboardSectionStore";
+import { SelectedDeviceStrip } from "../components/fleet/SelectedDeviceStrip";
 
 export function DashboardPage() {
   const activeSection = useDashboardSectionStore(
@@ -36,6 +37,7 @@ export function DashboardPage() {
         <ConnectionBadge />
       </section>
       <DashboardTabs />
+      <SelectedDeviceStrip />
       <StatusGrid />
 
       {activeSection === "operations" && (

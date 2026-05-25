@@ -1,0 +1,156 @@
+.landing-page {
+  min-height: 100vh;
+  padding: 32px;
+}
+
+.landing-hero {
+  max-width: 860px;
+  margin-bottom: 32px;
+}
+
+.landing-eyebrow {
+  margin: 0 0 10px;
+  color: #38bdf8;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.landing-title {
+  margin: 0;
+  color: #f8fafc;
+  font-size: clamp(2.3rem, 5vw, 4.6rem);
+  line-height: 0.95;
+  letter-spacing: -0.05em;
+}
+
+.landing-subtitle {
+  max-width: 760px;
+  margin: 18px 0 0;
+  color: #94a3b8;
+  font-size: 1.05rem;
+  line-height: 1.7;
+}
+
+.organization-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 18px;
+}
+
+.organization-card {
+  padding: 22px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 24px;
+  background: rgba(15, 23, 42, 0.76);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
+}
+
+.organization-card__top {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.organization-card__industry {
+  margin: 0 0 8px;
+  color: #38bdf8;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.organization-card h2 {
+  margin: 0;
+  color: #f8fafc;
+  font-size: 1.35rem;
+}
+
+.organization-card__alerts {
+  flex: 0 0 auto;
+  height: fit-content;
+  padding: 8px 12px;
+  border-radius: 999px;
+  color: #fecaca;
+  background: rgba(239, 68, 68, 0.16);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.organization-card__stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.organization-card__stats div {
+  padding: 14px;
+  border-radius: 16px;
+  background: rgba(2, 6, 23, 0.42);
+}
+
+.organization-card__stats label {
+  display: block;
+  margin-bottom: 8px;
+  color: #64748b;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.organization-card__stats strong {
+  color: #f8fafc;
+  font-size: 1.25rem;
+}
+
+.organization-card__online {
+  color: #86efac !important;
+}
+
+.organization-card__offline {
+  color: #fca5a5 !important;
+}
+
+.organization-card__button {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 22px;
+  border: 1px solid rgba(56, 189, 248, 0.38);
+  border-radius: 14px;
+  color: #f8fafc;
+  background: rgba(14, 116, 144, 0.24);
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.organization-card__button:hover {
+  background: rgba(14, 116, 144, 0.38);
+}
+
+.organization-grid__empty {
+  padding: 32px;
+  border-radius: 24px;
+  color: #64748b;
+  background: rgba(15, 23, 42, 0.66);
+}
+
+@media (max-width: 720px) {
+  .landing-page {
+    padding: 18px 14px;
+  }
+
+  .organization-card__top {
+    flex-direction: column;
+  }
+
+  .organization-card__alerts {
+    align-self: flex-start;
+  }
+
+  .organization-card__stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

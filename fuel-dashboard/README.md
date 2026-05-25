@@ -46,6 +46,70 @@ The main dashboard provides:
 - operational alert list
 - incident detail panel
 
+## Multi-Organization Operational Flow
+
+The frontend is now transitioning from a single global operational dashboard into a multi-organization operational intelligence platform.
+
+Current frontend hierarchy:
+
+```text
+Landing Page
+→ Organization Overview
+→ Fleet Overview
+→ Device Selection
+→ Device-Specific Operational Dashboard
+```
+
+The operational dashboard is now device-aware.
+
+This means dashboard operational data is scoped to the selected physical device instead of globally aggregating all telemetry.
+
+Current device-scoped frontend feeds:
+
+```text
+alerts
+telemetry
+device health
+live WebSocket alerts
+```
+
+The frontend now passes `device_id` into backend operational APIs.
+
+Current filtered backend endpoints:
+
+```http
+GET /api/alerts?device_id={device_id}
+
+GET /api/fuel-readings/recent?device_id={device_id}
+
+GET /api/device-health-events?device_id={device_id}
+
+GET /api/fuel-events?device_id={device_id}
+
+GET /api/device-state-events?device_id={device_id}
+
+GET /api/sensor-health-events?device_id={device_id}
+```
+
+This architecture prevents operational conflicts where:
+
+- telemetry from multiple devices mixes together
+- alerts from unrelated devices appear in the selected dashboard
+- device health becomes operationally ambiguous
+
+WebSocket live alerts are also now filtered using `device_id` so dashboards only receive operational alerts relevant to the selected device context.
+
+This architecture provides the frontend foundation for future features such as:
+
+- investigation timeline replay
+- operational reconstruction
+- route replay
+- device diagnostics
+- predictive maintenance
+- sensor analytics
+- operational heatmaps
+- forensic operational investigation
+
 ---
 
 ## Alert Workflow

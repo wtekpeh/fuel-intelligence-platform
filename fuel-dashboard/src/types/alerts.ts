@@ -13,6 +13,7 @@ export interface AlertResponse {
   is_acknowledged: boolean;
   status: AlertStatus;
   created_at: string;
+  device_id: string | null;
 }
 
 export interface AlertLifecycleResponse {

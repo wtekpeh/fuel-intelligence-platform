@@ -6,8 +6,8 @@ use uuid::Uuid;
 
 use crate::models::{
     AlertAcknowledgementResponse, AlertResponse, DeviceHealthEventResponse,
-    DeviceStateEventResponse, FuelEventResponse, FuelReading, SensorHealthEventResponse,
-    TelemetryStreamResponse,
+    DeviceStateEventResponse, FuelEventResponse, FuelReading, OrganizationFleetOverviewResponse,
+    OrganizationOverviewResponse, SensorHealthEventResponse, TelemetryStreamResponse,
 };
 use crate::services::device_health::classify_device_status;
 use crate::services::device_state::{
@@ -558,6 +558,7 @@ pub async fn recent_event_type_exists(
 pub async fn get_recent_fuel_events(
     db_pool: &PgPool,
     limit: i64,
+    device_id: Option<Uuid>,
 ) -> Result<Vec<FuelEventResponse>> {
     let rows = sqlx::query!(
         r#"
@@ -580,10 +581,14 @@ pub async fn get_recent_fuel_events(
             correlation_reason,
             message
         FROM fuel_events
+        WHERE
+            $2::uuid IS NULL
+            OR device_id = $2
         ORDER BY created_at DESC
         LIMIT $1
         "#,
-        limit
+        limit,
+        device_id
     )
     .fetch_all(db_pool)
     .await?;
@@ -770,6 +775,7 @@ pub async fn refresh_device_statuses(
 pub async fn get_recent_device_health_events(
     db_pool: &PgPool,
     limit: i64,
+    device_id: Option<Uuid>,
 ) -> Result<Vec<DeviceHealthEventResponse>> {
     let rows = sqlx::query!(
         r#"
@@ -781,10 +787,14 @@ pub async fn get_recent_device_health_events(
             reason,
             detected_at
         FROM device_health_events
+        WHERE
+            $2::uuid IS NULL
+            OR device_id = $2
         ORDER BY detected_at DESC
         LIMIT $1
         "#,
-        limit
+        limit,
+        device_id
     )
     .fetch_all(db_pool)
     .await?;
@@ -870,6 +880,7 @@ pub async fn recent_sensor_health_event_exists(
 pub async fn get_recent_sensor_health_events(
     db_pool: &PgPool,
     limit: i64,
+    device_id: Option<Uuid>,
 ) -> Result<Vec<SensorHealthEventResponse>> {
     let rows = sqlx::query!(
         r#"
@@ -884,10 +895,14 @@ pub async fn get_recent_sensor_health_events(
             last_seen_at,
             detected_at
         FROM sensor_health_events
+        WHERE
+            $2::uuid IS NULL
+            OR device_id = $2
         ORDER BY detected_at DESC
         LIMIT $1
         "#,
-        limit
+        limit,
+        device_id
     )
     .fetch_all(db_pool)
     .await?;
@@ -958,6 +973,7 @@ pub async fn create_device_state_event(
 pub async fn get_recent_device_state_events(
     db_pool: &PgPool,
     limit: i64,
+    device_id: Option<Uuid>,
 ) -> Result<Vec<DeviceStateEventResponse>> {
     let rows = sqlx::query!(
         r#"
@@ -969,10 +985,14 @@ pub async fn get_recent_device_state_events(
             longitude,
             recorded_at
         FROM device_state_events
+        WHERE
+            $2::uuid IS NULL
+            OR device_id = $2
         ORDER BY created_at DESC
         LIMIT $1
         "#,
-        limit
+        limit,
+        device_id
     )
     .fetch_all(db_pool)
     .await?;
@@ -1001,6 +1021,7 @@ pub async fn create_alert(
 ) -> Result<AlertResponse, sqlx::Error> {
     let row = sqlx::query!(
         r#"
+    WITH inserted_alert AS (
         INSERT INTO alerts (
             fuel_event_id,
             alert_type,
@@ -1017,7 +1038,21 @@ pub async fn create_alert(
             is_acknowledged,
             status,
             created_at
-        "#,
+    )
+    SELECT
+        inserted_alert.id,
+        inserted_alert.fuel_event_id,
+        fuel_events.device_id,
+        inserted_alert.alert_type,
+        inserted_alert.severity,
+        inserted_alert.reason,
+        inserted_alert.is_acknowledged,
+        inserted_alert.status,
+        inserted_alert.created_at
+    FROM inserted_alert
+    LEFT JOIN fuel_events
+        ON fuel_events.id = inserted_alert.fuel_event_id
+    "#,
         fuel_event_id,
         alert_type,
         severity,
@@ -1029,6 +1064,7 @@ pub async fn create_alert(
     Ok(AlertResponse {
         id: row.id,
         fuel_event_id: row.fuel_event_id,
+        device_id: row.device_id,
         alert_type: row.alert_type,
         severity: row.severity,
         reason: row.reason,
@@ -1038,22 +1074,32 @@ pub async fn create_alert(
     })
 }
 
-pub async fn get_recent_alerts(db_pool: &PgPool) -> Result<Vec<AlertResponse>, sqlx::Error> {
+pub async fn get_recent_alerts(
+    db_pool: &PgPool,
+    device_id: Option<Uuid>,
+) -> Result<Vec<AlertResponse>, sqlx::Error> {
     let rows = sqlx::query!(
         r#"
-        SELECT
-            id,
-            fuel_event_id,
-            alert_type,
-            severity,
-            reason,
-            is_acknowledged,
-            status,
-            created_at
-        FROM alerts
-        ORDER BY created_at DESC
-        LIMIT 100
-        "#
+    SELECT
+        alerts.id,
+        alerts.fuel_event_id,
+        fuel_events.device_id,
+        alerts.alert_type,
+        alerts.severity,
+        alerts.reason,
+        alerts.is_acknowledged,
+        alerts.status,
+        alerts.created_at
+    FROM alerts
+    LEFT JOIN fuel_events
+        ON fuel_events.id = alerts.fuel_event_id
+    WHERE
+        $1::uuid IS NULL
+        OR fuel_events.device_id = $1
+    ORDER BY alerts.created_at DESC
+    LIMIT 100
+    "#,
+        device_id
     )
     .fetch_all(db_pool)
     .await?;
@@ -1063,6 +1109,7 @@ pub async fn get_recent_alerts(db_pool: &PgPool) -> Result<Vec<AlertResponse>, s
         .map(|row| AlertResponse {
             id: row.id,
             fuel_event_id: row.fuel_event_id,
+            device_id: Some(row.device_id),
             alert_type: row.alert_type,
             severity: row.severity,
             reason: row.reason,
@@ -1080,17 +1127,20 @@ pub async fn list_alerts_since(
     let rows = sqlx::query!(
         r#"
         SELECT
-            id,
-            fuel_event_id,
-            alert_type,
-            severity,
-            reason,
-            is_acknowledged,
-            status,
-            created_at
+            alerts.id,
+            alerts.fuel_event_id,
+            fuel_events.device_id,
+            alerts.alert_type,
+            alerts.severity,
+            alerts.reason,
+            alerts.is_acknowledged,
+            alerts.status,
+            alerts.created_at
         FROM alerts
-        WHERE created_at > $1
-        ORDER BY created_at ASC
+        LEFT JOIN fuel_events
+            ON fuel_events.id = alerts.fuel_event_id
+        WHERE alerts.created_at > $1
+        ORDER BY alerts.created_at ASC
         "#,
         since
     )
@@ -1102,6 +1152,7 @@ pub async fn list_alerts_since(
         .map(|row| AlertResponse {
             id: row.id,
             fuel_event_id: row.fuel_event_id,
+            device_id: Some(row.device_id),
             alert_type: row.alert_type,
             severity: row.severity,
             reason: row.reason,
@@ -1184,6 +1235,7 @@ pub async fn resolve_alert(
 
 pub async fn get_recent_telemetry_stream(
     db_pool: &PgPool,
+    device_id: Option<Uuid>,
 ) -> Result<Vec<TelemetryStreamResponse>, sqlx::Error> {
     let rows = sqlx::query!(
         r#"
@@ -1197,9 +1249,13 @@ pub async fn get_recent_telemetry_stream(
             recorded_at,
             received_at
         FROM sensor_readings
+        WHERE
+            $1::uuid IS NULL
+            OR device_id = $1
         ORDER BY received_at DESC
-        LIMIT 5
-        "#
+        LIMIT 10
+        "#,
+        device_id
     )
     .fetch_all(db_pool)
     .await?;
@@ -1219,4 +1275,160 @@ pub async fn get_recent_telemetry_stream(
         .collect();
 
     Ok(readings)
+}
+
+pub async fn get_organization_overview(
+    db_pool: &PgPool,
+) -> Result<Vec<OrganizationOverviewResponse>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT
+            organizations.id AS organization_id,
+            organizations.name AS organization_name,
+            organizations.industry AS industry,
+
+            COUNT(DISTINCT assets.id) AS asset_count,
+            COUNT(DISTINCT devices.id) AS device_count,
+
+            COUNT(DISTINCT devices.id) FILTER (
+                WHERE devices.status = 'ONLINE'
+            ) AS online_device_count,
+
+            COUNT(DISTINCT devices.id) FILTER (
+                WHERE devices.status = 'STALE'
+            ) AS stale_device_count,
+
+            COUNT(DISTINCT devices.id) FILTER (
+                WHERE devices.status = 'OFFLINE'
+            ) AS offline_device_count,
+
+            COUNT(DISTINCT alerts.id) FILTER (
+                WHERE alerts.status = 'OPEN'
+            ) AS open_alert_count
+
+        FROM organizations
+        LEFT JOIN assets
+            ON assets.organization_id = organizations.id
+        LEFT JOIN devices
+            ON devices.asset_id = assets.id
+        LEFT JOIN fuel_events
+            ON fuel_events.device_id = devices.id
+        LEFT JOIN alerts
+            ON alerts.fuel_event_id = fuel_events.id
+
+        GROUP BY
+            organizations.id,
+            organizations.name,
+            organizations.industry
+
+        ORDER BY organizations.name ASC
+        "#
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    let overview = rows
+        .into_iter()
+        .map(|row| OrganizationOverviewResponse {
+            organization_id: row.organization_id,
+            organization_name: row.organization_name,
+            industry: row.industry,
+            asset_count: row.asset_count.unwrap_or(0),
+            device_count: row.device_count.unwrap_or(0),
+            online_device_count: row.online_device_count.unwrap_or(0),
+            stale_device_count: row.stale_device_count.unwrap_or(0),
+            offline_device_count: row.offline_device_count.unwrap_or(0),
+            open_alert_count: row.open_alert_count.unwrap_or(0),
+        })
+        .collect();
+
+    Ok(overview)
+}
+
+pub async fn get_organization_fleet_overview(
+    db_pool: &PgPool,
+    organization_id: Uuid,
+) -> Result<Vec<OrganizationFleetOverviewResponse>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT
+            assets.id AS asset_id,
+            assets.name AS asset_name,
+            assets.asset_type AS asset_type,
+            assets.capacity_litres AS capacity_litres,
+
+            devices.id AS device_id,
+            devices.device_code AS device_code,
+            devices.status AS device_status,
+            devices.last_seen_at AS last_seen_at,
+
+            COUNT(DISTINCT sensors.id) AS sensor_count,
+
+            COALESCE(
+                ARRAY_AGG(DISTINCT sensors.sensor_type)
+                FILTER (WHERE sensors.sensor_type IS NOT NULL),
+                ARRAY[]::TEXT[]
+            ) AS sensor_types,
+
+            COUNT(DISTINCT alerts.id) FILTER (
+                WHERE alerts.status = 'OPEN'
+            ) AS open_alert_count
+
+        FROM assets
+
+        INNER JOIN devices
+            ON devices.asset_id = assets.id
+
+        LEFT JOIN sensors
+            ON sensors.device_id = devices.id
+
+        LEFT JOIN fuel_events
+            ON fuel_events.device_id = devices.id
+
+        LEFT JOIN alerts
+            ON alerts.fuel_event_id = fuel_events.id
+
+        WHERE assets.organization_id = $1
+
+        GROUP BY
+            assets.id,
+            assets.name,
+            assets.asset_type,
+            assets.capacity_litres,
+            devices.id,
+            devices.device_code,
+            devices.status,
+            devices.last_seen_at
+
+        ORDER BY
+            assets.name ASC,
+            devices.device_code ASC
+        "#,
+        organization_id
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    let overview = rows
+        .into_iter()
+        .map(|row| OrganizationFleetOverviewResponse {
+            asset_id: row.asset_id,
+            asset_name: row.asset_name,
+            asset_type: row.asset_type,
+            capacity_litres: row.capacity_litres,
+
+            device_id: row.device_id,
+            device_code: row.device_code,
+            device_status: row.device_status,
+            last_seen_at: row.last_seen_at,
+
+            sensor_count: row.sensor_count.unwrap_or(0),
+
+            sensor_types: row.sensor_types.unwrap_or_default(),
+
+            open_alert_count: row.open_alert_count.unwrap_or(0),
+        })
+        .collect();
+
+    Ok(overview)
 }

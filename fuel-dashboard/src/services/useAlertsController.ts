@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { fetchAlerts } from "../api/alertsApi";
 import { useAlertStore } from "../store/alertStore";
 import { useConnectionStore } from "../store/connectionStore";
+import { useFleetStore } from "../store/fleetStore";
 import { connectAlertsWebSocket } from "../websocket/alertsWebSocket";
 
 export function useAlertsController() {
@@ -17,9 +18,7 @@ export function useAlertsController() {
     (state) => state.setLastHeartbeatAt,
   );
 
-  const setHighlightedAlertId = useAlertStore(
-    (state) => state.setHighlightedAlertId,
-  );
+  const selectedDevice = useFleetStore((state) => state.selectedDevice);
 
   useEffect(() => {
     let socket: WebSocket | null = null;
@@ -30,6 +29,8 @@ export function useAlertsController() {
 
     let isUnmounted = false;
 
+    const selectedDeviceId = selectedDevice?.device_id;
+
     async function connectDashboardSocket() {
       if (isUnmounted) {
         return;
@@ -38,7 +39,7 @@ export function useAlertsController() {
       setStatus("connecting");
 
       try {
-        const alerts = await fetchAlerts();
+        const alerts = await fetchAlerts(selectedDevice?.device_id);
 
         setAlerts(alerts);
 
@@ -59,6 +60,13 @@ export function useAlertsController() {
             }
 
             if (message.type === "recovery_alert") {
+              if (
+                selectedDeviceId &&
+                message.data.device_id !== selectedDeviceId
+              ) {
+                return;
+              }
+
               addAlert(message.data);
 
               lastReceivedAt = message.data.created_at;
@@ -67,6 +75,13 @@ export function useAlertsController() {
             }
 
             if (message.type === "live_alert") {
+              if (
+                selectedDeviceId &&
+                message.data.device_id !== selectedDeviceId
+              ) {
+                return;
+              }
+
               addAlert(message.data);
 
               lastReceivedAt = message.data.created_at;
@@ -125,5 +140,6 @@ export function useAlertsController() {
     setLastHeartbeatAt,
     setStatus,
     updateAlertLifecycle,
+    selectedDevice,
   ]);
 }

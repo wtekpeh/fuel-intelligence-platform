@@ -4,7 +4,12 @@ export function ConnectionBadge() {
   const status = useConnectionStore((state) => state.status);
   const lastHeartbeatAt = useConnectionStore((state) => state.lastHeartbeatAt);
 
-  const statusLabel = status.toUpperCase();
+  const statusLabel =
+    status === "connected"
+      ? "BACKEND ONLINE"
+      : status === "connecting"
+        ? "BACKEND CONNECTING"
+        : "BACKEND OFFLINE";
 
   return (
     <div className={`connection-badge connection-badge--${status}`}>

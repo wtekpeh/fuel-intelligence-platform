@@ -1,10 +1,10 @@
 import { useAlertStore } from "../../store/alertStore";
-import { useConnectionStore } from "../../store/connectionStore";
 import { StatusCard } from "./StatusCard";
+import { useFleetStore } from "../../store/fleetStore";
 
 export function StatusGrid() {
   const alerts = useAlertStore((state) => state.alerts);
-  const connectionStatus = useConnectionStore((state) => state.status);
+  const selectedDevice = useFleetStore((state) => state.selectedDevice);
 
   const openAlerts = alerts.filter((alert) => alert.status === "OPEN").length;
 
@@ -16,20 +16,19 @@ export function StatusGrid() {
     (alert) => alert.status === "RESOLVED",
   ).length;
 
-  const connectionTone =
-    connectionStatus === "connected"
-      ? "good"
-      : connectionStatus === "connecting"
-        ? "warning"
-        : "danger";
-
   return (
     <section className="status-grid">
       <StatusCard
-        label="Connection"
-        value={connectionStatus}
-        hint="Live alert stream"
-        tone={connectionTone}
+        label="Device Status"
+        value={selectedDevice?.device_status ?? "UNKNOWN"}
+        hint={selectedDevice?.device_code ?? "No device selected"}
+        tone={
+          selectedDevice?.device_status === "ONLINE"
+            ? "good"
+            : selectedDevice?.device_status === "STALE"
+              ? "warning"
+              : "danger"
+        }
       />
 
       <StatusCard

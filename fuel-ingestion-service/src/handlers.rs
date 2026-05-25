@@ -1,6 +1,6 @@
 use crate::routes::AppState;
 use axum::{
-    extract::{Json, Path, State},
+    extract::{Json, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
 };
@@ -13,11 +13,11 @@ use crate::{
         ReadingBatch,
     },
     repository::{
-        acknowledge_alert, get_or_create_demo_sensor, get_recent_alerts,
-        get_recent_device_health_events, get_recent_device_state_events, get_recent_fuel_events,
-        get_recent_sensor_health_events, get_recent_telemetry_stream, mark_device_heartbeat_seen,
-        mark_device_payload_seen, refresh_device_statuses, resolve_alert,
-        save_fuel_reading_as_sensor_reading,
+        acknowledge_alert, get_or_create_demo_sensor, get_organization_fleet_overview,
+        get_organization_overview, get_recent_alerts, get_recent_device_health_events,
+        get_recent_device_state_events, get_recent_fuel_events, get_recent_sensor_health_events,
+        get_recent_telemetry_stream, mark_device_heartbeat_seen, mark_device_payload_seen,
+        refresh_device_statuses, resolve_alert, save_fuel_reading_as_sensor_reading,
     },
 };
 
@@ -103,10 +103,13 @@ pub async fn ingest_reading_batch(
     }
 }
 
-pub async fn list_recent_fuel_events(State(app_state): State<AppState>) -> impl IntoResponse {
+pub async fn list_recent_fuel_events(
+    State(app_state): State<AppState>,
+    Query(query): Query<crate::models::TelemetryQueryParams>,
+) -> impl IntoResponse {
     let db_pool = &app_state.db_pool;
 
-    match get_recent_fuel_events(db_pool, 50).await {
+    match get_recent_fuel_events(db_pool, 50, query.device_id).await {
         Ok(events) => (StatusCode::OK, Json(events)).into_response(),
         Err(err) => {
             eprintln!("Failed to fetch fuel events: {}", err);
@@ -191,10 +194,11 @@ pub async fn refresh_device_health(State(app_state): State<AppState>) -> impl In
 
 pub async fn list_recent_device_health_events(
     State(app_state): State<AppState>,
+    Query(query): Query<crate::models::TelemetryQueryParams>,
 ) -> impl IntoResponse {
     let db_pool = &app_state.db_pool;
 
-    match get_recent_device_health_events(db_pool, 50).await {
+    match get_recent_device_health_events(db_pool, 50, query.device_id).await {
         Ok(events) => (StatusCode::OK, Json(events)).into_response(),
 
         Err(err) => {
@@ -214,10 +218,11 @@ pub async fn list_recent_device_health_events(
 
 pub async fn list_recent_sensor_health_events(
     State(app_state): State<AppState>,
+    Query(query): Query<crate::models::TelemetryQueryParams>,
 ) -> impl IntoResponse {
     let db_pool = &app_state.db_pool;
 
-    match get_recent_sensor_health_events(db_pool, 50).await {
+    match get_recent_sensor_health_events(db_pool, 50, query.device_id).await {
         Ok(events) => (StatusCode::OK, Json(events)).into_response(),
 
         Err(err) => {
@@ -237,8 +242,9 @@ pub async fn list_recent_sensor_health_events(
 
 pub async fn list_device_state_events(
     State(app_state): State<AppState>,
+    Query(query): Query<crate::models::TelemetryQueryParams>,
 ) -> Result<Json<Vec<DeviceStateEventResponse>>, StatusCode> {
-    let events = get_recent_device_state_events(&app_state.db_pool, 100)
+    let events = get_recent_device_state_events(&app_state.db_pool, 100, query.device_id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -247,8 +253,9 @@ pub async fn list_device_state_events(
 
 pub async fn list_alerts(
     State(app_state): State<AppState>,
+    Query(query): Query<crate::models::AlertQueryParams>,
 ) -> Result<Json<Vec<AlertResponse>>, StatusCode> {
-    let alerts: Vec<AlertResponse> = get_recent_alerts(&app_state.db_pool)
+    let alerts: Vec<AlertResponse> = get_recent_alerts(&app_state.db_pool, query.device_id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -294,10 +301,32 @@ pub async fn resolve_alert_handler(
 
 pub async fn list_recent_telemetry_stream(
     State(app_state): State<AppState>,
+    Query(query): Query<crate::models::TelemetryQueryParams>,
 ) -> Result<Json<Vec<crate::models::TelemetryStreamResponse>>, StatusCode> {
-    let readings = get_recent_telemetry_stream(&app_state.db_pool)
+    let readings = get_recent_telemetry_stream(&app_state.db_pool, query.device_id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(readings))
+}
+
+pub async fn list_organization_overview(
+    State(app_state): State<AppState>,
+) -> Result<Json<Vec<crate::models::OrganizationOverviewResponse>>, StatusCode> {
+    let overview = get_organization_overview(&app_state.db_pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(overview))
+}
+
+pub async fn list_organization_fleet_overview(
+    State(app_state): State<AppState>,
+    Path(organization_id): Path<uuid::Uuid>,
+) -> Result<Json<Vec<crate::models::OrganizationFleetOverviewResponse>>, StatusCode> {
+    let overview = get_organization_fleet_overview(&app_state.db_pool, organization_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(overview))
 }

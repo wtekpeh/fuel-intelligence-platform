@@ -110,6 +110,7 @@ pub struct AlertResponse {
     pub is_acknowledged: bool,
     pub status: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
+    pub device_id: Option<uuid::Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -136,4 +137,53 @@ pub struct TelemetryStreamResponse {
 
     pub recorded_at: DateTime<Utc>,
     pub received_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OrganizationOverviewResponse {
+    pub organization_id: uuid::Uuid,
+
+    pub organization_name: String,
+
+    pub industry: Option<String>,
+
+    pub asset_count: i64,
+
+    pub device_count: i64,
+
+    pub online_device_count: i64,
+
+    pub stale_device_count: i64,
+
+    pub offline_device_count: i64,
+
+    pub open_alert_count: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OrganizationFleetOverviewResponse {
+    pub asset_id: uuid::Uuid,
+    pub asset_name: String,
+    pub asset_type: String,
+    pub capacity_litres: Option<f64>,
+
+    pub device_id: uuid::Uuid,
+    pub device_code: String,
+    pub device_status: String,
+    pub last_seen_at: Option<DateTime<Utc>>,
+
+    pub sensor_count: i64,
+    pub sensor_types: Vec<String>,
+
+    pub open_alert_count: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AlertQueryParams {
+    pub device_id: Option<uuid::Uuid>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TelemetryQueryParams {
+    pub device_id: Option<uuid::Uuid>,
 }

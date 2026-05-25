@@ -200,11 +200,138 @@ Manual refresh is still available for testing, but production does not depend on
 
 # Current API Endpoints
 
+## Organization Operational Overview
+
+````http
+GET /api/organizations/overview
+
+Returns operational organization summaries for the frontend landing page.
+
+Current response fields:
+
+organization_id
+organization_name
+industry
+asset_count
+device_count
+online_device_count
+stale_device_count
+offline_device_count
+open_alert_count
+
+Example response:
+
+[
+  {
+    "organization_name": "Demo Transport Company",
+    "industry": "Transport",
+    "asset_count": 1,
+    "device_count": 9,
+    "online_device_count": 1,
+    "offline_device_count": 8,
+    "open_alert_count": 17
+  }
+]
+
+This endpoint provides the operational landing-page foundation for:
+
+organizations
+→ assets
+→ devices
+→ operational status
+→ live dashboard access
+Platform Hierarchy
+
+Current operational hierarchy:
+
+Organization
+→ Assets
+→ Devices
+→ Sensors
+
+Example:
+
+Mining Company
+→ Excavator
+→ Fuel Monitoring Device
+→ Fuel Sensor / GPS / Vibration Sensor
+
+This structure enables:
+
+multi-company support
+fleet segmentation
+mining/construction deployments
+device grouping
+future role-based access control
+operational dashboard routing
+
+This is an important architectural milestone because the platform is now transitioning from:
+
+```text
+single operational dashboard
+
+to:
+
+multi-organization operational intelligence platform
+
+based on the existing backend hierarchy already present in the database.
+
 ## Batch Ingestion
 
 ```http
 POST /api/fuel-readings/batch
-```
+````
+
+## Organization Fleet Overview
+
+````http
+GET /api/organizations/{organization_id}/fleet-overview
+
+Returns the assets, devices, sensors, device status, and open alert counts for a selected organization.
+
+This endpoint powers the second-level frontend page after selecting an organization from the landing page.
+
+Current response fields:
+
+asset_id
+asset_name
+asset_type
+capacity_litres
+device_id
+device_code
+device_status
+last_seen_at
+sensor_count
+sensor_types
+open_alert_count
+
+Example response:
+
+[
+  {
+    "asset_name": "Demo Fuel Truck",
+    "asset_type": "truck",
+    "capacity_litres": 200.0,
+    "device_code": "DEV_CORR_TEST_004",
+    "device_status": "ONLINE",
+    "sensor_count": 1,
+    "sensor_types": ["fuel_level"],
+    "open_alert_count": 13
+  }
+]
+
+Frontend flow supported by this endpoint:
+
+Organization landing page
+→ select organization
+→ view fleet/assets/devices/sensors
+→ select device
+→ open operational dashboard
+
+This endpoint strengthens the platform structure by making the dashboard organization-aware and device-aware instead of being a single global screen.
+
+
+Your README already has the organization overview section, so this fleet overview belongs directly after it. :contentReference[oaicite:0]{index=0}
 
 ---
 
@@ -212,7 +339,7 @@ POST /api/fuel-readings/batch
 
 ```http
 GET /api/fuel-events
-```
+````
 
 Fuel event responses include:
 
@@ -224,6 +351,67 @@ Fuel event responses include:
   Returns recent operational events as JSON.
 
 ---
+
+## Device-Aware Operational Dashboard Filtering
+
+The platform now supports device-scoped operational dashboard routing.
+
+Previously, dashboard operational feeds were globally aggregated.
+
+The backend now supports optional `device_id` filtering across operational intelligence endpoints so that frontend dashboards can operate on a selected device context.
+
+Current supported filtered endpoints:
+
+```http
+GET /api/alerts?device_id={device_id}
+
+GET /api/fuel-readings/recent?device_id={device_id}
+
+GET /api/device-health-events?device_id={device_id}
+
+GET /api/fuel-events?device_id={device_id}
+
+GET /api/device-state-events?device_id={device_id}
+
+GET /api/sensor-health-events?device_id={device_id}
+```
+
+This enables the frontend hierarchy:
+
+```text
+Organization
+→ Fleet Overview
+→ Device Selection
+→ Device-Specific Operational Dashboard
+```
+
+This architectural step is important because the platform is transitioning from:
+
+```text
+single global telemetry dashboard
+
+to:
+
+multi-organization
+multi-fleet
+multi-device
+operational intelligence routing
+```
+
+The backend now supports isolated operational investigation per physical device.
+
+This foundation will support future features such as:
+
+- operational replay
+- investigation timelines
+- route reconstruction
+- forensic fuel analysis
+- predictive maintenance
+- sensor diagnostics
+- ML-assisted analytics
+- device-specific operational dashboards
+
+WebSocket live alert filtering is also now device-aware at the frontend layer using `device_id` carried in alert payloads.
 
 ---
 
