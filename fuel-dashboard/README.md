@@ -116,7 +116,7 @@ This architecture provides the frontend foundation for future features such as:
 
 The dashboard supports the current backend alert lifecycle:
 
-```text
+````text
 OPEN
 → ACKNOWLEDGED
 → RESOLVED
@@ -168,6 +168,102 @@ OFFLINE
 UNKNOWN
 Dashboard Sections
 
+## Investigation Intelligence
+
+The Investigation tab has evolved from a simple event list into an operational investigation and telemetry intelligence workflow.
+
+Current investigation capabilities include:
+
+- fuel event investigation timeline
+- clustered operational event grouping
+- operational risk scoring
+- correlated telemetry interpretation
+- investigation detail side panel
+- mobile investigation modal behavior
+- telemetry integrity interpretation
+- operational context explanation
+- alert-to-investigation navigation flow
+
+Current investigation feeds:
+
+```text
+fuel events
+device state events
+sensor health events
+
+Current investigation APIs:
+
+GET /api/fuel-events?device_id={device_id}
+
+GET /api/device-state-events?device_id={device_id}
+
+GET /api/sensor-health-events?device_id={device_id}
+
+The investigation system now groups operational telemetry into correlated investigation clusters.
+
+Examples:
+
+theft patterns during idle periods
+suspicious refill activity during movement
+sensor integrity anomalies during fuel events
+correlated operational movement patterns
+telemetry clock drift interpretation
+
+Current investigation intelligence features:
+
+Cluster Risk Scoring
+
+Clusters are currently classified as:
+
+LOW
+MEDIUM
+HIGH
+CRITICAL
+
+based on:
+
+fuel theft patterns
+refill patterns
+sensor health anomalies
+operational severity
+correlated telemetry activity
+Cluster Explanation Engine
+
+The dashboard now generates operator-friendly explanations for investigation clusters.
+
+Examples:
+
+Fuel theft behavior appears operationally consistent with surrounding movement telemetry.
+Sensor integrity anomalies detected during suspicious fuel activity.
+Potential conflicting fuel activity detected within the same operational window.
+Investigation Detail Panel
+
+The investigation detail panel now exposes:
+
+fuel before/after values
+fuel delta
+confidence scoring
+correlation status
+operational context
+telemetry timestamps
+intelligence detection timestamps
+delayed synchronization indicators
+telemetry clock drift warnings
+Cross-Dashboard Navigation
+
+Operations alerts now support direct navigation into Investigation workflows.
+
+Operational flow:
+
+Operations Alert
+→ View Investigation
+→ Investigation Tab
+→ Cluster Prioritization
+→ Highlighted Investigation Event
+→ Operational Context Review
+
+This creates a connected operational intelligence workflow instead of isolated dashboard sections
+
 Current sections:
 
 Operations
@@ -182,8 +278,14 @@ Device Health
 
 Planned:
 
-Investigation timeline replay
-Analytics charts and trends
+map intelligence
+route replay
+timeline replay controls
+advanced investigation filtering
+analytics charts and trends
+fleet-wide operational intelligence
+predictive operational scoring
+sensor adapter visualization
 Responsive Design
 
 The dashboard is designed for:
@@ -266,4 +368,4 @@ landing page
 → selected operational dashboard
 
 Then commit mentally that every time we add a major frontend capability, we update this README.
-```
+````

@@ -4,6 +4,7 @@ export type DashboardSection =
   | "operations"
   | "device-health"
   | "investigation"
+  | "map"
   | "analytics";
 
 interface DashboardSectionStore {

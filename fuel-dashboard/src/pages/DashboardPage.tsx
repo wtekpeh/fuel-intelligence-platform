@@ -10,6 +10,9 @@ import { DeviceHealthPanel } from "../components/device-health/DeviceHealthPanel
 import { DashboardTabs } from "../components/layout/DashboardTabs";
 import { useDashboardSectionStore } from "../store/dashboardSectionStore";
 import { SelectedDeviceStrip } from "../components/fleet/SelectedDeviceStrip";
+import { InvestigationPanel } from "../components/investigation/InvestigationPanel";
+import MapIntelligencePanel from "../components/map-intelligence/MapIntelligencePanel";
+import { useInvestigationData } from "../services/useInvestigationData";
 
 export function DashboardPage() {
   const activeSection = useDashboardSectionStore(
@@ -19,6 +22,7 @@ export function DashboardPage() {
   useAlertsController();
   useTelemetryPolling();
   useDeviceHealthPolling();
+  useInvestigationData();
 
   return (
     <main className="dashboard-page">
@@ -53,12 +57,9 @@ export function DashboardPage() {
 
       {activeSection === "device-health" && <DeviceHealthPanel />}
 
-      {activeSection === "investigation" && (
-        <section className="placeholder-panel">
-          <h2>Investigation</h2>
-          <p>Timeline replay and forensic review will be added here.</p>
-        </section>
-      )}
+      {activeSection === "investigation" && <InvestigationPanel />}
+
+      {activeSection === "map" && <MapIntelligencePanel />}
 
       {activeSection === "analytics" && (
         <section className="placeholder-panel">

@@ -1,5 +1,7 @@
 import { acknowledgeAlert, resolveAlert } from "../../api/alertsApi";
 import { useAlertStore } from "../../store/alertStore";
+import { useDashboardSectionStore } from "../../store/dashboardSectionStore";
+import { useInvestigationStore } from "../../store/investigationStore";
 
 export function AlertDetailsPanel() {
   const selectedAlert = useAlertStore((state) => state.selectedAlert);
@@ -9,6 +11,14 @@ export function AlertDetailsPanel() {
   );
 
   const setSelectedAlert = useAlertStore((state) => state.setSelectedAlert);
+
+  const setActiveSection = useDashboardSectionStore(
+    (state) => state.setActiveSection,
+  );
+
+  const setFocusedFuelEventId = useInvestigationStore(
+    (state) => state.setFocusedFuelEventId,
+  );
 
   if (!selectedAlert) {
     return (
@@ -103,6 +113,17 @@ export function AlertDetailsPanel() {
           disabled={selectedAlert.status === "RESOLVED"}
         >
           Resolve
+        </button>
+
+        <button
+          type="button"
+          className="alert-details__secondary-button"
+          onClick={() => {
+            setFocusedFuelEventId(selectedAlert.fuel_event_id);
+            setActiveSection("investigation");
+          }}
+        >
+          View Investigation
         </button>
       </div>
     </aside>

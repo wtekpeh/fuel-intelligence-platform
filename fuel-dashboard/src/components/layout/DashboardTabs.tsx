@@ -24,6 +24,11 @@ const sections: {
     description: "Timeline and forensic review",
   },
   {
+    key: "map",
+    label: "Map Intelligence",
+    description: "Spatial events and asset movement",
+  },
+  {
     key: "analytics",
     label: "Analytics",
     description: "Trends and intelligence summaries",
