@@ -367,3 +367,39 @@
   line-height: 1.5;
   font-size: 0.92rem;
 }
+
+.investigation-detail__map-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  min-height: 38px;
+  margin: 0.4rem 0 1rem;
+  padding: 0 1rem;
+  border: 1px solid rgba(56, 189, 248, 0.36);
+  border-radius: 999px;
+  background: rgba(14, 116, 144, 0.22);
+  color: #f8fafc;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.investigation-detail__map-button {
+  width: auto;
+  height: 36px;
+  padding: 0 0.85rem;
+  border: 1px solid rgba(56, 189, 248, 0.36);
+  border-radius: 999px;
+  background: rgba(14, 116, 144, 0.28);
+  color: #f8fafc;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.investigation-detail__map-button:hover {
+  border-color: rgba(56, 189, 248, 0.65);
+  background: rgba(14, 116, 144, 0.44);
+}

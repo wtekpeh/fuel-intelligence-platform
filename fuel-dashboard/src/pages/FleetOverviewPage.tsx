@@ -2,6 +2,8 @@ import { useFleetOverview } from "../services/useFleetOverview";
 import { useFleetStore } from "../store/fleetStore";
 import { useOrganizationStore } from "../store/organizationStore";
 import { useAppViewStore } from "../store/appViewStore";
+import FuelLevelGauge from "../components/shared/FuelLevelGauge";
+import { useTelemetryStore } from "../store/telemetryStore";
 
 import "../styles/fleet.css";
 
@@ -15,6 +17,8 @@ export function FleetOverviewPage() {
   const showDashboard = useAppViewStore((state) => state.showDashboard);
 
   const fleetItems = useFleetStore((state) => state.fleetItems);
+
+  const readings = useTelemetryStore((state) => state.readings);
 
   useFleetOverview(selectedOrganization?.organization_id ?? null);
 
@@ -78,6 +82,30 @@ export function FleetOverviewPage() {
                 <span key={sensorType}>{sensorType}</span>
               ))}
             </div>
+
+            {(() => {
+              const latestReading = readings.find(
+                (reading) => reading.device_id === item.device_id,
+              );
+
+              if (!latestReading) {
+                return (
+                  <div className="fleet-card__fuel-empty">
+                    <label>Fuel Gauge</label>
+                    <strong>No live fuel reading</strong>
+                  </div>
+                );
+              }
+
+              return (
+                <FuelLevelGauge
+                  value={latestReading.fuel_level_litres}
+                  maxValue={item.capacity_litres ?? 100}
+                  size="compact"
+                  label="Fuel"
+                />
+              );
+            })()}
 
             <button
               type="button"

@@ -112,6 +112,40 @@ This architecture provides the frontend foundation for future features such as:
 
 ---
 
+# Shared Operational State Architecture
+
+The frontend now uses application-scoped operational orchestration for:
+
+```text
+telemetry
+investigation intelligence
+alerts
+selected operational device
+```
+
+This prevents duplicated polling and ensures all operational surfaces share synchronized live state.
+
+Current shared operational surfaces:
+
+```text
+Dashboard
+Fleet Overview
+Map Intelligence
+Investigation
+```
+
+This architecture enables:
+
+- synchronized operational investigation workflows
+- future route replay
+- future telemetry replay
+- fleet-wide operational intelligence
+- spatial investigation workflows
+- future geofence intelligence
+- future operational heatmaps
+
+---
+
 ## Alert Workflow
 
 The dashboard supports the current backend alert lifecycle:
@@ -278,15 +312,112 @@ Device Health
 
 Planned:
 
-map intelligence
-route replay
-timeline replay controls
-advanced investigation filtering
-analytics charts and trends
-fleet-wide operational intelligence
-predictive operational scoring
-sensor adapter visualization
+Planned Phase 2 Features:
+
+- route replay
+- breadcrumb trail rendering
+- replay timeline controls
+- animated telemetry playback
+- investigation hotspot clustering
+- geofence overlays
+- operational heatmaps
+- theft corridor analysis
+- live route streaming
+- multi-device fleet rendering
+- fleet replay intelligence
+- advanced investigation filtering
+- analytics charts and trends
+- predictive operational scoring
+- sensor adapter visualization
 Responsive Design
+
+---
+
+# Map Intelligence Phase 1
+
+The platform now includes a dedicated Map Intelligence operational surface.
+
+The Map Intelligence system is integrated directly into the operational dashboard architecture and shares the same device-scoped telemetry and investigation state used across the platform.
+
+Current Map Intelligence capabilities include:
+
+- live selected-device spatial rendering
+- telemetry-driven device positioning
+- investigation event spatial overlays
+- investigation-to-map synchronization
+- map-to-investigation synchronization
+- live fuel telemetry gauge
+- operational telemetry side intelligence panel
+- responsive operational map workspace
+
+Current map intelligence workflow:
+
+```text
+Operations Alert
+→ View Investigation
+→ Investigation Detail
+→ View on Map
+→ Map Intelligence
+→ Automatic Fly-To Investigation Event
+→ Focused Event Popup
+```
+
+## Current Map Intelligence Features
+
+### Operational Map Surface
+
+The operational map currently supports:
+
+- OpenStreetMap rendering
+- selected device tracking
+- investigation event overlays
+- investigation event focus synchronization
+- telemetry-driven operational positioning
+- live operational telemetry side panel
+
+### Investigation Spatial Synchronization
+
+Current synchronization behavior:
+
+```text
+Investigation Selection
+→ selectedTimelineItem updates
+→ MapFocusController reacts
+→ map flies to event
+→ focused marker enlarges
+→ popup opens automatically
+```
+
+### Reusable Telemetry Widgets
+
+Reusable telemetry widgets are now shared across:
+
+```text
+Fleet Overview
+Map Intelligence
+```
+
+Current reusable telemetry widgets:
+
+- FuelLevelGauge
+
+### Current Frontend Map Structure
+
+```text
+src/components/map-intelligence/
+├── MapIntelligencePanel.tsx
+├── OperationalMap.tsx
+├── DeviceMarkerLayer.tsx
+├── InvestigationEventLayer.tsx
+├── MapFocusController.tsx
+```
+
+Shared telemetry widget structure:
+
+```text
+src/components/shared/
+└── FuelLevelGauge.tsx
+```
 
 The dashboard is designed for:
 

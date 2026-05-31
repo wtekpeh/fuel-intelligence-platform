@@ -4,6 +4,7 @@ import type {
   FuelEvent,
   SensorHealthEvent,
 } from "../../types";
+import { useDashboardSectionStore } from "../../store/dashboardSectionStore";
 
 function FuelEventDetails({ event }: { event: FuelEvent }) {
   const telemetryTime = new Date(event.event_time);
@@ -155,6 +156,14 @@ export function InvestigationDetailPanel() {
     (state) => state.clearSelectedTimelineItem,
   );
 
+  const setActiveSection = useDashboardSectionStore(
+    (state) => state.setActiveSection,
+  );
+
+  function handleViewOnMap() {
+    setActiveSection("map");
+  }
+
   if (!selectedTimelineItem) {
     return null;
   }
@@ -173,6 +182,16 @@ export function InvestigationDetailPanel() {
       </div>
 
       <p>{selectedTimelineItem.subtitle}</p>
+
+      {selectedTimelineItem.type === "fuel_event" && (
+        <button
+          type="button"
+          className="investigation-detail__map-button"
+          onClick={handleViewOnMap}
+        >
+          View on Map
+        </button>
+      )}
 
       {selectedTimelineItem.type === "fuel_event" && (
         <FuelEventDetails event={selectedTimelineItem.raw as FuelEvent} />

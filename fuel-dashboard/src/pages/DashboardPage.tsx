@@ -3,7 +3,6 @@ import { StatusGrid } from "../components/status/StatusGrid";
 import { AlertTable } from "../components/alerts/AlertTable";
 import { AlertDetailsPanel } from "../components/alerts/AlertDetailsPanel";
 import { ConnectionBadge } from "../components/websocket/ConnectionBadge";
-import { useTelemetryPolling } from "../services/useTelemetryPolling";
 import { TelemetryStreamPanel } from "../components/telemetry/TelemetryStreamPanel";
 import { useDeviceHealthPolling } from "../services/useDeviceHealthPolling";
 import { DeviceHealthPanel } from "../components/device-health/DeviceHealthPanel";
@@ -20,7 +19,6 @@ export function DashboardPage() {
   );
 
   useAlertsController();
-  useTelemetryPolling();
   useDeviceHealthPolling();
   useInvestigationData();
 

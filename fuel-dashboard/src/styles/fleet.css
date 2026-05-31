@@ -231,3 +231,35 @@
     align-items: flex-start;
   }
 }
+
+.fleet-card .fuel-level-gauge {
+  width: 100%;
+  margin-top: 18px;
+  padding: 0.8rem;
+}
+
+.fleet-card .fuel-level-gauge p {
+  margin-bottom: 0.35rem;
+}
+
+.fleet-card__fuel-empty {
+  margin-top: 18px;
+  padding: 0.85rem;
+  border-radius: 16px;
+  background: rgba(2, 6, 23, 0.42);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.fleet-card__fuel-empty label {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: #64748b;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.fleet-card__fuel-empty strong {
+  color: #94a3b8;
+  font-size: 0.88rem;
+}
