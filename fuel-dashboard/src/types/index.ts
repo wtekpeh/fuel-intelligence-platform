@@ -4,3 +4,4 @@ export * from "./deviceHealth";
 export * from "./organization";
 export * from "./fleet";
 export * from "./investigation";
+export * from "./geofence";

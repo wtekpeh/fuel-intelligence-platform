@@ -4,6 +4,7 @@ import { useMap } from "react-leaflet";
 import { useFleetStore } from "../../store/fleetStore";
 import { useInvestigationStore } from "../../store/investigationStore";
 import { useTelemetryStore } from "../../store/telemetryStore";
+import { useGeofenceDrawStore } from "../../store/geofenceDrawStore";
 import type { FuelEvent } from "../../types";
 
 function MapFocusController() {
@@ -11,6 +12,7 @@ function MapFocusController() {
 
   const selectedDevice = useFleetStore((state) => state.selectedDevice);
   const readings = useTelemetryStore((state) => state.readings);
+  const isDrawing = useGeofenceDrawStore((state) => state.isDrawing);
 
   const selectedTimelineItem = useInvestigationStore(
     (state) => state.selectedTimelineItem,
@@ -23,6 +25,7 @@ function MapFocusController() {
 
   useEffect(() => {
     if (
+      isDrawing ||
       !selectedFuelEvent ||
       selectedFuelEvent.latitude === null ||
       selectedFuelEvent.longitude === null
@@ -30,13 +33,13 @@ function MapFocusController() {
       return;
     }
 
-    map.flyTo([selectedFuelEvent.latitude, selectedFuelEvent.longitude], 16, {
+    map.flyTo([selectedFuelEvent.latitude, selectedFuelEvent.longitude], 18, {
       duration: 1.2,
     });
-  }, [selectedFuelEvent, map]);
+  }, [isDrawing, selectedFuelEvent, map]);
 
   useEffect(() => {
-    if (!selectedDevice || selectedFuelEvent) {
+    if (isDrawing || !selectedDevice || selectedFuelEvent) {
       return;
     }
 
@@ -54,12 +57,12 @@ function MapFocusController() {
 
     map.flyTo(
       [selectedDeviceReading.latitude, selectedDeviceReading.longitude],
-      13,
+      15,
       {
         duration: 1.2,
       },
     );
-  }, [map, readings, selectedDevice, selectedFuelEvent]);
+  }, [isDrawing, map, readings, selectedDevice, selectedFuelEvent]);
 
   return null;
 }

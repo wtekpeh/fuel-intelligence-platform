@@ -5,9 +5,10 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::models::{
-    AlertAcknowledgementResponse, AlertResponse, DeviceHealthEventResponse,
-    DeviceStateEventResponse, FuelEventResponse, FuelReading, OrganizationFleetOverviewResponse,
-    OrganizationOverviewResponse, SensorHealthEventResponse, TelemetryStreamResponse,
+    AlertAcknowledgementResponse, AlertResponse, CreateGeofenceRequest, DeviceHealthEventResponse,
+    DeviceStateEventResponse, FuelEventResponse, FuelReading, Geofence,
+    OrganizationFleetOverviewResponse, OrganizationOverviewResponse, SensorHealthEventResponse,
+    TelemetryStreamResponse,
 };
 use crate::services::device_health::classify_device_status;
 use crate::services::device_state::{
@@ -1431,4 +1432,78 @@ pub async fn get_organization_fleet_overview(
         .collect();
 
     Ok(overview)
+}
+
+pub async fn create_geofence(
+    pool: &sqlx::PgPool,
+    payload: CreateGeofenceRequest,
+) -> Result<Geofence, sqlx::Error> {
+    let geofence = sqlx::query_as::<_, Geofence>(
+        r#"
+        INSERT INTO geofences (
+            id,
+            organization_id,
+            name,
+            geofence_type,
+            geometry,
+            is_active
+        )
+        VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            ST_SetSRID(
+                ST_GeomFromGeoJSON($5),
+                4326
+            ),
+            TRUE
+        )
+        RETURNING
+            id,
+            organization_id,
+            name,
+            geofence_type,
+            ST_AsGeoJSON(geometry)::json AS geojson,
+            is_active,
+            created_at,
+            updated_at
+        "#,
+    )
+    .bind(uuid::Uuid::new_v4())
+    .bind(payload.organization_id)
+    .bind(payload.name)
+    .bind(payload.geofence_type)
+    .bind(payload.geojson.to_string())
+    .fetch_one(pool)
+    .await?;
+
+    Ok(geofence)
+}
+
+pub async fn list_geofences(
+    pool: &sqlx::PgPool,
+    organization_id: uuid::Uuid,
+) -> Result<Vec<Geofence>, sqlx::Error> {
+    let geofences = sqlx::query_as::<_, Geofence>(
+        r#"
+        SELECT
+            id,
+            organization_id,
+            name,
+            geofence_type,
+            ST_AsGeoJSON(geometry)::json AS geojson,
+            is_active,
+            created_at,
+            updated_at
+        FROM geofences
+        WHERE organization_id = $1
+        ORDER BY created_at DESC
+        "#,
+    )
+    .bind(organization_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(geofences)
 }

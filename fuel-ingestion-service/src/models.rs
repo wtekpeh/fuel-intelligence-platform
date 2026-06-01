@@ -187,3 +187,23 @@ pub struct AlertQueryParams {
 pub struct TelemetryQueryParams {
     pub device_id: Option<uuid::Uuid>,
 }
+
+#[derive(Debug, serde::Serialize, sqlx::FromRow)]
+pub struct Geofence {
+    pub id: uuid::Uuid,
+    pub organization_id: uuid::Uuid,
+    pub name: String,
+    pub geofence_type: String,
+    pub geojson: serde_json::Value,
+    pub is_active: bool,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct CreateGeofenceRequest {
+    pub organization_id: uuid::Uuid,
+    pub name: String,
+    pub geofence_type: String,
+    pub geojson: serde_json::Value,
+}

@@ -2,6 +2,12 @@ import { MapContainer, TileLayer } from "react-leaflet";
 import DeviceMarkerLayer from "./DeviceMarkerLayer";
 import MapFocusController from "./MapFocusController";
 import InvestigationEventLayer from "./InvestigationEventLayer";
+import TelemetryRouteLayer from "./TelemetryRouteLayer";
+import ReplayPlaybackController from "./ReplayPlaybackController";
+import ReplayMarkerLayer from "./ReplayMarkerLayer";
+import ReplayCameraController from "./ReplayCameraController";
+import GeofenceLayer from "./GeofenceLayer";
+import GeofenceDrawControl from "./GeofenceDrawControl";
 
 function OperationalMap() {
   return (
@@ -17,11 +23,23 @@ function OperationalMap() {
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
+        <GeofenceLayer />
+
+        <TelemetryRouteLayer />
+
+        <ReplayMarkerLayer />
+
         <DeviceMarkerLayer />
 
         <InvestigationEventLayer />
 
         <MapFocusController />
+
+        <ReplayCameraController />
+
+        <ReplayPlaybackController />
+
+        <GeofenceDrawControl />
       </MapContainer>
     </div>
   );

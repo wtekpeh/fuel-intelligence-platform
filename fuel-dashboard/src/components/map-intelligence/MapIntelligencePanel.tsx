@@ -1,8 +1,12 @@
 import OperationalMap from "./OperationalMap";
 import FuelLevelGauge from "../shared/FuelLevelGauge";
+import ReplayControls from "./ReplayControls";
+import ReplayStatusCard from "./ReplayStatusCard";
+import GeofenceStatusCard from "./GeofenceStatusCard";
 
 import { useFleetStore } from "../../store/fleetStore";
 import { useTelemetryStore } from "../../store/telemetryStore";
+import GeofenceCreationCard from "./GeofenceCreationCard";
 
 function MapIntelligencePanel() {
   const selectedDevice = useFleetStore((state) => state.selectedDevice);
@@ -12,6 +16,7 @@ function MapIntelligencePanel() {
   const selectedDeviceReading = readings.find(
     (reading) => reading.device_id === selectedDevice?.device_id,
   );
+
   return (
     <section className="map-intelligence-panel">
       <div className="map-intelligence-panel__header">
@@ -28,6 +33,12 @@ function MapIntelligencePanel() {
         </div>
 
         <aside className="map-intelligence-workspace__side">
+          <ReplayControls />
+
+          <ReplayStatusCard />
+
+          <GeofenceStatusCard />
+
           {selectedDeviceReading ? (
             <>
               <FuelLevelGauge
@@ -60,6 +71,15 @@ function MapIntelligencePanel() {
                   {selectedDeviceReading.vibration_level ?? "N/A"}
                 </strong>
               </div>
+
+              <div className="map-live-card">
+                <label>Route Context</label>
+                <strong>Recent Telemetry Path</strong>
+                <span>
+                  Path is reconstructed from the latest telemetry readings for
+                  this selected device.
+                </span>
+              </div>
             </>
           ) : (
             <div className="map-live-card">
@@ -69,6 +89,8 @@ function MapIntelligencePanel() {
           )}
         </aside>
       </div>
+
+      <GeofenceCreationCard />
     </section>
   );
 }

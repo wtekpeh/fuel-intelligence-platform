@@ -5,16 +5,52 @@ import type { CircleMarker as LeafletCircleMarker } from "leaflet";
 import { useInvestigationStore } from "../../store/investigationStore";
 import type { FuelEvent } from "../../types";
 
-function getFuelEventPathOptions(severity: string, isFocused: boolean) {
+function getFuelEventPathOptions(
+  severity: string,
+  isFocused: boolean,
+  eventType: string,
+) {
   const normalizedSeverity = severity.toLowerCase();
 
+  const normalizedEventType = eventType.toLowerCase();
+
   if (isFocused) {
+    if (normalizedEventType.includes("theft")) {
+      return {
+        color: "#ef4444",
+        fillColor: "#ef4444",
+        fillOpacity: 0.95,
+        opacity: 1,
+        weight: 5,
+      };
+    }
+
+    if (normalizedEventType.includes("refill")) {
+      return {
+        color: "#22c55e",
+        fillColor: "#22c55e",
+        fillOpacity: 0.95,
+        opacity: 1,
+        weight: 5,
+      };
+    }
+
+    if (normalizedEventType.includes("leak")) {
+      return {
+        color: "#f59e0b",
+        fillColor: "#f59e0b",
+        fillOpacity: 0.95,
+        opacity: 1,
+        weight: 5,
+      };
+    }
+
     return {
       color: "#38bdf8",
       fillColor: "#38bdf8",
-      fillOpacity: 0.85,
+      fillOpacity: 0.9,
       opacity: 1,
-      weight: 4,
+      weight: 5,
     };
   }
 
@@ -49,7 +85,7 @@ function getFuelEventPathOptions(severity: string, isFocused: boolean) {
 
 function getFuelEventRadius(severity: string, isFocused: boolean) {
   if (isFocused) {
-    return 18;
+    return 20;
   }
 
   const normalizedSeverity = severity.toLowerCase();
@@ -113,7 +149,11 @@ function FuelEventMarker({
       ref={markerRef}
       center={[event.latitude, event.longitude]}
       radius={getFuelEventRadius(event.severity, isFocused)}
-      pathOptions={getFuelEventPathOptions(event.severity, isFocused)}
+      pathOptions={getFuelEventPathOptions(
+        event.severity,
+        isFocused,
+        event.event_type,
+      )}
       eventHandlers={{
         click: () => onSelect(event),
       }}

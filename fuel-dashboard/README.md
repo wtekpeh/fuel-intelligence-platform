@@ -150,7 +150,7 @@ This architecture enables:
 
 The dashboard supports the current backend alert lifecycle:
 
-````text
+`````text
 OPEN
 → ACKNOWLEDGED
 → RESOLVED
@@ -305,21 +305,19 @@ Device Health
 Investigation
 Analytics
 
-Implemented:
+Implemented Dashboard Sections:
 
-Operations
-Device Health
-
-Planned:
+- Operations
+- Device Health
+- Investigation
+- Map Intelligence
+- Replay Intelligence
+- Fleet Overview Operational Telemetry
 
 Planned Phase 2 Features:
 
-- route replay
-- breadcrumb trail rendering
-- replay timeline controls
 - animated telemetry playback
 - investigation hotspot clustering
-- geofence overlays
 - operational heatmaps
 - theft corridor analysis
 - live route streaming
@@ -417,7 +415,77 @@ Shared telemetry widget structure:
 ```text
 src/components/shared/
 └── FuelLevelGauge.tsx
+````md
+Replay intelligence structure:
+
+```text
+src/components/map-intelligence/
+├── ReplayControls.tsx
+├── ReplayStatusCard.tsx
+├── ReplayMarkerLayer.tsx
+├── ReplayPlaybackController.tsx
+├── ReplayCameraController.tsx
+
+Current replay intelligence capabilities:
+
+replay playback controls
+replay speed control
+replay scrubbing
+replay camera follow
+replay telemetry trail progression
+replay breadcrumb intelligence
+replay event correlation
+automatic replay pause on correlated events
+replay investigation synchronization
+geofence-aware replay context
+
+````md
+### Geofence Intelligence Foundation
+
+Current frontend geofence rendering is a temporary operational visualization layer used to validate:
+
+- polygon rendering
+- replay geofence awareness
+- operational zone visualization
+- geofence UX behavior
+
+Current geofence capabilities:
+
+- operational polygon overlays
+- replay-aware geofence status
+- current telemetry geofence awareness
+- operational zone status cards
+
+Current geofence architecture direction:
+
+```text
+PostgreSQL + PostGIS
+→ Rust geofence APIs
+→ GeoJSON frontend delivery
+→ Leaflet polygon rendering
+→ backend spatial intelligence
 ```
+
+Planned geofence intelligence capabilities:
+
+- depot zones
+- fueling station zones
+- restricted operational zones
+- safe corridors
+- route-risk analysis
+- dwell-zone detection
+- theft outside safe-zone detection
+- refill-inside-fueling-zone intelligence
+
+Important coordinate rule:
+
+```text
+Leaflet uses latitude, longitude
+PostGIS uses longitude, latitude
+```
+---
+
+# Responsive Design
 
 The dashboard is designed for:
 
@@ -466,6 +534,19 @@ mobile alert cards
 alert detail panel
 acknowledge/resolve actions
 device health tab
+map intelligence operational workspace
+telemetry route rendering
+breadcrumb telemetry progression
+replay playback engine
+replay scrubbing
+replay investigation correlation
+replay camera follow
+replay forensic pause workflow
+geofence rendering foundation
+geofence replay awareness
+reusable telemetry widgets
+fuel telemetry gauges
+fleet operational telemetry widgets
 
 Pending:
 
@@ -473,8 +554,6 @@ landing page / company overview
 company/device/sensor selection
 alert filters
 investigation timeline
-event replay
-map view
 analytics charts
 authentication
 Capacitor Android/iOS packaging
@@ -499,4 +578,4 @@ landing page
 → selected operational dashboard
 
 Then commit mentally that every time we add a major frontend capability, we update this README.
-````
+`````

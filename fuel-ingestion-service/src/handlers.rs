@@ -9,15 +9,16 @@ use crate::services::fuel_detection::{detect_fuel_event, detect_possible_leak};
 use crate::services::sensor_health::detect_frozen_fuel_sensor;
 use crate::{
     models::{
-        AlertResponse, ApiResponse, DeviceStateEventResponse, HeartbeatRequest, HeartbeatResponse,
-        ReadingBatch,
+        AlertResponse, ApiResponse, CreateGeofenceRequest, DeviceStateEventResponse,
+        HeartbeatRequest, HeartbeatResponse, ReadingBatch,
     },
     repository::{
-        acknowledge_alert, get_or_create_demo_sensor, get_organization_fleet_overview,
-        get_organization_overview, get_recent_alerts, get_recent_device_health_events,
-        get_recent_device_state_events, get_recent_fuel_events, get_recent_sensor_health_events,
-        get_recent_telemetry_stream, mark_device_heartbeat_seen, mark_device_payload_seen,
-        refresh_device_statuses, resolve_alert, save_fuel_reading_as_sensor_reading,
+        acknowledge_alert, create_geofence, get_or_create_demo_sensor,
+        get_organization_fleet_overview, get_organization_overview, get_recent_alerts,
+        get_recent_device_health_events, get_recent_device_state_events, get_recent_fuel_events,
+        get_recent_sensor_health_events, get_recent_telemetry_stream, list_geofences,
+        mark_device_heartbeat_seen, mark_device_payload_seen, refresh_device_statuses,
+        resolve_alert, save_fuel_reading_as_sensor_reading,
     },
 };
 
@@ -329,4 +330,52 @@ pub async fn list_organization_fleet_overview(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(overview))
+}
+
+pub async fn create_geofence_handler(
+    State(app_state): State<AppState>,
+    Json(payload): Json<CreateGeofenceRequest>,
+) -> impl IntoResponse {
+    let db_pool = &app_state.db_pool;
+
+    match create_geofence(db_pool, payload).await {
+        Ok(geofence) => (StatusCode::CREATED, Json(geofence)).into_response(),
+
+        Err(err) => {
+            eprintln!("Failed to create geofence: {}", err);
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "success": false,
+                    "message": "Failed to create geofence"
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+pub async fn list_geofences_handler(
+    State(app_state): State<AppState>,
+    Path(organization_id): Path<uuid::Uuid>,
+) -> impl IntoResponse {
+    let db_pool = &app_state.db_pool;
+
+    match list_geofences(db_pool, organization_id).await {
+        Ok(geofences) => (StatusCode::OK, Json(geofences)).into_response(),
+
+        Err(err) => {
+            eprintln!("Failed to fetch geofences: {}", err);
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "success": false,
+                    "message": "Failed to fetch geofences"
+                })),
+            )
+                .into_response()
+        }
+    }
 }
