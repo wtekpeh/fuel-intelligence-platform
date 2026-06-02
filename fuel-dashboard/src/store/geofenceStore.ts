@@ -1,8 +1,16 @@
 import { create } from "zustand";
 
-import { createGeofence, listGeofences } from "../api/geofenceApi";
+import {
+  createGeofence,
+  listGeofences,
+  checkPositionAgainstGeofences,
+} from "../api/geofenceApi";
 
-import type { CreateGeofencePayload, Geofence } from "../types";
+import type {
+  CreateGeofencePayload,
+  Geofence,
+  CheckPositionResponse,
+} from "../types";
 
 interface GeofenceStore {
   geofences: Geofence[];
@@ -14,6 +22,15 @@ interface GeofenceStore {
   loadGeofences: (organizationId: string) => Promise<void>;
 
   createGeofenceRecord: (payload: CreateGeofencePayload) => Promise<void>;
+
+  positionStatus: CheckPositionResponse | null;
+
+  checkCurrentPosition: (
+    organizationId: string,
+    deviceId: string,
+    latitude: number,
+    longitude: number,
+  ) => Promise<void>;
 }
 
 export const useGeofenceStore = create<GeofenceStore>((set) => ({
@@ -22,6 +39,8 @@ export const useGeofenceStore = create<GeofenceStore>((set) => ({
   loading: false,
 
   error: null,
+
+  positionStatus: null,
 
   loadGeofences: async (organizationId: string) => {
     try {
@@ -66,6 +85,28 @@ export const useGeofenceStore = create<GeofenceStore>((set) => ({
         loading: false,
         error: "Failed to create geofence",
       });
+    }
+  },
+
+  checkCurrentPosition: async (
+    organizationId,
+    deviceId,
+    latitude,
+    longitude,
+  ) => {
+    try {
+      const response = await checkPositionAgainstGeofences({
+        organization_id: organizationId,
+        device_id: deviceId,
+        latitude,
+        longitude,
+      });
+
+      set({
+        positionStatus: response,
+      });
+    } catch (error) {
+      console.error("Failed to check position against geofences", error);
     }
   },
 }));

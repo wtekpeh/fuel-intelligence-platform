@@ -440,31 +440,45 @@ replay investigation synchronization
 geofence-aware replay context
 
 ````md
-### Geofence Intelligence Foundation
+### Spatial Intelligence & Geofence Operations
 
-Current frontend geofence rendering is a temporary operational visualization layer used to validate:
+Current spatial intelligence capabilities:
 
-- polygon rendering
-- replay geofence awareness
-- operational zone visualization
-- geofence UX behavior
+- PostGIS-backed geofence persistence
+- operational polygon drawing tools
+- draw-to-save geofence workflow
+- backend GeoJSON delivery
+- replay-aware geofence intelligence
+- telemetry-aware geofence status
+- live PostGIS ST_Contains spatial checks
+- operational zone overlays
+- device-aware geofence assignment foundation
+- replay spatial synchronization
+- operational map workspace controls
 
-Current geofence capabilities:
+Current spatial intelligence architecture:
 
-- operational polygon overlays
-- replay-aware geofence status
-- current telemetry geofence awareness
-- operational zone status cards
+Leaflet Draw Tools
+→ GeoJSON extraction
+→ Zustand draw orchestration
+→ Rust geofence APIs
+→ PostgreSQL + PostGIS persistence
+→ backend ST_Contains intelligence
+→ device-aware geofence filtering
+→ replay-aware spatial intelligence
+→ operational investigation workflows
 
-Current geofence architecture direction:
+````md
+### Current Operational Geofence Workflow
 
 ```text
-PostgreSQL + PostGIS
-→ Rust geofence APIs
-→ GeoJSON frontend delivery
-→ Leaflet polygon rendering
-→ backend spatial intelligence
-```
+draw operational zone
+→ modal metadata workflow
+→ backend persistence
+→ PostGIS geometry storage
+→ telemetry position checks
+→ replay-aware zone intelligence
+→ operational geofence status
 
 Planned geofence intelligence capabilities:
 
@@ -476,6 +490,14 @@ Planned geofence intelligence capabilities:
 - dwell-zone detection
 - theft outside safe-zone detection
 - refill-inside-fueling-zone intelligence
+- depot entry/exit intelligence
+- restricted-zone alerts
+- dwell detection
+- route corridor violations
+- operational hotspot analysis
+- replay spatial investigations
+- zone transition intelligence
+- unauthorized fueling detection
 
 Important coordinate rule:
 
@@ -484,6 +506,16 @@ Leaflet uses latitude, longitude
 PostGIS uses longitude, latitude
 ```
 ---
+
+Operational draw behavior:
+
+```text
+drawing mode
+→ replay pauses
+→ camera follow pauses
+→ map focus synchronization pauses
+→ operational workspace stabilizes
+```
 
 # Responsive Design
 

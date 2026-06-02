@@ -27,3 +27,21 @@ export interface CreateGeofencePayload {
   geofence_type: GeofenceType;
   geojson: GeoJsonPolygon;
 }
+
+export interface CheckPositionPayload {
+  organization_id: string;
+  device_id: string;
+  latitude: number;
+  longitude: number;
+}
+
+export interface GeofencePositionMatch {
+  geofence_id: string;
+  geofence_name: string;
+  geofence_type: string;
+}
+
+export interface CheckPositionResponse {
+  inside_geofence: boolean;
+  matched_geofences: GeofencePositionMatch[];
+}

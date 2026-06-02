@@ -12,6 +12,9 @@ It is responsible for:
 - detecting operational fuel events
 - supporting offline-safe synchronization
 - exposing operational intelligence through APIs
+- geospatial operational intelligence
+- PostGIS spatial investigation support
+- operational geofence intelligence
 
 The system is designed primarily for African deployment environments where:
 
@@ -148,6 +151,100 @@ Implemented:
 - event correlation suppression
 - timeline reconstruction
 - delayed-event handling
+
+## Spatial Intelligence Layer
+
+The backend now includes a PostGIS-backed spatial intelligence layer.
+
+Current spatial intelligence capabilities:
+
+- PostGIS polygon persistence
+- GeoJSON operational geofence APIs
+- telemetry position spatial checks
+- replay-aware spatial intelligence
+- operational zone intelligence
+- backend ST_Contains geofence checks
+- device-aware geofence assignment foundation
+
+Current spatial intelligence workflow:
+
+```text
+Leaflet Draw
+→ GeoJSON payload
+→ Rust geofence APIs
+→ PostgreSQL + PostGIS geometry storage
+→ ST_Contains spatial intelligence
+→ replay-aware operational investigation
+```
+
+Current geofence APIs:
+
+```http
+POST /api/geofences
+
+GET /api/geofences/{organization_id}
+
+POST /api/geofences/check-position
+```
+
+Current geofence types:
+
+```text
+DEPOT
+FUELING_STATION
+RESTRICTED_ZONE
+SAFE_CORRIDOR
+CUSTOMER_SITE
+```
+
+Current spatial intelligence capabilities include:
+
+- live telemetry geofence awareness
+- replay geofence analysis
+- operational zone status evaluation
+- backend spatial filtering
+- organization-wide geofence intelligence
+
+Current architecture foundation:
+
+```text
+geofences
+→ operational zone geometry
+
+geofence_device_assignments
+→ optional per-device inclusion/exclusion
+```
+
+Current spatial intelligence query foundation uses:
+
+```sql
+ST_Contains(
+  geometry,
+  ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)
+)
+```
+
+Important coordinate rule:
+
+```text
+PostGIS:
+longitude, latitude
+
+Leaflet:
+latitude, longitude
+```
+
+Planned spatial intelligence capabilities:
+
+- depot entry/exit events
+- restricted-zone alerts
+- dwell detection
+- route corridor analysis
+- unauthorized fueling detection
+- theft outside depot intelligence
+- replay spatial investigation workflows
+- operational hotspot analysis
+- future route-risk intelligence
 
 ---
 
@@ -1030,11 +1127,17 @@ Device / Simulator
     ├── GPS Telemetry
     ├── Vibration Telemetry
     └── Motion Telemetry
+    ├── Spatial Intelligence Layer
+
+
 → Operational Intelligence Layer
     ├── Fuel Event Detection
     ├── Device Health Intelligence
     ├── Sensor Health Intelligence
     └── Device State Engine
+    ├── Geofence Intelligence
+    ├── PostGIS Spatial Checks
+    └── Replay Spatial Investigation
 ````
 
 → Live Distribution Layer
@@ -1082,6 +1185,14 @@ Implemented:
 - event-driven live alert streaming
 - heartbeat keepalive support
 - WebSocket operational feeds
+- PostGIS spatial intelligence layer
+- GeoJSON geofence APIs
+- backend geofence persistence
+- operational polygon intelligence
+- ST_Contains spatial checks
+- replay-aware geofence intelligence
+- device-aware geofence assignment foundation
+- telemetry position geofence checks
 
 Pending:
 

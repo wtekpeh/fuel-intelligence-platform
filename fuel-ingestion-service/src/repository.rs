@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::models::{
     AlertAcknowledgementResponse, AlertResponse, CreateGeofenceRequest, DeviceHealthEventResponse,
-    DeviceStateEventResponse, FuelEventResponse, FuelReading, Geofence,
+    DeviceStateEventResponse, FuelEventResponse, FuelReading, Geofence, GeofencePositionMatch,
     OrganizationFleetOverviewResponse, OrganizationOverviewResponse, SensorHealthEventResponse,
     TelemetryStreamResponse,
 };
@@ -1506,4 +1506,206 @@ pub async fn list_geofences(
     .await?;
 
     Ok(geofences)
+}
+
+async fn get_matching_geofences_for_position(
+    pool: &PgPool,
+    organization_id: uuid::Uuid,
+    device_id: uuid::Uuid,
+    latitude: f64,
+    longitude: f64,
+) -> Result<Vec<GeofencePositionMatch>, sqlx::Error> {
+    let matches = sqlx::query_as!(
+        GeofencePositionMatch,
+        r#"
+        SELECT
+            g.id AS geofence_id,
+            g.name AS geofence_name,
+            g.geofence_type
+        FROM geofences g
+        WHERE
+            g.organization_id = $1
+            AND g.is_active = TRUE
+
+            AND ST_Contains(
+                g.geometry,
+                ST_SetSRID(
+                    ST_MakePoint($2, $3),
+                    4326
+                )
+            )
+
+            AND (
+                NOT EXISTS (
+                    SELECT 1
+                    FROM geofence_device_assignments gda
+                    WHERE gda.geofence_id = g.id
+                )
+
+                OR EXISTS (
+                    SELECT 1
+                    FROM geofence_device_assignments gda
+                    WHERE
+                        gda.geofence_id = g.id
+                        AND gda.device_id = $4
+                        AND gda.is_included = TRUE
+                )
+            )
+        "#,
+        organization_id,
+        longitude,
+        latitude,
+        device_id,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(matches)
+}
+
+pub async fn get_organization_id_for_device(
+    pool: &PgPool,
+    device_id: uuid::Uuid,
+) -> Result<uuid::Uuid, sqlx::Error> {
+    let record = sqlx::query!(
+        r#"
+        SELECT
+            a.organization_id
+        FROM devices d
+        JOIN assets a
+            ON a.id = d.asset_id
+        WHERE d.id = $1
+        "#,
+        device_id,
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(record.organization_id)
+}
+
+pub async fn check_position_against_geofences(
+    pool: &PgPool,
+    organization_id: Uuid,
+    device_id: Uuid,
+    latitude: f64,
+    longitude: f64,
+) -> Result<Vec<GeofencePositionMatch>, sqlx::Error> {
+    let matches =
+        get_matching_geofences_for_position(pool, organization_id, device_id, latitude, longitude)
+            .await?;
+
+    Ok(matches)
+}
+
+async fn insert_geofence_transition_event(
+    pool: &PgPool,
+    organization_id: uuid::Uuid,
+    device_id: uuid::Uuid,
+    geofence_id: uuid::Uuid,
+    transition_type: &str,
+    latitude: f64,
+    longitude: f64,
+    recorded_at: chrono::DateTime<chrono::Utc>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        r#"
+        INSERT INTO geofence_transition_events (
+            id,
+            organization_id,
+            device_id,
+            geofence_id,
+            transition_type,
+            latitude,
+            longitude,
+            recorded_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        "#,
+        uuid::Uuid::new_v4(),
+        organization_id,
+        device_id,
+        geofence_id,
+        transition_type,
+        latitude,
+        longitude,
+        recorded_at,
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn detect_and_store_geofence_transitions_from_previous_position(
+    pool: &PgPool,
+    organization_id: uuid::Uuid,
+    device_id: uuid::Uuid,
+    previous_latitude: f64,
+    previous_longitude: f64,
+    current_latitude: f64,
+    current_longitude: f64,
+    recorded_at: chrono::DateTime<chrono::Utc>,
+) -> Result<(), sqlx::Error> {
+    let previous_matches = get_matching_geofences_for_position(
+        pool,
+        organization_id,
+        device_id,
+        previous_latitude,
+        previous_longitude,
+    )
+    .await?;
+
+    let current_matches = get_matching_geofences_for_position(
+        pool,
+        organization_id,
+        device_id,
+        current_latitude,
+        current_longitude,
+    )
+    .await?;
+
+    let previous_ids: std::collections::HashSet<uuid::Uuid> = previous_matches
+        .iter()
+        .map(|geofence| geofence.geofence_id)
+        .collect();
+
+    let current_ids: std::collections::HashSet<uuid::Uuid> = current_matches
+        .iter()
+        .map(|geofence| geofence.geofence_id)
+        .collect();
+
+    for geofence in &current_matches {
+        if !previous_ids.contains(&geofence.geofence_id) {
+            insert_geofence_transition_event(
+                pool,
+                organization_id,
+                device_id,
+                geofence.geofence_id,
+                "ENTERED_ZONE",
+                current_latitude,
+                current_longitude,
+                recorded_at,
+            )
+            .await?;
+        }
+    }
+
+    for geofence in &previous_matches {
+        if !current_ids.contains(&geofence.geofence_id) {
+            insert_geofence_transition_event(
+                pool,
+                organization_id,
+                device_id,
+                geofence.geofence_id,
+                "EXITED_ZONE",
+                current_latitude,
+                current_longitude,
+                recorded_at,
+            )
+            .await?;
+        }
+    }
+
+    Ok(())
 }

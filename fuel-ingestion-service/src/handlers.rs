@@ -9,16 +9,18 @@ use crate::services::fuel_detection::{detect_fuel_event, detect_possible_leak};
 use crate::services::sensor_health::detect_frozen_fuel_sensor;
 use crate::{
     models::{
-        AlertResponse, ApiResponse, CreateGeofenceRequest, DeviceStateEventResponse,
-        HeartbeatRequest, HeartbeatResponse, ReadingBatch,
+        AlertResponse, ApiResponse, CheckPositionRequest, CheckPositionResponse,
+        CreateGeofenceRequest, DeviceStateEventResponse, HeartbeatRequest, HeartbeatResponse,
+        ReadingBatch,
     },
     repository::{
-        acknowledge_alert, create_geofence, get_or_create_demo_sensor,
-        get_organization_fleet_overview, get_organization_overview, get_recent_alerts,
-        get_recent_device_health_events, get_recent_device_state_events, get_recent_fuel_events,
-        get_recent_sensor_health_events, get_recent_telemetry_stream, list_geofences,
-        mark_device_heartbeat_seen, mark_device_payload_seen, refresh_device_statuses,
-        resolve_alert, save_fuel_reading_as_sensor_reading,
+        acknowledge_alert, check_position_against_geofences, create_geofence,
+        detect_and_store_geofence_transitions_from_previous_position, get_or_create_demo_sensor,
+        get_organization_fleet_overview, get_organization_id_for_device, get_organization_overview,
+        get_recent_alerts, get_recent_device_health_events, get_recent_device_state_events,
+        get_recent_fuel_events, get_recent_sensor_health_events, get_recent_telemetry_stream,
+        list_geofences, mark_device_heartbeat_seen, mark_device_payload_seen,
+        refresh_device_statuses, resolve_alert, save_fuel_reading_as_sensor_reading,
     },
 };
 
@@ -40,6 +42,8 @@ pub async fn ingest_reading_batch(
 
         let mut previous_reading = None;
 
+        let organization_id = get_organization_id_for_device(db_pool, device_id).await?;
+
         for reading in &payload.readings {
             save_fuel_reading_as_sensor_reading(
                 db_pool,
@@ -49,6 +53,20 @@ pub async fn ingest_reading_batch(
                 previous_reading,
             )
             .await?;
+
+            if let Some(previous_reading) = previous_reading {
+                detect_and_store_geofence_transitions_from_previous_position(
+                    db_pool,
+                    organization_id,
+                    device_id,
+                    previous_reading.latitude,
+                    previous_reading.longitude,
+                    reading.latitude,
+                    reading.longitude,
+                    reading.timestamp,
+                )
+                .await?;
+            }
 
             detect_fuel_event(
                 db_pool,
@@ -373,6 +391,45 @@ pub async fn list_geofences_handler(
                 Json(serde_json::json!({
                     "success": false,
                     "message": "Failed to fetch geofences"
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+pub async fn check_position_against_geofences_handler(
+    State(app_state): State<AppState>,
+    Json(payload): Json<CheckPositionRequest>,
+) -> impl IntoResponse {
+    let db_pool = &app_state.db_pool;
+
+    match check_position_against_geofences(
+        db_pool,
+        payload.organization_id,
+        payload.device_id,
+        payload.latitude,
+        payload.longitude,
+    )
+    .await
+    {
+        Ok(matched_geofences) => {
+            let response = CheckPositionResponse {
+                inside_geofence: !matched_geofences.is_empty(),
+                matched_geofences,
+            };
+
+            (StatusCode::OK, Json(response)).into_response()
+        }
+
+        Err(err) => {
+            eprintln!("Failed to check position against geofences: {}", err);
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "success": false,
+                    "message": "Failed to check position against geofences"
                 })),
             )
                 .into_response()

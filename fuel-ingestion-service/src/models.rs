@@ -207,3 +207,38 @@ pub struct CreateGeofenceRequest {
     pub geofence_type: String,
     pub geojson: serde_json::Value,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct CheckPositionRequest {
+    pub organization_id: uuid::Uuid,
+    pub device_id: uuid::Uuid,
+    pub latitude: f64,
+    pub longitude: f64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GeofencePositionMatch {
+    pub geofence_id: uuid::Uuid,
+    pub geofence_name: String,
+    pub geofence_type: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CheckPositionResponse {
+    pub inside_geofence: bool,
+    pub matched_geofences: Vec<GeofencePositionMatch>,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct GeofenceTransitionEvent {
+    pub id: uuid::Uuid,
+    pub organization_id: uuid::Uuid,
+    pub device_id: uuid::Uuid,
+    pub geofence_id: uuid::Uuid,
+    pub transition_type: String,
+    pub latitude: f64,
+    pub longitude: f64,
+    pub recorded_at: chrono::DateTime<chrono::Utc>,
+    pub detected_at: chrono::DateTime<chrono::Utc>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}

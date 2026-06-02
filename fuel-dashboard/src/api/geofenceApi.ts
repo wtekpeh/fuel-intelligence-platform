@@ -2,6 +2,8 @@ import { httpClient } from "./httpClient";
 
 import type { CreateGeofencePayload, Geofence } from "../types";
 
+import type { CheckPositionPayload, CheckPositionResponse } from "../types";
+
 export async function listGeofences(
   organizationId: string,
 ): Promise<Geofence[]> {
@@ -16,6 +18,17 @@ export async function createGeofence(
   payload: CreateGeofencePayload,
 ): Promise<Geofence> {
   const response = await httpClient.post<Geofence>("/api/geofences", payload);
+
+  return response.data;
+}
+
+export async function checkPositionAgainstGeofences(
+  payload: CheckPositionPayload,
+): Promise<CheckPositionResponse> {
+  const response = await httpClient.post<CheckPositionResponse>(
+    "/api/geofences/check-position",
+    payload,
+  );
 
   return response.data;
 }
