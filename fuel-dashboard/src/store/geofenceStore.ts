@@ -4,12 +4,14 @@ import {
   createGeofence,
   listGeofences,
   checkPositionAgainstGeofences,
+  listGeofenceTransitionEvents,
 } from "../api/geofenceApi";
 
 import type {
   CreateGeofencePayload,
   Geofence,
   CheckPositionResponse,
+  GeofenceTransitionEvent,
 } from "../types";
 
 interface GeofenceStore {
@@ -19,11 +21,15 @@ interface GeofenceStore {
 
   error: string | null;
 
+  positionStatus: CheckPositionResponse | null;
+
+  transitionEvents: GeofenceTransitionEvent[];
+
   loadGeofences: (organizationId: string) => Promise<void>;
 
   createGeofenceRecord: (payload: CreateGeofencePayload) => Promise<void>;
 
-  positionStatus: CheckPositionResponse | null;
+  loadTransitionEvents: (deviceId?: string) => Promise<void>;
 
   checkCurrentPosition: (
     organizationId: string,
@@ -41,6 +47,8 @@ export const useGeofenceStore = create<GeofenceStore>((set) => ({
   error: null,
 
   positionStatus: null,
+
+  transitionEvents: [],
 
   loadGeofences: async (organizationId: string) => {
     try {
@@ -107,6 +115,18 @@ export const useGeofenceStore = create<GeofenceStore>((set) => ({
       });
     } catch (error) {
       console.error("Failed to check position against geofences", error);
+    }
+  },
+
+  loadTransitionEvents: async (deviceId?: string) => {
+    try {
+      const events = await listGeofenceTransitionEvents(deviceId);
+
+      set({
+        transitionEvents: events,
+      });
+    } catch (error) {
+      console.error("Failed to load geofence transition events", error);
     }
   },
 }));

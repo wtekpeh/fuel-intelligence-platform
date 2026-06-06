@@ -2,7 +2,7 @@ use chrono::{DateTime, Duration, Utc};
 use rand::Rng;
 
 use crate::{
-    config::AppConfig,
+    config::{AppConfig, SimulationTimeMode},
     models::{FuelReading, SimulationMode},
 };
 
@@ -11,6 +11,7 @@ pub struct FuelSimulator {
     tank_capacity_litres: f64,
     current_fuel_litres: f64,
     current_time: DateTime<Utc>,
+    simulation_time_mode: SimulationTimeMode,
     reading_count: i32,
     latitude: f64,
     longitude: f64,
@@ -28,6 +29,7 @@ impl FuelSimulator {
             tank_capacity_litres: config.tank_capacity_litres,
             current_fuel_litres: config.initial_fuel_litres,
             current_time: Utc::now(),
+            simulation_time_mode: config.simulation_time_mode.clone(),
             reading_count: 0,
             latitude: config.latitude,
             longitude: config.longitude,
@@ -63,7 +65,10 @@ impl FuelSimulator {
 
         let reading = FuelReading {
             device_id: self.device_id.clone(),
-            timestamp: self.current_time,
+            timestamp: match self.simulation_time_mode {
+                SimulationTimeMode::Realtime => Utc::now(),
+                SimulationTimeMode::Historical => self.current_time,
+            },
             fuel_level_litres: round_2(self.current_fuel_litres),
             fuel_level_percentage: round_2(
                 (self.current_fuel_litres / self.tank_capacity_litres) * 100.0,

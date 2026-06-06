@@ -7,8 +7,8 @@ use uuid::Uuid;
 use crate::models::{
     AlertAcknowledgementResponse, AlertResponse, CreateGeofenceRequest, DeviceHealthEventResponse,
     DeviceStateEventResponse, FuelEventResponse, FuelReading, Geofence, GeofencePositionMatch,
-    OrganizationFleetOverviewResponse, OrganizationOverviewResponse, SensorHealthEventResponse,
-    TelemetryStreamResponse,
+    GeofenceTransitionEventResponse, OrganizationFleetOverviewResponse,
+    OrganizationOverviewResponse, SensorHealthEventResponse, TelemetryStreamResponse,
 };
 use crate::services::device_health::classify_device_status;
 use crate::services::device_state::{
@@ -1708,4 +1708,83 @@ pub async fn detect_and_store_geofence_transitions_from_previous_position(
     }
 
     Ok(())
+}
+
+pub async fn list_recent_geofence_transition_events(
+    pool: &PgPool,
+    device_id: Option<uuid::Uuid>,
+) -> Result<Vec<GeofenceTransitionEventResponse>, sqlx::Error> {
+    let events = sqlx::query_as!(
+        GeofenceTransitionEventResponse,
+        r#"
+        SELECT
+            gte.id,
+            gte.organization_id,
+            gte.device_id,
+
+            gte.geofence_id,
+            g.name AS geofence_name,
+            g.geofence_type,
+
+            gte.transition_type,
+
+            gte.latitude,
+            gte.longitude,
+
+            gte.recorded_at,
+            gte.detected_at,
+            gte.created_at
+
+        FROM geofence_transition_events gte
+        INNER JOIN geofences g
+            ON g.id = gte.geofence_id
+
+        WHERE
+            ($1::uuid IS NULL OR gte.device_id = $1)
+
+        ORDER BY gte.detected_at DESC
+        LIMIT 100
+        "#,
+        device_id,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(events)
+}
+
+pub async fn get_telemetry_history(
+    pool: &PgPool,
+    device_id: uuid::Uuid,
+    start_time: chrono::DateTime<chrono::Utc>,
+    end_time: chrono::DateTime<chrono::Utc>,
+) -> Result<Vec<TelemetryStreamResponse>, sqlx::Error> {
+    let readings = sqlx::query_as!(
+        TelemetryStreamResponse,
+        r#"
+        SELECT
+            s.device_id,
+            sr.recorded_at,
+            sr.received_at,
+            sr.value AS fuel_level_litres,
+            sr.latitude,
+            sr.longitude,
+            sr.vibration_level,
+            sr.motion_detected
+        FROM sensor_readings sr
+        JOIN sensors s ON s.id = sr.sensor_id
+        WHERE
+            s.device_id = $1
+            AND sr.recorded_at >= $2
+            AND sr.recorded_at <= $3
+        ORDER BY sr.recorded_at ASC
+        "#,
+        device_id,
+        start_time,
+        end_time,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(readings)
 }

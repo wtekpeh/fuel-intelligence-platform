@@ -2,6 +2,7 @@ import { useInvestigationStore } from "../../store/investigationStore";
 import type {
   DeviceStateEvent,
   FuelEvent,
+  GeofenceTransitionEvent,
   SensorHealthEvent,
 } from "../../types";
 import { useDashboardSectionStore } from "../../store/dashboardSectionStore";
@@ -147,6 +148,51 @@ function SensorHealthDetails({ event }: { event: SensorHealthEvent }) {
   );
 }
 
+function GeofenceTransitionDetails({
+  event,
+}: {
+  event: GeofenceTransitionEvent;
+}) {
+  return (
+    <div className="investigation-detail__grid">
+      <div>
+        <label>Transition</label>
+        <strong>{event.transition_type}</strong>
+      </div>
+
+      <div>
+        <label>Geofence</label>
+        <strong>{event.geofence_name}</strong>
+      </div>
+
+      <div>
+        <label>Zone Type</label>
+        <strong>{event.geofence_type}</strong>
+      </div>
+
+      <div>
+        <label>Latitude</label>
+        <strong>{event.latitude}</strong>
+      </div>
+
+      <div>
+        <label>Longitude</label>
+        <strong>{event.longitude}</strong>
+      </div>
+
+      <div>
+        <label>Occurred At</label>
+        <strong>{new Date(event.recorded_at).toLocaleString()}</strong>
+      </div>
+
+      <div>
+        <label>Detected At</label>
+        <strong>{new Date(event.detected_at).toLocaleString()}</strong>
+      </div>
+    </div>
+  );
+}
+
 export function InvestigationDetailPanel() {
   const selectedTimelineItem = useInvestigationStore(
     (state) => state.selectedTimelineItem,
@@ -183,7 +229,8 @@ export function InvestigationDetailPanel() {
 
       <p>{selectedTimelineItem.subtitle}</p>
 
-      {selectedTimelineItem.type === "fuel_event" && (
+      {(selectedTimelineItem.type === "fuel_event" ||
+        selectedTimelineItem.type === "geofence_transition") && (
         <button
           type="button"
           className="investigation-detail__map-button"
@@ -206,6 +253,12 @@ export function InvestigationDetailPanel() {
       {selectedTimelineItem.type === "sensor_health" && (
         <SensorHealthDetails
           event={selectedTimelineItem.raw as SensorHealthEvent}
+        />
+      )}
+
+      {selectedTimelineItem.type === "geofence_transition" && (
+        <GeofenceTransitionDetails
+          event={selectedTimelineItem.raw as GeofenceTransitionEvent}
         />
       )}
     </aside>

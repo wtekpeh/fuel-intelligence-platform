@@ -224,6 +224,7 @@ Current investigation feeds:
 fuel events
 device state events
 sensor health events
+geofence transition events
 
 Current investigation APIs:
 
@@ -232,6 +233,8 @@ GET /api/fuel-events?device_id={device_id}
 GET /api/device-state-events?device_id={device_id}
 
 GET /api/sensor-health-events?device_id={device_id}
+
+GET /api/geofence-transition-events?device_id={device_id}
 
 The investigation system now groups operational telemetry into correlated investigation clusters.
 
@@ -284,6 +287,10 @@ intelligence detection timestamps
 delayed synchronization indicators
 telemetry clock drift warnings
 Cross-Dashboard Navigation
+geofence transition details
+geofence name/type
+geofence entry/exit coordinates
+geofence occurred/detected timestamps
 
 Operations alerts now support direct navigation into Investigation workflows.
 
@@ -342,15 +349,16 @@ Current Map Intelligence capabilities include:
 - live selected-device spatial rendering
 - telemetry-driven device positioning
 - investigation event spatial overlays
+- geofence transition spatial overlays
 - investigation-to-map synchronization
 - map-to-investigation synchronization
+- geofence-to-investigation synchronization
 - live fuel telemetry gauge
 - operational telemetry side intelligence panel
 - responsive operational map workspace
 
 Current map intelligence workflow:
 
-```text
 Operations Alert
 → View Investigation
 → Investigation Detail
@@ -358,7 +366,13 @@ Operations Alert
 → Map Intelligence
 → Automatic Fly-To Investigation Event
 → Focused Event Popup
-```
+
+Geofence Transition
+→ Investigation Timeline
+→ Geofence Detail Panel
+→ View on Map
+→ Map Intelligence
+→ Automatic Fly-To Transition Marker
 
 ## Current Map Intelligence Features
 
@@ -401,14 +415,16 @@ Current reusable telemetry widgets:
 
 ### Current Frontend Map Structure
 
-```text
 src/components/map-intelligence/
 ├── MapIntelligencePanel.tsx
 ├── OperationalMap.tsx
 ├── DeviceMarkerLayer.tsx
 ├── InvestigationEventLayer.tsx
+├── GeofenceTransitionLayer.tsx
 ├── MapFocusController.tsx
-```
+├── GeofenceLayer.tsx
+├── GeofenceDrawControl.tsx
+├── GeofenceCreationCard.tsx
 
 Shared telemetry widget structure:
 
@@ -452,6 +468,10 @@ Current spatial intelligence capabilities:
 - telemetry-aware geofence status
 - live PostGIS ST_Contains spatial checks
 - operational zone overlays
+- geofence transition markers
+- ENTERED_ZONE and EXITED_ZONE visualization
+- geofence transition polling every 5 seconds
+- geofence transition detail panel integration
 - device-aware geofence assignment foundation
 - replay spatial synchronization
 - operational map workspace controls
@@ -490,13 +510,11 @@ Planned geofence intelligence capabilities:
 - dwell-zone detection
 - theft outside safe-zone detection
 - refill-inside-fueling-zone intelligence
-- depot entry/exit intelligence
 - restricted-zone alerts
 - dwell detection
 - route corridor violations
 - operational hotspot analysis
 - replay spatial investigations
-- zone transition intelligence
 - unauthorized fueling detection
 
 Important coordinate rule:
@@ -579,6 +597,12 @@ geofence replay awareness
 reusable telemetry widgets
 fuel telemetry gauges
 fleet operational telemetry widgets
+geofence transition event polling
+geofence transition map markers
+ENTERED_ZONE and EXITED_ZONE visualization
+geofence transition investigation timeline integration
+geofence transition detail panel
+geofence View on Map workflow
 
 Pending:
 

@@ -3,6 +3,13 @@ use serde::Deserialize;
 use std::fs;
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "lowercase")]
+pub enum SimulationTimeMode {
+    Realtime,
+    Historical,
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct AppConfig {
     pub device_id: String,
     pub tank_capacity_litres: f64,
@@ -19,6 +26,8 @@ pub struct AppConfig {
 
     pub ingestion_url: String,
     pub heartbeat_url: String,
+
+    pub simulation_time_mode: SimulationTimeMode,
 }
 
 impl AppConfig {

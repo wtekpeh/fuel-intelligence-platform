@@ -137,6 +137,8 @@ config.toml
 Example:
 
 device_id = "DEV001"
+simulation_time_mode = "realtime"
+
 tank_capacity_litres = 200.0
 initial_fuel_litres = 180.0
 latitude = 5.6037
@@ -148,6 +150,45 @@ theft_reading_number = 10
 leak_start_reading = 20
 leak_end_reading = 25
 refill_reading_number = 35
+
+## Simulation Time Mode
+
+The simulator supports two timestamp modes:
+
+### Realtime Mode
+
+```toml
+simulation_time_mode = "realtime"
+
+In realtime mode, every generated reading uses the current system time:
+
+timestamp ≈ Utc::now()
+
+This is the default mode for:
+
+live dashboard testing
+geofence transition testing
+operational monitoring
+hardware-like behaviour
+Historical Mode
+simulation_time_mode = "historical"
+
+In historical mode, the simulator advances its internal clock by one minute per reading.
+
+This is useful for:
+
+replay testing
+offline sync testing
+delayed batch reconstruction
+historical investigation scenarios
+Current Recommended Mode
+
+For normal dashboard and geofence testing, use:
+
+simulation_time_mode = "realtime"
+
+This prevents simulated readings from drifting into the future while the backend detects them now.
+
 How to Run
 
 From inside fuel-simulator/:

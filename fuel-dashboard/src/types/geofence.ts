@@ -45,3 +45,22 @@ export interface CheckPositionResponse {
   inside_geofence: boolean;
   matched_geofences: GeofencePositionMatch[];
 }
+
+export interface GeofenceTransitionEvent {
+  id: string;
+  organization_id: string;
+  device_id: string;
+
+  geofence_id: string;
+  geofence_name: string;
+  geofence_type: string;
+
+  transition_type: "ENTERED_ZONE" | "EXITED_ZONE" | string;
+
+  latitude: number;
+  longitude: number;
+
+  recorded_at: string;
+  detected_at: string;
+  created_at: string;
+}

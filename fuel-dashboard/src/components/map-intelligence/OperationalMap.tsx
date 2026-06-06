@@ -8,6 +8,7 @@ import ReplayMarkerLayer from "./ReplayMarkerLayer";
 import ReplayCameraController from "./ReplayCameraController";
 import GeofenceLayer from "./GeofenceLayer";
 import GeofenceDrawControl from "./GeofenceDrawControl";
+import GeofenceTransitionLayer from "./GeofenceTransitionLayer";
 
 function OperationalMap() {
   return (
@@ -24,21 +25,14 @@ function OperationalMap() {
         />
 
         <GeofenceLayer />
-
         <TelemetryRouteLayer />
-
         <ReplayMarkerLayer />
-
         <DeviceMarkerLayer />
-
         <InvestigationEventLayer />
-
+        <GeofenceTransitionLayer />
         <MapFocusController />
-
         <ReplayCameraController />
-
         <ReplayPlaybackController />
-
         <GeofenceDrawControl />
       </MapContainer>
     </div>

@@ -187,6 +187,144 @@ GET /api/geofences/{organization_id}
 POST /api/geofences/check-position
 ```
 
+`````md
+## Geofence Transition Events
+
+The backend now supports automatic geofence transition detection during telemetry ingestion.
+
+Current transition types:
+
+````text
+ENTERED_ZONE
+EXITED_ZONE
+
+Transition logic:
+
+outside → inside = ENTERED_ZONE
+
+inside → outside = EXITED_ZONE
+
+inside → inside = no event
+
+outside → outside = no event
+
+Transition events are stored in:
+
+geofence_transition_events
+
+Current event fields:
+
+id
+organization_id
+device_id
+geofence_id
+transition_type
+latitude
+longitude
+recorded_at
+detected_at
+created_at
+
+Geofence transition responses are enriched with:
+
+geofence_name
+geofence_type
+
+Current APIs:
+
+GET /api/geofence-transition-events
+
+GET /api/geofence-transition-events?device_id={device_id}
+
+Current ordering:
+
+ORDER BY detected_at DESC
+
+This allows operational dashboards to show the most recently detected geofence transitions first.
+
+Current use cases:
+
+depot entry detection
+depot exit detection
+operational zone monitoring
+replay investigation
+investigation timeline correlation
+future geofence intelligence rules
+
+---
+
+### Location 3
+
+Go all the way to the bottom.
+
+Find:
+
+```md
+# Current Development Status
+
+Implemented:
+````
+
+Then find the spatial intelligence section:
+
+```md
+- PostGIS spatial intelligence layer
+- GeoJSON geofence APIs
+- backend geofence persistence
+- operational polygon intelligence
+- ST_Contains spatial checks
+- replay-aware geofence intelligence
+- device-aware geofence assignment foundation
+- telemetry position geofence checks
+```
+
+Append immediately after it:
+
+```md
+- geofence transition detection
+- geofence transition event persistence
+- enriched geofence transition APIs
+- device-filtered geofence transition queries
+- investigation-ready geofence transition intelligence
+```
+
+---
+
+### Location 4
+
+Find:
+
+```md
+Planned spatial intelligence capabilities:
+
+- depot entry/exit events
+```
+
+Remove:
+
+```md
+- depot entry/exit events
+```
+
+because we have already implemented it.
+
+Leave the rest:
+
+```md
+- restricted-zone alerts
+- dwell detection
+- route corridor analysis
+- unauthorized fueling detection
+- theft outside depot intelligence
+- replay spatial investigation workflows
+- operational hotspot analysis
+- future route-risk intelligence
+```
+
+---
+
+Those are the only four places I would touch in the ingestion service README right now. That keeps the document accurate and avoids duplication.
+
 Current geofence types:
 
 ```text
@@ -204,6 +342,11 @@ Current spatial intelligence capabilities include:
 - operational zone status evaluation
 - backend spatial filtering
 - organization-wide geofence intelligence
+- geofence transition detection
+- geofence transition event persistence
+- geofence transition event enrichment
+- device-filtered geofence transition queries
+- investigation-ready geofence transition timelines
 
 Current architecture foundation:
 
@@ -378,6 +521,7 @@ based on the existing backend hierarchy already present in the database.
 ```http
 POST /api/fuel-readings/batch
 ````
+`````
 
 ## Organization Fleet Overview
 

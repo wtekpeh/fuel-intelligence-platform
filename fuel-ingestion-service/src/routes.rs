@@ -1,10 +1,11 @@
 use crate::config::AppConfig;
 use crate::handlers::{
     acknowledge_alert_handler, check_position_against_geofences_handler, create_geofence_handler,
-    ingest_reading_batch, list_alerts, list_device_state_events, list_geofences_handler,
+    ingest_reading_batch, list_alerts, list_device_state_events,
+    list_geofence_transition_events_handler, list_geofences_handler,
     list_organization_fleet_overview, list_organization_overview, list_recent_device_health_events,
     list_recent_fuel_events, list_recent_sensor_health_events, list_recent_telemetry_stream,
-    receive_heartbeat, refresh_device_health, resolve_alert_handler,
+    list_telemetry_history, receive_heartbeat, refresh_device_health, resolve_alert_handler,
 };
 use crate::services::alert_hub::AlertHub;
 use crate::ws::alerts_ws_handler;
@@ -90,6 +91,11 @@ pub fn app_routes(db_pool: PgPool, config: AppConfig, alert_hub: AlertHub) -> Ro
             "/api/geofences/check-position",
             post(check_position_against_geofences_handler),
         )
+        .route(
+            "/api/geofence-transition-events",
+            get(list_geofence_transition_events_handler),
+        )
+        .route("/api/fuel-readings/history", get(list_telemetry_history))
         .route("/ws/alerts", get(alerts_ws_handler))
         .with_state(app_state)
         .layer(cors)

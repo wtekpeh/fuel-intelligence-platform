@@ -19,8 +19,9 @@ use crate::{
         get_organization_fleet_overview, get_organization_id_for_device, get_organization_overview,
         get_recent_alerts, get_recent_device_health_events, get_recent_device_state_events,
         get_recent_fuel_events, get_recent_sensor_health_events, get_recent_telemetry_stream,
-        list_geofences, mark_device_heartbeat_seen, mark_device_payload_seen,
-        refresh_device_statuses, resolve_alert, save_fuel_reading_as_sensor_reading,
+        get_telemetry_history, list_geofences, list_recent_geofence_transition_events,
+        mark_device_heartbeat_seen, mark_device_payload_seen, refresh_device_statuses,
+        resolve_alert, save_fuel_reading_as_sensor_reading,
     },
 };
 
@@ -435,4 +436,48 @@ pub async fn check_position_against_geofences_handler(
                 .into_response()
         }
     }
+}
+
+pub async fn list_geofence_transition_events_handler(
+    State(app_state): State<AppState>,
+    Query(query): Query<crate::models::TelemetryQueryParams>,
+) -> impl IntoResponse {
+    let db_pool = &app_state.db_pool;
+
+    match list_recent_geofence_transition_events(db_pool, query.device_id).await {
+        Ok(events) => (StatusCode::OK, Json(events)).into_response(),
+
+        Err(err) => {
+            eprintln!("Failed to fetch geofence transition events: {}", err);
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "success": false,
+                    "message": "Failed to fetch geofence transition events"
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+pub async fn list_telemetry_history(
+    State(app_state): State<AppState>,
+    Query(query): Query<crate::models::TelemetryHistoryQueryParams>,
+) -> Result<Json<Vec<crate::models::TelemetryStreamResponse>>, StatusCode> {
+    if query.start_time > query.end_time {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let readings = get_telemetry_history(
+        &app_state.db_pool,
+        query.device_id,
+        query.start_time,
+        query.end_time,
+    )
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(readings))
 }

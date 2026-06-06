@@ -1,9 +1,15 @@
-import type { DeviceStateEvent, FuelEvent, SensorHealthEvent } from "../types";
+import type {
+  DeviceStateEvent,
+  FuelEvent,
+  SensorHealthEvent,
+  GeofenceTransitionEvent,
+} from "../types";
 
 export type InvestigationTimelineItemType =
   | "fuel_event"
   | "device_state"
-  | "sensor_health";
+  | "sensor_health"
+  | "geofence_transition";
 
 export interface InvestigationTimelineItem {
   id: string;
@@ -12,13 +18,18 @@ export interface InvestigationTimelineItem {
   title: string;
   subtitle: string;
   severity: "good" | "warning" | "danger" | "neutral";
-  raw: FuelEvent | DeviceStateEvent | SensorHealthEvent;
+  raw:
+    | FuelEvent
+    | DeviceStateEvent
+    | SensorHealthEvent
+    | GeofenceTransitionEvent;
 }
 
 export function buildInvestigationTimeline(params: {
   fuelEvents: FuelEvent[];
   deviceStateEvents: DeviceStateEvent[];
   sensorHealthEvents: SensorHealthEvent[];
+  geofenceTransitionEvents: GeofenceTransitionEvent[];
 }): InvestigationTimelineItem[] {
   const fuelItems: InvestigationTimelineItem[] = params.fuelEvents.map(
     (event) => ({
@@ -72,7 +83,21 @@ export function buildInvestigationTimeline(params: {
       raw: event,
     }));
 
-  return [...fuelItems, ...stateItems, ...sensorItems].sort(
+  const geofenceItems: InvestigationTimelineItem[] =
+    params.geofenceTransitionEvents.map((event) => ({
+      id: `geofence-${event.id}`,
+      type: "geofence_transition",
+      timestamp: event.recorded_at,
+      title: event.transition_type,
+      subtitle:
+        event.transition_type === "ENTERED_ZONE"
+          ? "Device entered operational zone"
+          : "Device exited operational zone",
+      severity: event.transition_type === "ENTERED_ZONE" ? "good" : "warning",
+      raw: event,
+    }));
+
+  return [...fuelItems, ...stateItems, ...sensorItems, ...geofenceItems].sort(
     (first, second) =>
       new Date(second.timestamp).getTime() -
       new Date(first.timestamp).getTime(),

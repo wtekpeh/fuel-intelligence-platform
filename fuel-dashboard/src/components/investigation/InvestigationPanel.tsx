@@ -6,6 +6,7 @@ import { InvestigationDetailPanel } from "./InvestigationDetailPanel";
 import { buildInvestigationClusters } from "../../utils/investigationClusters";
 import { calculateClusterRisk } from "../../utils/investigationRisk";
 import { explainInvestigationCluster } from "../../utils/investigationExplanation";
+import { useGeofenceStore } from "../../store/geofenceStore";
 
 export function InvestigationPanel() {
   const selectedDevice = useFleetStore((state) => state.selectedDevice);
@@ -25,14 +26,23 @@ export function InvestigationPanel() {
     (state) => state.focusedFuelEventId,
   );
 
+  const geofenceTransitionEvents = useGeofenceStore(
+    (state) => state.transitionEvents,
+  );
+
   const [activeTimelineFilter, setActiveTimelineFilter] = useState<
-    "all" | "fuel_event" | "device_state" | "sensor_health"
+    | "all"
+    | "fuel_event"
+    | "device_state"
+    | "sensor_health"
+    | "geofence_transition"
   >("all");
 
   const timelineItems = buildInvestigationTimeline({
     fuelEvents,
     deviceStateEvents,
     sensorHealthEvents,
+    geofenceTransitionEvents,
   });
 
   const visibleTimelineItems =
@@ -75,6 +85,11 @@ export function InvestigationPanel() {
         <div>
           <label>Sensor Health</label>
           <strong>{sensorHealthEvents.length}</strong>
+        </div>
+
+        <div>
+          <label>Geofence Events</label>
+          <strong>{geofenceTransitionEvents.length}</strong>
         </div>
       </div>
 
@@ -125,6 +140,18 @@ export function InvestigationPanel() {
           onClick={() => setActiveTimelineFilter("sensor_health")}
         >
           Sensor Health
+        </button>
+
+        <button
+          type="button"
+          className={
+            activeTimelineFilter === "geofence_transition"
+              ? "investigation-filter__button investigation-filter__button--active"
+              : "investigation-filter__button"
+          }
+          onClick={() => setActiveTimelineFilter("geofence_transition")}
+        >
+          Geofence
         </button>
       </div>
 

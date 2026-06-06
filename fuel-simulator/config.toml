@@ -1,4 +1,5 @@
-device_id = "DEV_CORR_TEST_004"
+device_id = "DEV_CORR_TEST_002"
+simulation_time_mode = "realtime"
 tank_capacity_litres = 200.0
 initial_fuel_litres = 180.0
 latitude = 5.6037
@@ -14,3 +15,4 @@ leak_end_reading = 20
 ingestion_url = "http://127.0.0.1:9000/api/fuel-readings/batch"
 
 heartbeat_url = "http://127.0.0.1:9000/api/heartbeat"
+

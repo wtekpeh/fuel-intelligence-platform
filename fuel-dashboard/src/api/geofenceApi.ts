@@ -1,8 +1,12 @@
 import { httpClient } from "./httpClient";
 
-import type { CreateGeofencePayload, Geofence } from "../types";
-
-import type { CheckPositionPayload, CheckPositionResponse } from "../types";
+import type {
+  CheckPositionPayload,
+  CheckPositionResponse,
+  GeofenceTransitionEvent,
+  CreateGeofencePayload,
+  Geofence,
+} from "../types";
 
 export async function listGeofences(
   organizationId: string,
@@ -28,6 +32,21 @@ export async function checkPositionAgainstGeofences(
   const response = await httpClient.post<CheckPositionResponse>(
     "/api/geofences/check-position",
     payload,
+  );
+
+  return response.data;
+}
+
+export async function listGeofenceTransitionEvents(
+  deviceId?: string,
+): Promise<GeofenceTransitionEvent[]> {
+  const response = await httpClient.get<GeofenceTransitionEvent[]>(
+    "/api/geofence-transition-events",
+    {
+      params: {
+        device_id: deviceId,
+      },
+    },
   );
 
   return response.data;

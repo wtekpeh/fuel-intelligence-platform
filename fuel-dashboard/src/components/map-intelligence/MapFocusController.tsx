@@ -5,7 +5,7 @@ import { useFleetStore } from "../../store/fleetStore";
 import { useInvestigationStore } from "../../store/investigationStore";
 import { useTelemetryStore } from "../../store/telemetryStore";
 import { useGeofenceDrawStore } from "../../store/geofenceDrawStore";
-import type { FuelEvent } from "../../types";
+import type { FuelEvent, GeofenceTransitionEvent } from "../../types";
 
 function MapFocusController() {
   const map = useMap();
@@ -21,6 +21,11 @@ function MapFocusController() {
   const selectedFuelEvent =
     selectedTimelineItem?.type === "fuel_event"
       ? (selectedTimelineItem.raw as FuelEvent)
+      : null;
+
+  const selectedGeofenceTransition =
+    selectedTimelineItem?.type === "geofence_transition"
+      ? (selectedTimelineItem.raw as GeofenceTransitionEvent)
       : null;
 
   useEffect(() => {
@@ -39,7 +44,34 @@ function MapFocusController() {
   }, [isDrawing, selectedFuelEvent, map]);
 
   useEffect(() => {
-    if (isDrawing || !selectedDevice || selectedFuelEvent) {
+    if (
+      isDrawing ||
+      !selectedGeofenceTransition ||
+      selectedGeofenceTransition.latitude === null ||
+      selectedGeofenceTransition.longitude === null
+    ) {
+      return;
+    }
+
+    map.flyTo(
+      [
+        selectedGeofenceTransition.latitude,
+        selectedGeofenceTransition.longitude,
+      ],
+      17,
+      {
+        duration: 1.2,
+      },
+    );
+  }, [isDrawing, selectedGeofenceTransition, map]);
+
+  useEffect(() => {
+    if (
+      isDrawing ||
+      !selectedDevice ||
+      selectedFuelEvent ||
+      selectedGeofenceTransition
+    ) {
       return;
     }
 
@@ -62,7 +94,14 @@ function MapFocusController() {
         duration: 1.2,
       },
     );
-  }, [isDrawing, map, readings, selectedDevice, selectedFuelEvent]);
+  }, [
+    isDrawing,
+    map,
+    readings,
+    selectedDevice,
+    selectedFuelEvent,
+    selectedGeofenceTransition,
+  ]);
 
   return null;
 }
