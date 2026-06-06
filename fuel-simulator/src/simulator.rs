@@ -137,7 +137,7 @@ impl FuelSimulator {
 }
 
 fn generate_normal_consumption() -> f64 {
-    rand::thread_rng().gen_range(0.2..1.0)
+    rand::thread_rng().gen_range(0.01..0.05)
 }
 
 fn generate_theft_drop() -> f64 {

@@ -14,6 +14,9 @@ function ReplayCameraController() {
 
   const isReplayMode = useMapReplayStore((state) => state.isReplayMode);
   const currentIndex = useMapReplayStore((state) => state.currentIndex);
+  const replayHistoryReadings = useMapReplayStore(
+    (state) => state.replayReadings,
+  );
   const isDrawing = useGeofenceDrawStore((state) => state.isDrawing);
 
   useEffect(() => {
@@ -21,7 +24,10 @@ function ReplayCameraController() {
       return;
     }
 
-    const replayReadings = readings
+    const sourceReadings =
+      replayHistoryReadings.length > 0 ? replayHistoryReadings : readings;
+
+    const replayReadings = sourceReadings
       .filter(
         (reading) =>
           reading.device_id === selectedDevice.device_id &&
@@ -47,7 +53,15 @@ function ReplayCameraController() {
       animate: true,
       duration: 0.45,
     });
-  }, [currentIndex, isReplayMode, map, readings, selectedDevice, isDrawing]);
+  }, [
+    currentIndex,
+    isReplayMode,
+    map,
+    readings,
+    replayHistoryReadings,
+    selectedDevice,
+    isDrawing,
+  ]);
 
   return null;
 }

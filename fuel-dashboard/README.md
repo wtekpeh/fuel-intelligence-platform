@@ -323,17 +323,21 @@ Implemented Dashboard Sections:
 
 Planned Phase 2 Features:
 
-- animated telemetry playback
 - investigation hotspot clustering
 - operational heatmaps
+- theft hotspot intelligence
+- refill hotspot intelligence
+- alert hotspot intelligence
 - theft corridor analysis
-- live route streaming
 - multi-device fleet rendering
-- fleet replay intelligence
 - advanced investigation filtering
 - analytics charts and trends
 - predictive operational scoring
+- geofence utilization intelligence
+- journey intelligence
+- investigation report export
 - sensor adapter visualization
+
 Responsive Design
 
 ---
@@ -450,12 +454,64 @@ replay scrubbing
 replay camera follow
 replay telemetry trail progression
 replay breadcrumb intelligence
-replay event correlation
+
+today replay loading
+yesterday replay loading
+last 7 days replay loading
+
+custom date range replay loading
+
+investigation replay workflow
+
+replay geofence correlation
+replay fuel event correlation
+replay device state correlation
+replay alert correlation
+replay device health correlation
+
+replay event feed timeline
+
 automatic replay pause on correlated events
+
+replay forensic reconstruction workflow
+
 replay investigation synchronization
+
 geofence-aware replay context
 
-````md
+````
+
+### Replay Intelligence Workflow
+
+Current replay workflow:
+
+Investigation Event
+→ View On Map
+→ Investigation Replay
+→ Historical Telemetry Load
+→ Replay Reconstruction
+
+Replay reconstruction currently correlates:
+
+Telemetry Position
+→ Geofence Context
+
+Telemetry Position
+→ Fuel Event Context
+
+Telemetry Position
+→ Device State Context
+
+Telemetry Position
+→ Alert Context
+
+Telemetry Position
+→ Device Health Context
+
+Telemetry Position
+→ Replay Event Feed Timeline
+
+
 ### Spatial Intelligence & Geofence Operations
 
 Current spatial intelligence capabilities:
@@ -589,6 +645,18 @@ telemetry route rendering
 breadcrumb telemetry progression
 replay playback engine
 replay scrubbing
+today replay loading
+yesterday replay loading
+last 7 days replay loading
+custom date range replay loading
+investigation replay workflow
+replay geofence correlation
+replay fuel event correlation
+replay device state correlation
+replay alert correlation
+replay device health correlation
+replay event feed timeline
+replay forensic reconstruction workflow
 replay investigation correlation
 replay camera follow
 replay forensic pause workflow

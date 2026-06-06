@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 
 import { useFleetStore } from "../../store/fleetStore";
 import { useMapReplayStore } from "../../store/mapReplayStore";
@@ -9,6 +9,9 @@ import type { FuelEvent } from "../../types";
 function ReplayPlaybackController() {
   const selectedDevice = useFleetStore((state) => state.selectedDevice);
   const readings = useTelemetryStore((state) => state.readings);
+  const replayHistoryReadings = useMapReplayStore(
+    (state) => state.replayReadings,
+  );
 
   const isReplayMode = useMapReplayStore((state) => state.isReplayMode);
   const isPlaying = useMapReplayStore((state) => state.isPlaying);
@@ -27,20 +30,26 @@ function ReplayPlaybackController() {
     (state) => state.setFocusedFuelEventId,
   );
 
-  const replayReadings = selectedDevice
-    ? readings
-        .filter(
-          (reading) =>
-            reading.device_id === selectedDevice.device_id &&
-            reading.latitude !== null &&
-            reading.longitude !== null,
-        )
-        .sort(
-          (a, b) =>
-            new Date(a.recorded_at).getTime() -
-            new Date(b.recorded_at).getTime(),
-        )
-    : [];
+  const sourceReadings =
+    replayHistoryReadings.length > 0 ? replayHistoryReadings : readings;
+
+  const replayReadings = useMemo(() => {
+    if (!selectedDevice) {
+      return [];
+    }
+
+    return sourceReadings
+      .filter(
+        (reading) =>
+          reading.device_id === selectedDevice.device_id &&
+          reading.latitude !== null &&
+          reading.longitude !== null,
+      )
+      .sort(
+        (a, b) =>
+          new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime(),
+      );
+  }, [sourceReadings, selectedDevice]);
 
   useEffect(() => {
     if (!isReplayMode || !isPlaying) {
@@ -97,7 +106,7 @@ function ReplayPlaybackController() {
       return;
     }
 
-    pause();
+    //pause();
 
     setFocusedFuelEventId(matchedEvent.id);
 

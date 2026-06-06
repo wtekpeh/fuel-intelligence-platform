@@ -30,13 +30,24 @@ function MapIntelligencePanel() {
       <div className="map-intelligence-workspace">
         <div className="map-intelligence-workspace__map">
           <OperationalMap />
+
+          <div className="replay-command-center">
+            <div className="replay-command-center__header">
+              <div>
+                <label>Replay Command Center</label>
+                <h3>Route History Playback</h3>
+              </div>
+
+              <span>Historical telemetry replay</span>
+            </div>
+
+            <ReplayControls />
+
+            <ReplayStatusCard />
+          </div>
         </div>
 
         <aside className="map-intelligence-workspace__side">
-          <ReplayControls />
-
-          <ReplayStatusCard />
-
           <GeofenceStatusCard />
 
           {selectedDeviceReading ? (

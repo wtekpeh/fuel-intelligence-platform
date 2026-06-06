@@ -11,11 +11,18 @@ function ReplayMarkerLayer() {
   const isReplayMode = useMapReplayStore((state) => state.isReplayMode);
   const currentIndex = useMapReplayStore((state) => state.currentIndex);
 
+  const replayHistoryReadings = useMapReplayStore(
+    (state) => state.replayReadings,
+  );
+
   if (!isReplayMode || !selectedDevice) {
     return null;
   }
 
-  const replayReadings = readings
+  const sourceReadings =
+    replayHistoryReadings.length > 0 ? replayHistoryReadings : readings;
+
+  const replayReadings = sourceReadings
     .filter(
       (reading) =>
         reading.device_id === selectedDevice.device_id &&

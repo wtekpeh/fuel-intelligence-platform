@@ -13,11 +13,15 @@ function TelemetryRouteLayer() {
 
   const currentIndex = useMapReplayStore((state) => state.currentIndex);
 
+  const replayReadings = useMapReplayStore((state) => state.replayReadings);
+
   if (!selectedDevice) {
     return null;
   }
 
-  const deviceReadings = readings
+  const sourceReadings = replayReadings.length > 0 ? replayReadings : readings;
+
+  const deviceReadings = sourceReadings
     .filter(
       (reading) =>
         reading.device_id === selectedDevice.device_id &&
