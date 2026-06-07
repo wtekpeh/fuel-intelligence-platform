@@ -34,6 +34,8 @@ function ReplayControls() {
   const [endDate, setEndDate] = useState("");
   const [endTime, setEndTime] = useState("");
 
+  const [showAdvancedControls, setShowAdvancedControls] = useState(false);
+
   const loadTodayRoute = async () => {
     if (!selectedDevice) {
       return;
@@ -120,68 +122,88 @@ function ReplayControls() {
     <div className="replay-controls">
       {!isReplayMode ? (
         <>
-          <div className="replay-controls__group">
-            <span className="replay-controls__label">Quick Ranges</span>
-
-            <button type="button" onClick={loadTodayRoute}>
-              Today
-            </button>
-
-            <button type="button" onClick={loadYesterdayRoute}>
-              Yesterday
-            </button>
-
-            <button type="button" onClick={loadLast7DaysRoute}>
-              Last 7 Days
-            </button>
-          </div>
-
-          <div className="replay-controls__field">
-            <label>From Date</label>
-            <input
-              type="date"
-              value={startDate}
-              onChange={(event) => setStartDate(event.target.value)}
-            />
-          </div>
-
-          <div className="replay-controls__field">
-            <label>From Time</label>
-            <input
-              type="time"
-              value={startTime}
-              onChange={(event) => setStartTime(event.target.value)}
-            />
-          </div>
-
-          <div className="replay-controls__field">
-            <label>To Date</label>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(event) => setEndDate(event.target.value)}
-            />
-          </div>
-
-          <div className="replay-controls__field">
-            <label>To Time</label>
-            <input
-              type="time"
-              value={endTime}
-              onChange={(event) => setEndTime(event.target.value)}
-            />
-          </div>
-
-          <div className="replay-controls__group">
-            <span className="replay-controls__label">Actions</span>
-
-            <button type="button" onClick={loadCustomRangeRoute}>
-              Load Range
-            </button>
-
+          <div className="replay-controls__group replay-controls__primary">
             <button type="button" onClick={startReplay}>
               Start Replay
             </button>
+
+            <button
+              type="button"
+              className="replay-controls__advanced-toggle"
+              onClick={() => setShowAdvancedControls(!showAdvancedControls)}
+            >
+              {showAdvancedControls
+                ? "Hide Advanced Options ▲"
+                : "Advanced Options ▼"}
+            </button>
+          </div>
+
+          <div
+            className={
+              showAdvancedControls
+                ? "replay-controls__advanced replay-controls__advanced--open"
+                : "replay-controls__advanced"
+            }
+          >
+            <div className="replay-controls__group">
+              <span className="replay-controls__label">Quick Ranges</span>
+
+              <button type="button" onClick={loadTodayRoute}>
+                Today
+              </button>
+
+              <button type="button" onClick={loadYesterdayRoute}>
+                Yesterday
+              </button>
+
+              <button type="button" onClick={loadLast7DaysRoute}>
+                Last 7 Days
+              </button>
+            </div>
+
+            <div className="replay-controls__field">
+              <label>From Date</label>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(event) => setStartDate(event.target.value)}
+              />
+            </div>
+
+            <div className="replay-controls__field">
+              <label>From Time</label>
+              <input
+                type="time"
+                value={startTime}
+                onChange={(event) => setStartTime(event.target.value)}
+              />
+            </div>
+
+            <div className="replay-controls__field">
+              <label>To Date</label>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(event) => setEndDate(event.target.value)}
+              />
+            </div>
+
+            <div className="replay-controls__field">
+              <label>To Time</label>
+              <input
+                type="time"
+                value={endTime}
+                onChange={(event) => setEndTime(event.target.value)}
+              />
+            </div>
+
+            <div className="replay-controls__group">
+              <span className="replay-controls__label">Actions</span>
+
+              <button type="button" onClick={loadCustomRangeRoute}>
+                Load Range
+              </button>
+            </div>
           </div>
         </>
       ) : (

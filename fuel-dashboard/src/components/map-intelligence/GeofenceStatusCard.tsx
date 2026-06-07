@@ -19,6 +19,10 @@ function GeofenceStatusCard() {
 
   const positionStatus = useGeofenceStore((state) => state.positionStatus);
 
+  const geofences = useGeofenceStore((state) => state.geofences);
+
+  const transitionEvents = useGeofenceStore((state) => state.transitionEvents);
+
   const checkCurrentPosition = useGeofenceStore(
     (state) => state.checkCurrentPosition,
   );
@@ -66,6 +70,60 @@ function GeofenceStatusCard() {
     selectedOrganization,
   ]);
 
+  const totalGeofences = geofences.length;
+
+  const totalEntries = transitionEvents.filter(
+    (event) => event.transition_type === "ENTERED_ZONE",
+  ).length;
+
+  const totalExits = transitionEvents.filter(
+    (event) => event.transition_type === "EXITED_ZONE",
+  ).length;
+
+  const latestTransition =
+    transitionEvents.length > 0 ? transitionEvents[0] : null;
+
+  const zoneActivityCounts = transitionEvents.reduce<
+    Record<string, { name: string; count: number }>
+  >((counts, event) => {
+    const existingZone = counts[event.geofence_id];
+
+    if (!existingZone) {
+      counts[event.geofence_id] = {
+        name: event.geofence_name,
+        count: 1,
+      };
+
+      return counts;
+    }
+
+    existingZone.count += 1;
+
+    return counts;
+  }, {});
+
+  const mostActiveZone = Object.values(zoneActivityCounts).sort(
+    (firstZone, secondZone) => secondZone.count - firstZone.count,
+  )[0];
+
+  const totalTransitions = transitionEvents.length;
+
+  const mostActiveZonePercentage =
+    mostActiveZone && totalTransitions > 0
+      ? ((mostActiveZone.count / totalTransitions) * 100).toFixed(0)
+      : null;
+
+  const mostActiveZoneConcentration =
+    mostActiveZonePercentage === null
+      ? null
+      : Number(mostActiveZonePercentage) >= 76
+        ? "Operational Dependency"
+        : Number(mostActiveZonePercentage) >= 51
+          ? "High Concentration"
+          : Number(mostActiveZonePercentage) >= 26
+            ? "Moderate Concentration"
+            : "Distributed Activity";
+
   if (!selectedDevice) {
     return null;
   }
@@ -77,7 +135,7 @@ function GeofenceStatusCard() {
   ) {
     return (
       <div className="map-live-card">
-        <label>Geofence Status</label>
+        <label>Geofence Intelligence</label>
         <strong>No location available</strong>
       </div>
     );
@@ -86,7 +144,7 @@ function GeofenceStatusCard() {
   if (!positionStatus) {
     return (
       <div className="map-live-card">
-        <label>Geofence Status</label>
+        <label>Geofence Intelligence</label>
         <strong>Checking zone...</strong>
       </div>
     );
@@ -94,7 +152,7 @@ function GeofenceStatusCard() {
 
   return (
     <div className="map-live-card">
-      <label>Geofence Status</label>
+      <label>Geofence Intelligence</label>
 
       <strong>
         {positionStatus.inside_geofence
@@ -118,6 +176,44 @@ function GeofenceStatusCard() {
           ? "Status follows the current replay position using PostGIS."
           : "Status follows the latest telemetry position using PostGIS."}
       </span>
+
+      <div className="geofence-intelligence-grid">
+        <div>
+          <label>Total Zones</label>
+          <strong>{totalGeofences}</strong>
+        </div>
+
+        <div>
+          <label>Entries</label>
+          <strong>{totalEntries}</strong>
+        </div>
+
+        <div>
+          <label>Exits</label>
+          <strong>{totalExits}</strong>
+        </div>
+      </div>
+
+      {latestTransition && (
+        <span>Latest Transition: {latestTransition.transition_type}</span>
+      )}
+
+      {mostActiveZone && (
+        <div className="geofence-intelligence-highlight">
+          <label>Most Active Zone</label>
+
+          <strong>{mostActiveZone.name}</strong>
+
+          <span>
+            {mostActiveZone.count} transitions · {mostActiveZonePercentage}% of
+            activity
+          </span>
+
+          {mostActiveZoneConcentration && (
+            <small>{mostActiveZoneConcentration}</small>
+          )}
+        </div>
+      )}
     </div>
   );
 }

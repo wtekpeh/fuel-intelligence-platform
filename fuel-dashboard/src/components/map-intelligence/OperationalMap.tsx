@@ -9,8 +9,29 @@ import ReplayCameraController from "./ReplayCameraController";
 import GeofenceLayer from "./GeofenceLayer";
 import GeofenceDrawControl from "./GeofenceDrawControl";
 import GeofenceTransitionLayer from "./GeofenceTransitionLayer";
+import FuelEventHotspotLayer from "./FuelEventHotspotLayer";
+import { useMapLayerStore } from "../../store/mapLayerStore";
+import HotspotClusterLayer from "./HotspotClusterLayer";
 
 function OperationalMap() {
+  const showFuelEvents = useMapLayerStore((state) => state.showFuelEvents);
+
+  const showDeviceMarker = useMapLayerStore((state) => state.showDeviceMarker);
+
+  const showInvestigationEvents = useMapLayerStore(
+    (state) => state.showInvestigationEvents,
+  );
+
+  const showGeofenceTransitions = useMapLayerStore(
+    (state) => state.showGeofenceTransitions,
+  );
+
+  const showGeofences = useMapLayerStore((state) => state.showGeofences);
+
+  const showReplayRoute = useMapLayerStore((state) => state.showReplayRoute);
+
+  const showHotspots = useMapLayerStore((state) => state.showHotspots);
+
   return (
     <div className="operational-map-shell">
       <MapContainer
@@ -24,12 +45,21 @@ function OperationalMap() {
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
-        <GeofenceLayer />
-        <TelemetryRouteLayer />
+        {showGeofences && <GeofenceLayer />}
+
+        {showReplayRoute && <TelemetryRouteLayer />}
+
+        {showFuelEvents && <FuelEventHotspotLayer />}
+
+        {showHotspots && <HotspotClusterLayer />}
+
         <ReplayMarkerLayer />
-        <DeviceMarkerLayer />
-        <InvestigationEventLayer />
-        <GeofenceTransitionLayer />
+
+        {showDeviceMarker && <DeviceMarkerLayer />}
+
+        {showInvestigationEvents && <InvestigationEventLayer />}
+
+        {showGeofenceTransitions && <GeofenceTransitionLayer />}
         <MapFocusController />
         <ReplayCameraController />
         <ReplayPlaybackController />

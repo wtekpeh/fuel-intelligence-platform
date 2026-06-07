@@ -7,6 +7,7 @@ import GeofenceStatusCard from "./GeofenceStatusCard";
 import { useFleetStore } from "../../store/fleetStore";
 import { useTelemetryStore } from "../../store/telemetryStore";
 import GeofenceCreationCard from "./GeofenceCreationCard";
+import MapLayerControlCard from "./MapLayerControlCard";
 
 function MapIntelligencePanel() {
   const selectedDevice = useFleetStore((state) => state.selectedDevice);
@@ -48,6 +49,7 @@ function MapIntelligencePanel() {
         </div>
 
         <aside className="map-intelligence-workspace__side">
+          <MapLayerControlCard />
           <GeofenceStatusCard />
 
           {selectedDeviceReading ? (
