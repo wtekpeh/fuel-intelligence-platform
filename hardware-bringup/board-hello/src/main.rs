@@ -1,93 +1,87 @@
 #![no_std]
 #![no_main]
 
-use embedded_hal_bus::spi::ExclusiveDevice;
-use embedded_sdmmc::{Mode, SdCard, TimeSource, Timestamp, VolumeIdx, VolumeManager};
+mod board;
+mod http;
+mod i2c_scan;
+mod modem;
+
+use board::BoardPins;
 use esp_backtrace as _;
 use esp_hal::delay::Delay;
-use esp_hal::gpio::{Level, Output, OutputConfig};
+use esp_hal::i2c::master::{Config as I2cConfig, I2c};
 use esp_hal::main;
-use esp_hal::spi::master::{Config, Spi};
 use esp_println::println;
+use modem::Modem;
 
 esp_bootloader_esp_idf::esp_app_desc!();
-
-struct DummyTimeSource;
-
-impl TimeSource for DummyTimeSource {
-    fn get_timestamp(&self) -> Timestamp {
-        Timestamp {
-            year_since_1970: 56,
-            zero_indexed_month: 0,
-            zero_indexed_day: 0,
-            hours: 0,
-            minutes: 0,
-            seconds: 0,
-        }
-    }
-}
 
 #[main]
 fn main() -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default());
     let delay = Delay::new();
 
-    println!("SD write test starting...");
+    println!("A7670E modem AT test starting from modules...");
 
-    let mut peripheral_power = Output::new(peripherals.GPIO12, Level::Low, OutputConfig::default());
+    let mut board_pins = BoardPins::new(peripherals.GPIO12, peripherals.GPIO5, peripherals.GPIO4);
 
-    peripheral_power.set_high();
-    delay.delay_millis(1000);
+    Modem::power_on(
+        &mut board_pins.modem_power_on,
+        &mut board_pins.modem_reset,
+        &mut board_pins.modem_pwrkey,
+        &delay,
+    );
 
-    let spi = Spi::new(peripherals.SPI2, Config::default())
+    let mut modem = Modem::new(peripherals.UART1, peripherals.GPIO26, peripherals.GPIO27);
+
+    i2c_scan::print_scan_banner();
+
+    let mut i2c = I2c::new(peripherals.I2C0, I2cConfig::default())
         .unwrap()
-        .with_sck(peripherals.GPIO14)
-        .with_miso(peripherals.GPIO2)
-        .with_mosi(peripherals.GPIO15);
+        .with_sda(peripherals.GPIO32)
+        .with_scl(peripherals.GPIO33);
 
-    let sd_cs = Output::new(peripherals.GPIO13, Level::High, OutputConfig::default());
-
-    let spi_device = ExclusiveDevice::new(spi, sd_cs, delay).unwrap();
-
-    let sdcard = SdCard::new(spi_device, delay);
-
-    match sdcard.num_bytes() {
-        Ok(size) => println!("SD detected. Size: {} bytes", size),
-        Err(_) => println!("SD detect failed."),
-    }
-
-    let volume_manager = VolumeManager::new(sdcard, DummyTimeSource);
-
-    match volume_manager.open_volume(VolumeIdx(0)) {
-        Ok(volume0) => {
-            println!("Volume opened.");
-
-            match volume0.open_root_dir() {
-                Ok(root_dir) => {
-                    println!("Root directory opened.");
-
-                    match root_dir.open_file_in_dir("FUEL_LOG.TXT", Mode::ReadWriteCreateOrAppend) {
-                        Ok(mut file) => {
-                            println!("File opened.");
-
-                            let _ = file.write(b"Fuel Intelligence Platform SD write test\r\n");
-                            let _ = file.write(b"Board: LILYGO T-A7670E R2\r\n");
-                            let _ = file.write(b"Status: SD logging works\r\n");
-                            let _ = file.flush();
-
-                            println!("Write complete.");
-                        }
-                        Err(_) => println!("Failed to open file."),
-                    }
-                }
-                Err(_) => println!("Failed to open root directory."),
-            }
-        }
-        Err(_) => println!("Failed to open volume."),
-    }
+    i2c_scan::scan_i2c_bus(&mut i2c);
 
     loop {
-        println!("SD write test alive...");
-        delay.delay_millis(3000);
+        modem.send_command_and_print_response(b"AT\r\n", "AT", &delay);
+        delay.delay_millis(1000);
+
+        modem.send_command_and_print_response(b"AT+CPIN?\r\n", "AT+CPIN?", &delay);
+        delay.delay_millis(1000);
+
+        modem.send_command_and_print_response(b"AT+CSQ\r\n", "AT+CSQ", &delay);
+        delay.delay_millis(1000);
+
+        modem.send_command_and_print_response(b"AT+CEREG?\r\n", "AT+CEREG?", &delay);
+        delay.delay_millis(1000);
+
+        modem.send_command_and_print_response(b"AT+CGATT?\r\n", "AT+CGATT?", &delay);
+        delay.delay_millis(1000);
+
+        modem.send_command_and_print_response(b"AT+CGPADDR\r\n", "AT+CGPADDR", &delay);
+        delay.delay_millis(1000);
+
+        modem.send_command_and_print_response(b"AT+CGNSSPWR=1\r\n", "AT+CGNSSPWR=1", &delay);
+        delay.delay_millis(2000);
+
+        modem.send_command_and_print_response(b"AT+CGNSSPWR?\r\n", "AT+CGNSSPWR?", &delay);
+        delay.delay_millis(1000);
+
+        modem.send_command_and_print_response(b"AT+CGNSINF\r\n", "AT+CGNSINF", &delay);
+        delay.delay_millis(1000);
+
+        modem.send_command_and_print_response(b"AT+CGPS=1\r\n", "AT+CGPS=1", &delay);
+        delay.delay_millis(2000);
+
+        modem.send_command_and_print_response(b"AT+CGPSINFO\r\n", "AT+CGPSINFO", &delay);
+        delay.delay_millis(5000);
+
+        modem.send_command_and_print_response(b"AT+CAGPS\r\n", "AT+CAGPS", &delay);
+        delay.delay_millis(1000);
+
+        http::run_http_diagnostic(&mut modem, &delay);
+
+        delay.delay_millis(10000);
     }
 }
