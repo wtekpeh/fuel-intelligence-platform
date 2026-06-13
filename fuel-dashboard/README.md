@@ -334,7 +334,6 @@ Planned Phase 2 Features:
 - analytics charts and trends
 - predictive operational scoring
 - geofence utilization intelligence
-- journey intelligence
 - investigation report export
 - sensor adapter visualization
 
@@ -511,6 +510,42 @@ Telemetry Position
 Telemetry Position
 → Replay Event Feed Timeline
 
+## Journey Intelligence
+
+Journey Intelligence provides operational movement summaries derived from replay telemetry and geofence intelligence.
+
+Current Journey Intelligence capabilities:
+
+- journey distance calculation
+- journey duration calculation
+- replay point counting
+- last destination reporting
+- visited zone detection
+- zone visit frequency analysis
+
+Current workflow:
+
+Historical Telemetry
+→ Replay Reconstruction
+→ Journey Intelligence
+
+Journey Intelligence currently provides:
+
+- Distance Travelled (km)
+- Journey Duration
+- Replay Points
+- Visited Zones
+- Zone Visit Counts
+- Last Destination Coordinates
+
+Spatial calculations use:
+
+Turf.js
+→ GeoJSON LineString generation
+→ Journey Distance Calculation
+
+Current implementation is device-scoped and replay-aware.
+
 
 ### Spatial Intelligence & Geofence Operations
 
@@ -531,6 +566,10 @@ Current spatial intelligence capabilities:
 - device-aware geofence assignment foundation
 - replay spatial synchronization
 - operational map workspace controls
+- geofence utilization intelligence
+- zone transition frequency tracking
+- most active zone identification
+- zone concentration classification
 
 Current spatial intelligence architecture:
 
@@ -671,6 +710,15 @@ ENTERED_ZONE and EXITED_ZONE visualization
 geofence transition investigation timeline integration
 geofence transition detail panel
 geofence View on Map workflow
+journey intelligence
+journey distance calculation
+journey duration calculation
+visited zone intelligence
+zone visit frequency analysis
+last destination reporting
+most active zone intelligence
+zone concentration classification
+Turf.js spatial calculations
 
 Pending:
 
@@ -683,17 +731,16 @@ authentication
 Capacitor Android/iOS packaging
 Product Direction
 
-The frontend is being built as an operational fuel monitoring interface first.
+The frontend is being built as an Operational Intelligence Platform.
 
-The goal is not to build a generic admin dashboard.
+The platform supports:
 
-The goal is to support:
+- GPS-only deployments
+- Fuel monitoring deployments
+- Fuel + GPS deployments
+- Fuel + GPS + Vibration deployments
 
-sensor data
-→ operational intelligence
-→ live alert workflow
-→ investigation
-→ resolution
+The platform architecture is designed to evolve into a broader operational intelligence system while remaining useful for customers who only require fleet tracking and geospatial visibility.
 
 The next major product direction is:
 

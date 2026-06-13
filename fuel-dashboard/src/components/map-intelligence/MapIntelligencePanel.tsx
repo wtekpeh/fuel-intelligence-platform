@@ -8,6 +8,8 @@ import { useFleetStore } from "../../store/fleetStore";
 import { useTelemetryStore } from "../../store/telemetryStore";
 import GeofenceCreationCard from "./GeofenceCreationCard";
 import MapLayerControlCard from "./MapLayerControlCard";
+import JourneyIntelligenceCard from "./JourneyIntelligenceCard";
+import ReplayEventSummaryCard from "./ReplayEventSummaryCard";
 
 function MapIntelligencePanel() {
   const selectedDevice = useFleetStore((state) => state.selectedDevice);
@@ -45,6 +47,8 @@ function MapIntelligencePanel() {
             <ReplayControls />
 
             <ReplayStatusCard />
+
+            <ReplayEventSummaryCard />
           </div>
         </div>
 
@@ -85,14 +89,7 @@ function MapIntelligencePanel() {
                 </strong>
               </div>
 
-              <div className="map-live-card">
-                <label>Route Context</label>
-                <strong>Recent Telemetry Path</strong>
-                <span>
-                  Path is reconstructed from the latest telemetry readings for
-                  this selected device.
-                </span>
-              </div>
+              <JourneyIntelligenceCard />
             </>
           ) : (
             <div className="map-live-card">

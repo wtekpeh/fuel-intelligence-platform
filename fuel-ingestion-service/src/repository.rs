@@ -1020,40 +1020,41 @@ pub async fn create_alert(
     severity: String,
     reason: String,
 ) -> Result<AlertResponse, sqlx::Error> {
-    let row = sqlx::query!(
+    let alert = sqlx::query_as!(
+        AlertResponse,
         r#"
-    WITH inserted_alert AS (
-        INSERT INTO alerts (
-            fuel_event_id,
-            alert_type,
-            severity,
-            reason
+        WITH inserted_alert AS (
+            INSERT INTO alerts (
+                fuel_event_id,
+                alert_type,
+                severity,
+                reason
+            )
+            VALUES ($1, $2, $3, $4)
+            RETURNING
+                id,
+                fuel_event_id,
+                alert_type,
+                severity,
+                reason,
+                is_acknowledged,
+                status,
+                created_at
         )
-        VALUES ($1, $2, $3, $4)
-        RETURNING
-            id,
-            fuel_event_id,
-            alert_type,
-            severity,
-            reason,
-            is_acknowledged,
-            status,
-            created_at
-    )
-    SELECT
-        inserted_alert.id,
-        inserted_alert.fuel_event_id,
-        fuel_events.device_id,
-        inserted_alert.alert_type,
-        inserted_alert.severity,
-        inserted_alert.reason,
-        inserted_alert.is_acknowledged,
-        inserted_alert.status,
-        inserted_alert.created_at
-    FROM inserted_alert
-    LEFT JOIN fuel_events
-        ON fuel_events.id = inserted_alert.fuel_event_id
-    "#,
+        SELECT
+            inserted_alert.id AS "id!",
+            inserted_alert.fuel_event_id,
+            fuel_events.device_id,
+            inserted_alert.alert_type AS "alert_type!",
+            inserted_alert.severity AS "severity!",
+            inserted_alert.reason AS "reason!",
+            inserted_alert.is_acknowledged AS "is_acknowledged!",
+            inserted_alert.status AS "status!",
+            inserted_alert.created_at AS "created_at!"
+        FROM inserted_alert
+        LEFT JOIN fuel_events
+            ON fuel_events.id = inserted_alert.fuel_event_id
+        "#,
         fuel_event_id,
         alert_type,
         severity,
@@ -1062,17 +1063,7 @@ pub async fn create_alert(
     .fetch_one(db_pool)
     .await?;
 
-    Ok(AlertResponse {
-        id: row.id,
-        fuel_event_id: row.fuel_event_id,
-        device_id: row.device_id,
-        alert_type: row.alert_type,
-        severity: row.severity,
-        reason: row.reason,
-        is_acknowledged: row.is_acknowledged,
-        status: row.status,
-        created_at: row.created_at,
-    })
+    Ok(alert)
 }
 
 pub async fn get_recent_alerts(
