@@ -83,7 +83,7 @@ export function InvestigationPanel() {
         </div>
 
         <div>
-          <label>Sensor Health</label>
+          <label>Sensor Health Events</label>
           <strong>{sensorHealthEvents.length}</strong>
         </div>
 
@@ -139,7 +139,7 @@ export function InvestigationPanel() {
           }
           onClick={() => setActiveTimelineFilter("sensor_health")}
         >
-          Sensor Health
+          Sensor Health Events
         </button>
 
         <button
@@ -151,7 +151,7 @@ export function InvestigationPanel() {
           }
           onClick={() => setActiveTimelineFilter("geofence_transition")}
         >
-          Geofence
+          Geofence Events
         </button>
       </div>
 
