@@ -76,4 +76,32 @@ impl<'d> Modem<'d> {
             }
         }
     }
+
+    pub fn send_command_and_collect_response(
+        &mut self,
+        command: &[u8],
+        label: &str,
+        delay: &Delay,
+    ) -> Option<[u8; 256]> {
+        let _ = self.uart.write(command);
+
+        println!("Sent: {}", label);
+
+        delay.delay_millis(1000);
+
+        let mut buffer = [0u8; 256];
+
+        match self.uart.read(&mut buffer) {
+            Ok(bytes_read) => {
+                println!("Collected {} byte(s)", bytes_read);
+
+                Some(buffer)
+            }
+            Err(_) => {
+                println!("No response received.");
+
+                None
+            }
+        }
+    }
 }
