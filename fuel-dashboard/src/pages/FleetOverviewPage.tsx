@@ -18,6 +18,30 @@ export function FleetOverviewPage() {
 
   const fleetItems = useFleetStore((state) => state.fleetItems);
 
+  const offlineDevices = fleetItems.filter(
+    (item) => item.device_status === "OFFLINE",
+  );
+
+  const staleDevices = fleetItems.filter(
+    (item) => item.device_status === "STALE",
+  );
+
+  const devicesWithAlerts = fleetItems.filter(
+    (item) => item.open_alert_count > 0,
+  );
+
+  const totalOpenAlerts = fleetItems.reduce(
+    (totalAlerts, item) => totalAlerts + item.open_alert_count,
+    0,
+  );
+
+  const fleetRiskLevel =
+    offlineDevices.length > 0 || totalOpenAlerts >= 5
+      ? "HIGH"
+      : staleDevices.length > 0 || totalOpenAlerts > 0
+        ? "MODERATE"
+        : "HEALTHY";
+
   const readings = useTelemetryStore((state) => state.readings);
 
   useFleetOverview(selectedOrganization?.organization_id ?? null);
@@ -35,6 +59,48 @@ export function FleetOverviewPage() {
           Review assets, connected devices, sensors, and operational status
           before opening the live dashboard.
         </p>
+      </section>
+
+      <section className="fleet-attention-center">
+        <div className="fleet-attention-card">
+          <label>Offline Devices</label>
+          <strong>{offlineDevices.length}</strong>
+        </div>
+
+        <div className="fleet-attention-card">
+          <label>Stale Devices</label>
+          <strong>{staleDevices.length}</strong>
+        </div>
+
+        <div className="fleet-attention-card">
+          <label>Devices With Alerts</label>
+          <strong>{devicesWithAlerts.length}</strong>
+        </div>
+
+        <div className="fleet-attention-card">
+          <label>Total Open Alerts</label>
+          <strong>{totalOpenAlerts}</strong>
+        </div>
+      </section>
+
+      <section
+        className={`fleet-status-banner fleet-status-banner--${fleetRiskLevel.toLowerCase()}`}
+      >
+        <label>Fleet Status</label>
+
+        <strong>
+          {fleetRiskLevel === "HIGH"
+            ? "Operational Risk Elevated"
+            : fleetRiskLevel === "MODERATE"
+              ? "Moderate Attention Required"
+              : "Fleet Healthy"}
+        </strong>
+
+        <span>
+          {offlineDevices.length} offline device(s), {staleDevices.length} stale
+          device(s), {devicesWithAlerts.length} device(s) with alerts,{" "}
+          {totalOpenAlerts} open alert(s).
+        </span>
       </section>
 
       <section className="fleet-grid">
