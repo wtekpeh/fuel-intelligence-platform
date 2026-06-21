@@ -5,3 +5,4 @@ export * from "./organization";
 export * from "./fleet";
 export * from "./investigation";
 export * from "./geofence";
+export * from "./analytics";

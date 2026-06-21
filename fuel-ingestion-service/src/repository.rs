@@ -5,10 +5,12 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::models::{
-    AlertAcknowledgementResponse, AlertResponse, CreateGeofenceRequest, DeviceHealthEventResponse,
-    DeviceStateEventResponse, FuelEventResponse, FuelReading, Geofence, GeofencePositionMatch,
-    GeofenceTransitionEventResponse, OrganizationFleetOverviewResponse,
-    OrganizationOverviewResponse, SensorHealthEventResponse, TelemetryStreamResponse,
+    AlertAcknowledgementResponse, AlertResponse, AlertTrendPoint, AlertTrendSummary,
+    AlertTrendsResponse, CreateGeofenceRequest, DeviceHealthEventResponse,
+    DeviceStateEventResponse, FuelEventResponse, FuelReading, Geofence, GeofenceActivityTrendPoint,
+    GeofenceActivityTrendResponse, GeofencePositionMatch, GeofenceTransitionEventResponse,
+    OrganizationFleetOverviewResponse, OrganizationOverviewResponse, SensorHealthEventResponse,
+    TelemetryStreamResponse,
 };
 use crate::services::device_health::classify_device_status;
 use crate::services::device_state::{
@@ -1112,6 +1114,103 @@ pub async fn get_recent_alerts(
         .collect())
 }
 
+pub async fn get_alert_trends(
+    db_pool: &PgPool,
+    device_id: Option<Uuid>,
+    days: i64,
+) -> Result<AlertTrendsResponse, sqlx::Error> {
+    let safe_days = if days < 1 {
+        30
+    } else if days > 90 {
+        90
+    } else {
+        days
+    };
+
+    let summary_row = sqlx::query!(
+        r#"
+        SELECT
+            COUNT(*) AS "total_alerts!",
+            COUNT(*) FILTER (WHERE alerts.alert_type = 'THEFT') AS "theft_alerts!",
+            COUNT(*) FILTER (WHERE alerts.alert_type = 'REFILL') AS "refill_alerts!",
+            COUNT(*) FILTER (WHERE alerts.alert_type = 'LEAK') AS "leak_alerts!",
+            COUNT(*) FILTER (WHERE alerts.status = 'OPEN') AS "open_alerts!",
+            COUNT(*) FILTER (WHERE alerts.status = 'ACKNOWLEDGED') AS "acknowledged_alerts!",
+            COUNT(*) FILTER (WHERE alerts.status = 'RESOLVED') AS "resolved_alerts!"
+        FROM alerts
+        LEFT JOIN fuel_events
+            ON fuel_events.id = alerts.fuel_event_id
+        WHERE
+            alerts.created_at >= NOW() - ($2 * INTERVAL '1 day')
+            AND (
+                $1::uuid IS NULL
+                OR fuel_events.device_id = $1
+            )
+        "#,
+        device_id,
+        safe_days as f64
+    )
+    .fetch_one(db_pool)
+    .await?;
+
+    let summary = AlertTrendSummary {
+        total_alerts: summary_row.total_alerts,
+        theft_alerts: summary_row.theft_alerts,
+        refill_alerts: summary_row.refill_alerts,
+        leak_alerts: summary_row.leak_alerts,
+        open_alerts: summary_row.open_alerts,
+        acknowledged_alerts: summary_row.acknowledged_alerts,
+        resolved_alerts: summary_row.resolved_alerts,
+    };
+
+    let trend_rows = sqlx::query!(
+        r#"
+    SELECT
+        alerts.created_at::date AS "day!",
+        alerts.alert_type AS "alert_type!",
+        alerts.status AS "status!",
+        COUNT(*) AS "count!"
+    FROM alerts
+    LEFT JOIN fuel_events
+        ON fuel_events.id = alerts.fuel_event_id
+    WHERE
+        alerts.created_at >= NOW() - ($2 * INTERVAL '1 day')
+        AND (
+            $1::uuid IS NULL
+            OR fuel_events.device_id = $1
+        )
+    GROUP BY
+        alerts.created_at::date,
+        alerts.alert_type,
+        alerts.status
+    ORDER BY
+        alerts.created_at::date ASC,
+        alerts.alert_type ASC,
+        alerts.status ASC
+    "#,
+        device_id,
+        safe_days as f64
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    let trend = trend_rows
+        .into_iter()
+        .map(|row| AlertTrendPoint {
+            day: row.day.to_string(),
+            alert_type: row.alert_type,
+            status: row.status,
+            count: row.count,
+        })
+        .collect();
+
+    Ok(AlertTrendsResponse {
+        days: safe_days,
+        summary,
+        trend,
+    })
+}
+
 pub async fn list_alerts_since(
     db_pool: &PgPool,
     since: chrono::DateTime<chrono::Utc>,
@@ -1778,4 +1877,58 @@ pub async fn get_telemetry_history(
     .await?;
 
     Ok(readings)
+}
+
+pub async fn get_geofence_activity_trends(
+    db_pool: &PgPool,
+    device_id: Option<Uuid>,
+    days: i64,
+) -> Result<GeofenceActivityTrendResponse, sqlx::Error> {
+    let safe_days = if days < 1 {
+        30
+    } else if days > 90 {
+        90
+    } else {
+        days
+    };
+
+    let trend_rows = sqlx::query!(
+        r#"
+        SELECT
+            gte.detected_at::date AS "day!",
+            COUNT(*) FILTER (
+                WHERE gte.transition_type = 'ENTERED_ZONE'
+            ) AS "entries!",
+            COUNT(*) FILTER (
+                WHERE gte.transition_type = 'EXITED_ZONE'
+            ) AS "exits!"
+        FROM geofence_transition_events gte
+        WHERE
+            gte.detected_at >= NOW() - ($2 * INTERVAL '1 day')
+            AND (
+                $1::uuid IS NULL
+                OR gte.device_id = $1
+            )
+        GROUP BY gte.detected_at::date
+        ORDER BY gte.detected_at::date ASC
+        "#,
+        device_id,
+        safe_days as f64
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    let trend = trend_rows
+        .into_iter()
+        .map(|row| GeofenceActivityTrendPoint {
+            day: row.day.to_string(),
+            entries: row.entries,
+            exits: row.exits,
+        })
+        .collect();
+
+    Ok(GeofenceActivityTrendResponse {
+        days: safe_days,
+        trend,
+    })
 }

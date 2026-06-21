@@ -257,3 +257,54 @@ pub struct GeofenceTransitionEventResponse {
     pub detected_at: chrono::DateTime<chrono::Utc>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct AnalyticsAlertTrendQuery {
+    pub device_id: Option<uuid::Uuid>,
+    pub days: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AlertTrendSummary {
+    pub total_alerts: i64,
+    pub theft_alerts: i64,
+    pub refill_alerts: i64,
+    pub leak_alerts: i64,
+    pub open_alerts: i64,
+    pub acknowledged_alerts: i64,
+    pub resolved_alerts: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AlertTrendPoint {
+    pub day: String,
+    pub alert_type: String,
+    pub status: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AlertTrendsResponse {
+    pub days: i64,
+    pub summary: AlertTrendSummary,
+    pub trend: Vec<AlertTrendPoint>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AnalyticsGeofenceActivityQuery {
+    pub device_id: Option<uuid::Uuid>,
+    pub days: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GeofenceActivityTrendPoint {
+    pub day: String,
+    pub entries: i64,
+    pub exits: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GeofenceActivityTrendResponse {
+    pub days: i64,
+    pub trend: Vec<GeofenceActivityTrendPoint>,
+}

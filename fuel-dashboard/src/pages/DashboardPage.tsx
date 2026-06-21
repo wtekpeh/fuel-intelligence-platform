@@ -12,6 +12,7 @@ import { SelectedDeviceStrip } from "../components/fleet/SelectedDeviceStrip";
 import { InvestigationPanel } from "../components/investigation/InvestigationPanel";
 import MapIntelligencePanel from "../components/map-intelligence/MapIntelligencePanel";
 import { useInvestigationData } from "../services/useInvestigationData";
+import AlertTrendsPanel from "../components/analytics/AlertTrendsPanel";
 
 export function DashboardPage() {
   const activeSection = useDashboardSectionStore(
@@ -59,15 +60,7 @@ export function DashboardPage() {
 
       {activeSection === "map" && <MapIntelligencePanel />}
 
-      {activeSection === "analytics" && (
-        <section className="placeholder-panel">
-          <h2>Analytics</h2>
-          <p>
-            Trend charts and operational intelligence summaries will be added
-            here.
-          </p>
-        </section>
-      )}
+      {activeSection === "analytics" && <AlertTrendsPanel />}
     </main>
   );
 }
