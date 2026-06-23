@@ -438,6 +438,78 @@ The backend automatically refreshes device health in the background using `DEVIC
 
 Manual refresh is still available for testing, but production does not depend on manually calling the refresh endpoint.
 
+# Analytics Intelligence
+
+The backend now exposes dedicated analytics endpoints that provide
+aggregated operational intelligence separate from raw operational
+event streams.
+
+Operational Endpoints
+
+→ raw events
+→ investigations
+→ timeline reconstruction
+
+Examples:
+
+GET /api/device-health-events
+GET /api/geofence-transition-events
+GET /api/alerts
+
+Analytics Endpoints
+
+→ trend analysis
+→ fleet intelligence
+→ operational scoring
+
+Current analytics APIs:
+
+GET /api/analytics/alert-trends
+GET /api/analytics/geofence-activity
+GET /api/analytics/device-health-trends
+GET /api/analytics/geofence-utilization
+
+Supported analytics periods:
+
+days=7
+days=30
+days=90
+
+## Analytics APIs
+
+Document:
+
+GET /api/analytics/alert-trends
+
+Returns:
+
+total alerts
+alert breakdown
+daily alert trend
+GET /api/analytics/geofence-activity
+
+Returns:
+
+entries per day
+exits per day
+zone activity trends
+GET /api/analytics/device-health-trends
+
+Returns:
+
+offline events
+stale events
+recovery events
+reliability issue counts
+most unreliable devices
+GET /api/analytics/geofence-utilization
+
+Returns:
+
+zone visit counts
+most active zones
+geofence utilization ranking
+
 # Current API Endpoints
 
 ## Organization Operational Overview
@@ -1282,6 +1354,12 @@ Device / Simulator
     ├── Geofence Intelligence
     ├── PostGIS Spatial Checks
     └── Replay Spatial Investigation
+
+  Analytics Intelligence Layer
+    ├── Alert Trends
+    ├── Device Reliability Analytics
+    ├── Geofence Activity Analytics
+    └── Geofence Utilization Analytics
 ````
 
 → Live Distribution Layer
@@ -1337,6 +1415,30 @@ Implemented:
 - replay-aware geofence intelligence
 - device-aware geofence assignment foundation
 - telemetry position geofence checks
+- organization operational overview API
+- organization fleet overview API
+- device-scoped operational filtering
+- alert trend analytics
+- geofence activity analytics
+- device reliability analytics
+- geofence utilization analytics
+- analytics aggregation endpoints
+
+Upcoming Architecture Initiative
+
+Device Capability Profiles
+
+The platform is transitioning toward explicit device capability
+profiles to support:
+
+GPS_ONLY
+GPS_VIBRATION
+FUEL_GPS
+FUEL_GPS_VIBRATION
+
+This will allow onboarding workflows, ingestion processing,
+sensor creation, and analytics behavior to be driven by
+declared device capabilities instead of inferred sensors.
 
 Pending:
 

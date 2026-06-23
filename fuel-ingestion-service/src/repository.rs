@@ -6,9 +6,10 @@ use uuid::Uuid;
 
 use crate::models::{
     AlertAcknowledgementResponse, AlertResponse, AlertTrendPoint, AlertTrendSummary,
-    AlertTrendsResponse, CreateGeofenceRequest, DeviceHealthEventResponse,
-    DeviceStateEventResponse, FuelEventResponse, FuelReading, Geofence, GeofenceActivityTrendPoint,
-    GeofenceActivityTrendResponse, GeofencePositionMatch, GeofenceTransitionEventResponse,
+    AlertTrendsResponse, CreateGeofenceRequest, DeviceHealthEventResponse, DeviceHealthTrendDevice,
+    DeviceHealthTrendResponse, DeviceStateEventResponse, FuelEventResponse, FuelReading, Geofence,
+    GeofenceActivityTrendPoint, GeofenceActivityTrendResponse, GeofencePositionMatch,
+    GeofenceTransitionEventResponse, GeofenceUtilizationResponse, GeofenceUtilizationZone,
     OrganizationFleetOverviewResponse, OrganizationOverviewResponse, SensorHealthEventResponse,
     TelemetryStreamResponse,
 };
@@ -1930,5 +1931,122 @@ pub async fn get_geofence_activity_trends(
     Ok(GeofenceActivityTrendResponse {
         days: safe_days,
         trend,
+    })
+}
+
+pub async fn get_device_health_trends(
+    db_pool: &PgPool,
+    days: i64,
+) -> Result<DeviceHealthTrendResponse, sqlx::Error> {
+    let safe_days = if days < 1 {
+        30
+    } else if days > 90 {
+        90
+    } else {
+        days
+    };
+
+    let rows = sqlx::query!(
+        r#"
+        SELECT
+            d.id AS "device_id!",
+            d.device_code AS "device_code!",
+            COUNT(*) FILTER (
+                WHERE dhe.new_status = 'OFFLINE'
+            ) AS "offline_events!",
+            COUNT(*) FILTER (
+                WHERE dhe.new_status = 'STALE'
+            ) AS "stale_events!",
+            COUNT(*) FILTER (
+                WHERE dhe.new_status = 'ONLINE'
+            ) AS "recovery_events!"
+        FROM device_health_events dhe
+        INNER JOIN devices d
+            ON d.id = dhe.device_id
+        WHERE
+            dhe.created_at >= NOW() - ($1 * INTERVAL '1 day')
+        GROUP BY
+            d.id,
+            d.device_code
+        ORDER BY
+            (
+                COUNT(*) FILTER (
+                    WHERE dhe.new_status IN ('OFFLINE', 'STALE')
+                )
+            ) DESC
+        LIMIT 10
+        "#,
+        safe_days as f64
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    let devices = rows
+        .into_iter()
+        .map(|row| DeviceHealthTrendDevice {
+            device_id: row.device_id,
+            device_code: row.device_code,
+            offline_events: row.offline_events,
+            stale_events: row.stale_events,
+            recovery_events: row.recovery_events,
+            reliability_issue_count: row.offline_events + row.stale_events,
+        })
+        .collect();
+
+    Ok(DeviceHealthTrendResponse {
+        days: safe_days,
+        devices,
+    })
+}
+
+pub async fn get_geofence_utilization(
+    db_pool: &PgPool,
+    days: i64,
+) -> Result<GeofenceUtilizationResponse, sqlx::Error> {
+    let safe_days = if days < 1 {
+        30
+    } else if days > 90 {
+        90
+    } else {
+        days
+    };
+
+    let rows = sqlx::query!(
+        r#"
+    SELECT
+        g.name AS "geofence_name!",
+        COUNT(*) FILTER (
+            WHERE gte.transition_type = 'ENTERED_ZONE'
+        ) AS "visits!"
+    FROM geofence_transition_events gte
+    INNER JOIN geofences g
+        ON g.id = gte.geofence_id
+    WHERE
+        gte.detected_at >= NOW() - ($1 * INTERVAL '1 day')
+    GROUP BY
+        g.name
+    ORDER BY
+        COUNT(*) FILTER (
+            WHERE gte.transition_type = 'ENTERED_ZONE'
+        ) DESC,
+        g.name ASC
+    LIMIT 10
+    "#,
+        safe_days as f64
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    let zones = rows
+        .into_iter()
+        .map(|row| GeofenceUtilizationZone {
+            geofence_name: row.geofence_name,
+            visits: row.visits,
+        })
+        .collect();
+
+    Ok(GeofenceUtilizationResponse {
+        days: safe_days,
+        zones,
     })
 }

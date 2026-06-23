@@ -1,44 +1,28 @@
-import { useDeviceHealthStore } from "../../store/deviceHealthStore";
-import { useFleetStore } from "../../store/fleetStore";
+import { useEffect } from "react";
+import { useAnalyticsStore } from "../../store/analyticsStore";
 
 export default function DeviceHealthTrendsPanel() {
-  const { events } = useDeviceHealthStore();
-  const { fleetItems } = useFleetStore();
+  const {
+    deviceHealthTrends,
+    loadingDeviceHealthTrends,
+    deviceHealthTrendsError,
+    fetchDeviceHealthTrends,
+    selectedDays,
+  } = useAnalyticsStore();
 
-  const unreliableDevices = Object.values(
-    events.reduce<
-      Record<
-        string,
-        {
-          deviceId: string;
-          deviceCode: string;
-          assetName: string;
-          eventCount: number;
-        }
-      >
-    >((deviceTotals, event) => {
-      const matchingFleetItem = fleetItems.find((fleetItem) => {
-        return fleetItem.device_id === event.device_id;
-      });
+  useEffect(() => {
+    fetchDeviceHealthTrends(selectedDays);
+  }, [fetchDeviceHealthTrends, selectedDays]);
 
-      if (!deviceTotals[event.device_id]) {
-        deviceTotals[event.device_id] = {
-          deviceId: event.device_id,
-          deviceCode: matchingFleetItem?.device_code ?? event.device_id,
-          assetName: matchingFleetItem?.asset_name ?? "Unknown Asset",
-          eventCount: 0,
-        };
-      }
+  if (loadingDeviceHealthTrends) {
+    return <p>Loading device health analytics...</p>;
+  }
 
-      deviceTotals[event.device_id].eventCount += 1;
+  if (deviceHealthTrendsError) {
+    return <p>{deviceHealthTrendsError}</p>;
+  }
 
-      return deviceTotals;
-    }, {}),
-  )
-    .sort((firstDevice, secondDevice) => {
-      return secondDevice.eventCount - firstDevice.eventCount;
-    })
-    .slice(0, 5);
+  const unreliableDevices = deviceHealthTrends?.devices ?? [];
 
   return (
     <section className="fleet-card">
@@ -55,12 +39,11 @@ export default function DeviceHealthTrendsPanel() {
 
           <tbody>
             {unreliableDevices.map((device) => (
-              <tr key={device.deviceId}>
+              <tr key={device.device_id}>
                 <td className="analytics-device-cell">
-                  <strong>{device.deviceCode}</strong>
-                  <span>{device.assetName}</span>
+                  <strong>{device.device_code}</strong>
                 </td>
-                <td>{device.eventCount}</td>
+                <td>{device.reliability_issue_count}</td>
               </tr>
             ))}
           </tbody>

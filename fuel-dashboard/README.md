@@ -121,6 +121,8 @@ telemetry
 investigation intelligence
 alerts
 selected operational device
+analytics intelligence
+selected analytics period
 ```
 
 This prevents duplicated polling and ensures all operational surfaces share synchronized live state.
@@ -312,6 +314,19 @@ Device Health
 Investigation
 Analytics
 
+Current Analytics Capabilities:
+
+- Alert Trends
+- Geofence Activity Trends
+- Most Unreliable Devices
+- Geofence Utilization
+
+Shared Analytics Filters:
+
+- Last 7 Days
+- Last 30 Days
+- Last 90 Days
+
 Implemented Dashboard Sections:
 
 - Operations
@@ -338,6 +353,41 @@ Planned Phase 2 Features:
 - sensor adapter visualization
 
 Responsive Design
+
+# Analytics Intelligence
+
+The Analytics dashboard provides aggregated operational intelligence
+separate from raw operational event streams.
+
+Operational Endpoints
+
+→ raw events
+→ investigations
+→ telemetry review
+
+Examples:
+
+GET /api/device-health-events
+GET /api/geofence-transition-events
+
+Analytics Endpoints
+
+→ aggregated intelligence
+→ trend analysis
+→ operational scoring
+
+Examples:
+
+GET /api/analytics/alert-trends
+GET /api/analytics/geofence-activity
+GET /api/analytics/device-health-trends
+GET /api/analytics/geofence-utilization
+
+All analytics surfaces are controlled by a shared analytics period selector:
+
+Last 7 Days
+Last 30 Days
+Last 90 Days
 
 ---
 
@@ -719,6 +769,14 @@ last destination reporting
 most active zone intelligence
 zone concentration classification
 Turf.js spatial calculations
+Analytics Dashboard
+Alert Trends
+Geofence Activity Trends
+Most Unreliable Devices
+Geofence Utilization
+Shared Analytics Filters
+Analytics State Management
+Analytics API Integration
 
 Pending:
 
@@ -726,7 +784,6 @@ landing page / company overview
 company/device/sensor selection
 alert filters
 investigation timeline
-analytics charts
 authentication
 Capacitor Android/iOS packaging
 Product Direction
@@ -742,11 +799,14 @@ The platform supports:
 
 The platform architecture is designed to evolve into a broader operational intelligence system while remaining useful for customers who only require fleet tracking and geospatial visibility.
 
-The next major product direction is:
+Upcoming Architecture Initiative
 
-landing page
-→ company/device/sensor overview
-→ selected operational dashboard
+Device Capability Profiles
+
+The platform is transitioning toward explicit device capability
+profiles so that GPS-only, Fuel-only, Fuel+GPS, and
+Fuel+GPS+Vibration deployments can be onboarded and managed
+through a common operational intelligence architecture.
 
 Then commit mentally that every time we add a major frontend capability, we update this README.
 `````

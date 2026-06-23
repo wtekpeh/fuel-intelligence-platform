@@ -31,3 +31,27 @@ export interface GeofenceActivityTrendResponse {
   days: number;
   trend: GeofenceActivityTrendPoint[];
 }
+
+export interface DeviceHealthTrendDevice {
+  device_id: string;
+  device_code: string;
+  offline_events: number;
+  stale_events: number;
+  recovery_events: number;
+  reliability_issue_count: number;
+}
+
+export interface DeviceHealthTrendResponse {
+  days: number;
+  devices: DeviceHealthTrendDevice[];
+}
+
+export interface GeofenceUtilizationZone {
+  geofence_name: string;
+  visits: number;
+}
+
+export interface GeofenceUtilizationResponse {
+  days: number;
+  zones: GeofenceUtilizationZone[];
+}

@@ -308,3 +308,41 @@ pub struct GeofenceActivityTrendResponse {
     pub days: i64,
     pub trend: Vec<GeofenceActivityTrendPoint>,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct AnalyticsDeviceHealthTrendQuery {
+    pub days: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeviceHealthTrendDevice {
+    pub device_id: uuid::Uuid,
+    pub device_code: String,
+    pub offline_events: i64,
+    pub stale_events: i64,
+    pub recovery_events: i64,
+    pub reliability_issue_count: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeviceHealthTrendResponse {
+    pub days: i64,
+    pub devices: Vec<DeviceHealthTrendDevice>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AnalyticsGeofenceUtilizationQuery {
+    pub days: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GeofenceUtilizationZone {
+    pub geofence_name: String,
+    pub visits: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GeofenceUtilizationResponse {
+    pub days: i64,
+    pub zones: Vec<GeofenceUtilizationZone>,
+}

@@ -1,32 +1,28 @@
-import { useGeofenceStore } from "../../store/geofenceStore";
+import { useEffect } from "react";
+import { useAnalyticsStore } from "../../store/analyticsStore";
 
 export default function GeofenceUtilizationPanel() {
-  const { transitionEvents } = useGeofenceStore();
+  const {
+    geofenceUtilization,
+    loadingGeofenceUtilization,
+    geofenceUtilizationError,
+    fetchGeofenceUtilization,
+    selectedDays,
+  } = useAnalyticsStore();
 
-  const zoneUsageRows = Object.values(
-    transitionEvents.reduce<
-      Record<string, { zoneName: string; visits: number }>
-    >((zoneTotals, event) => {
-      if (event.transition_type !== "ENTERED_ZONE") {
-        return zoneTotals;
-      }
+  useEffect(() => {
+    fetchGeofenceUtilization(selectedDays);
+  }, [fetchGeofenceUtilization, selectedDays]);
 
-      if (!zoneTotals[event.geofence_name]) {
-        zoneTotals[event.geofence_name] = {
-          zoneName: event.geofence_name,
-          visits: 0,
-        };
-      }
+  if (loadingGeofenceUtilization) {
+    return <p>Loading geofence utilization...</p>;
+  }
 
-      zoneTotals[event.geofence_name].visits += 1;
+  if (geofenceUtilizationError) {
+    return <p>{geofenceUtilizationError}</p>;
+  }
 
-      return zoneTotals;
-    }, {}),
-  )
-    .sort((firstZone, secondZone) => {
-      return secondZone.visits - firstZone.visits;
-    })
-    .slice(0, 5);
+  const zones = geofenceUtilization?.zones ?? [];
 
   return (
     <section className="fleet-card">
@@ -42,9 +38,9 @@ export default function GeofenceUtilizationPanel() {
           </thead>
 
           <tbody>
-            {zoneUsageRows.map((zone) => (
-              <tr key={zone.zoneName}>
-                <td>{zone.zoneName}</td>
+            {zones.map((zone) => (
+              <tr key={zone.geofence_name}>
+                <td>{zone.geofence_name}</td>
                 <td>{zone.visits}</td>
               </tr>
             ))}

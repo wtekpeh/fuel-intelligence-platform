@@ -9,18 +9,21 @@ use crate::services::fuel_detection::{detect_fuel_event, detect_possible_leak};
 use crate::services::sensor_health::detect_frozen_fuel_sensor;
 use crate::{
     models::{
-        AlertResponse, AnalyticsGeofenceActivityQuery, ApiResponse, CheckPositionRequest,
-        CheckPositionResponse, CreateGeofenceRequest, DeviceStateEventResponse,
-        GeofenceActivityTrendResponse, HeartbeatRequest, HeartbeatResponse, ReadingBatch,
+        AlertResponse, AnalyticsDeviceHealthTrendQuery, AnalyticsGeofenceActivityQuery,
+        AnalyticsGeofenceUtilizationQuery, ApiResponse, CheckPositionRequest,
+        CheckPositionResponse, CreateGeofenceRequest, DeviceHealthTrendResponse,
+        DeviceStateEventResponse, GeofenceActivityTrendResponse, GeofenceUtilizationResponse,
+        HeartbeatRequest, HeartbeatResponse, ReadingBatch,
     },
     repository::{
         acknowledge_alert, check_position_against_geofences, create_geofence,
         detect_and_store_geofence_transitions_from_previous_position, get_alert_trends,
-        get_geofence_activity_trends, get_or_create_demo_sensor, get_organization_fleet_overview,
-        get_organization_id_for_device, get_organization_overview, get_recent_alerts,
-        get_recent_device_health_events, get_recent_device_state_events, get_recent_fuel_events,
-        get_recent_sensor_health_events, get_recent_telemetry_stream, get_telemetry_history,
-        list_geofences, list_recent_geofence_transition_events, mark_device_heartbeat_seen,
+        get_device_health_trends, get_geofence_activity_trends, get_geofence_utilization,
+        get_or_create_demo_sensor, get_organization_fleet_overview, get_organization_id_for_device,
+        get_organization_overview, get_recent_alerts, get_recent_device_health_events,
+        get_recent_device_state_events, get_recent_fuel_events, get_recent_sensor_health_events,
+        get_recent_telemetry_stream, get_telemetry_history, list_geofences,
+        list_recent_geofence_transition_events, mark_device_heartbeat_seen,
         mark_device_payload_seen, refresh_device_statuses, resolve_alert,
         save_fuel_reading_as_sensor_reading,
     },
@@ -514,6 +517,32 @@ pub async fn get_geofence_activity_trends_handler(
     let days = query.days.unwrap_or(30);
 
     let response = get_geofence_activity_trends(&state.db_pool, query.device_id, days)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(response))
+}
+
+pub async fn get_device_health_trends_handler(
+    State(state): State<AppState>,
+    Query(query): Query<AnalyticsDeviceHealthTrendQuery>,
+) -> Result<Json<DeviceHealthTrendResponse>, StatusCode> {
+    let days = query.days.unwrap_or(30);
+
+    let response = get_device_health_trends(&state.db_pool, days)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(response))
+}
+
+pub async fn get_geofence_utilization_handler(
+    State(state): State<AppState>,
+    Query(query): Query<AnalyticsGeofenceUtilizationQuery>,
+) -> Result<Json<GeofenceUtilizationResponse>, StatusCode> {
+    let days = query.days.unwrap_or(30);
+
+    let response = get_geofence_utilization(&state.db_pool, days)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 

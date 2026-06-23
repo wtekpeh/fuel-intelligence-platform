@@ -1,7 +1,8 @@
 use crate::config::AppConfig;
 use crate::handlers::{
     acknowledge_alert_handler, check_position_against_geofences_handler, create_geofence_handler,
-    get_alert_trends_handler, get_geofence_activity_trends_handler, ingest_reading_batch,
+    get_alert_trends_handler, get_device_health_trends_handler,
+    get_geofence_activity_trends_handler, get_geofence_utilization_handler, ingest_reading_batch,
     list_alerts, list_device_state_events, list_geofence_transition_events_handler,
     list_geofences_handler, list_organization_fleet_overview, list_organization_overview,
     list_recent_device_health_events, list_recent_fuel_events, list_recent_sensor_health_events,
@@ -68,6 +69,14 @@ pub fn app_routes(db_pool: PgPool, config: AppConfig, alert_hub: AlertHub) -> Ro
         .route("/api/device-state-events", get(list_device_state_events))
         .route("/api/alerts", get(list_alerts))
         .route("/api/analytics/alert-trends", get(get_alert_trends_handler))
+        .route(
+            "/api/analytics/device-health-trends",
+            get(get_device_health_trends_handler),
+        )
+        .route(
+            "/api/analytics/geofence-utilization",
+            get(get_geofence_utilization_handler),
+        )
         .route(
             "/api/analytics/geofence-activity",
             get(get_geofence_activity_trends_handler),
