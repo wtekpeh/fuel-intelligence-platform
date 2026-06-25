@@ -346,3 +346,54 @@ pub struct GeofenceUtilizationResponse {
     pub days: i64,
     pub zones: Vec<GeofenceUtilizationZone>,
 }
+
+// -----------------------------------------------------------------------------
+// Device Management
+// -----------------------------------------------------------------------------
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct HardwareProfile {
+    pub id: uuid::Uuid,
+    pub profile_code: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct HardwareProfileSensor {
+    pub id: uuid::Uuid,
+    pub hardware_profile_id: uuid::Uuid,
+    pub sensor_type: String,
+    pub unit: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RegisterDeviceRequest {
+    pub asset_id: uuid::Uuid,
+    pub device_code: String,
+    pub hardware_profile_id: uuid::Uuid,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct DeviceSummary {
+    pub id: uuid::Uuid,
+    pub device_code: String,
+    pub asset_id: uuid::Uuid,
+    pub hardware_profile_id: uuid::Uuid,
+    pub hardware_profile_code: String,
+    pub hardware_profile_name: String,
+    pub status: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct DeviceSensorSummary {
+    pub id: uuid::Uuid,
+    pub device_id: uuid::Uuid,
+    pub sensor_code: String,
+    pub sensor_type: String,
+    pub unit: String,
+    pub created_at: DateTime<Utc>,
+}

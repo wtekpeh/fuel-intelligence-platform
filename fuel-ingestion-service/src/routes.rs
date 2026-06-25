@@ -9,6 +9,7 @@ use crate::handlers::{
     list_recent_telemetry_stream, list_telemetry_history, receive_heartbeat, refresh_device_health,
     resolve_alert_handler,
 };
+use crate::platform_routes::platform_routes;
 use crate::services::alert_hub::AlertHub;
 use crate::ws::alerts_ws_handler;
 use axum::http::{Method, header};
@@ -50,6 +51,7 @@ pub fn app_routes(db_pool: PgPool, config: AppConfig, alert_hub: AlertHub) -> Ro
         .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]);
 
     Router::new()
+        .merge(platform_routes())
         .route("/api/fuel-readings/batch", post(ingest_reading_batch))
         .route("/api/fuel-events", get(list_recent_fuel_events))
         .route(

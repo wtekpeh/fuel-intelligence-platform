@@ -16,6 +16,7 @@ export function LandingPage() {
   );
 
   const showFleet = useAppViewStore((state) => state.showFleet);
+  const showPlatform = useAppViewStore((state) => state.showPlatform);
 
   return (
     <main className="landing-page">
@@ -28,6 +29,16 @@ export function LandingPage() {
           Monitor organizations, assets, sensors, fuel events, and operational
           intelligence from a centralized platform.
         </p>
+
+        <div className="landing-actions">
+          <button
+            type="button"
+            className="landing-platform-button"
+            onClick={showPlatform}
+          >
+            Platform Management
+          </button>
+        </div>
       </section>
 
       <section className="organization-grid">

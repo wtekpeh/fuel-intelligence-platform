@@ -1424,25 +1424,86 @@ Implemented:
 - geofence utilization analytics
 - analytics aggregation endpoints
 
-Upcoming Architecture Initiative
+# Device & Hardware Management
 
-Device Capability Profiles
+The platform now includes a dedicated Device & Hardware Management
+layer that is separate from the Operational Intelligence layer.
 
-The platform is transitioning toward explicit device capability
-profiles to support:
+This provides the production foundation for onboarding physical
+tracking hardware independently of telemetry ingestion.
 
+Current capabilities:
+
+- Hardware Profile management
+- Hardware Profile sensor definitions
+- Device registration
+- Automatic sensor provisioning
+- Device listing
+- Device sensor listing
+
+Current hardware profiles:
+
+```text
 GPS_ONLY
-GPS_VIBRATION
-FUEL_GPS
-FUEL_GPS_VIBRATION
+FUEL_FULL
+```
 
-This will allow onboarding workflows, ingestion processing,
-sensor creation, and analytics behavior to be driven by
-declared device capabilities instead of inferred sensors.
+Current onboarding workflow:
+
+```text
+Create Organization
+        ↓
+Create Asset
+        ↓
+Register Device
+        ↓
+Select Hardware Profile
+        ↓
+Automatically Provision Sensors
+```
+
+Automatic provisioning examples:
+
+```text
+GPS_ONLY
+→ GPS
+
+FUEL_FULL
+→ Fuel
+→ GPS
+→ Vibration
+```
+
+Current Platform Management APIs:
+
+```http
+GET  /api/hardware-profiles
+
+GET  /api/hardware-profiles/{hardware_profile_id}/sensors
+
+POST /api/devices
+
+GET  /api/devices
+
+GET  /api/devices/{device_id}/sensors
+```
+
+This architecture separates Platform Management from Operational
+Intelligence, allowing the ingestion engine to process only the
+telemetry supported by the registered hardware profile.
+
+Future hardware support includes:
+
+- LilyGO devices
+- GPS-only deployments
+- Fuel monitoring deployments
+- Fuel + GPS deployments
+- Fuel + GPS + Vibration deployments
+- Custom PCB hardware
+- Additional hardware profiles without database redesign
 
 Pending:
 
-- live dashboard
 - ML-assisted anomaly scoring
 - Redis/Kafka streaming
 - industrial hardware integration

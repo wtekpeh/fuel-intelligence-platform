@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type AppView = "landing" | "fleet" | "dashboard";
+export type AppView = "landing" | "fleet" | "dashboard" | "platform";
 
 interface AppViewStore {
   activeView: AppView;
@@ -8,6 +8,7 @@ interface AppViewStore {
   showLanding: () => void;
   showFleet: () => void;
   showDashboard: () => void;
+  showPlatform: () => void;
 }
 
 export const useAppViewStore = create<AppViewStore>((set) => ({
@@ -26,5 +27,10 @@ export const useAppViewStore = create<AppViewStore>((set) => ({
   showDashboard: () =>
     set({
       activeView: "dashboard",
+    }),
+
+  showPlatform: () =>
+    set({
+      activeView: "platform",
     }),
 }));

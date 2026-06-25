@@ -7,9 +7,10 @@ use uuid::Uuid;
 use crate::models::{
     AlertAcknowledgementResponse, AlertResponse, AlertTrendPoint, AlertTrendSummary,
     AlertTrendsResponse, CreateGeofenceRequest, DeviceHealthEventResponse, DeviceHealthTrendDevice,
-    DeviceHealthTrendResponse, DeviceStateEventResponse, FuelEventResponse, FuelReading, Geofence,
-    GeofenceActivityTrendPoint, GeofenceActivityTrendResponse, GeofencePositionMatch,
-    GeofenceTransitionEventResponse, GeofenceUtilizationResponse, GeofenceUtilizationZone,
+    DeviceHealthTrendResponse, DeviceSensorSummary, DeviceStateEventResponse, DeviceSummary,
+    FuelEventResponse, FuelReading, Geofence, GeofenceActivityTrendPoint,
+    GeofenceActivityTrendResponse, GeofencePositionMatch, GeofenceTransitionEventResponse,
+    GeofenceUtilizationResponse, GeofenceUtilizationZone, HardwareProfile, HardwareProfileSensor,
     OrganizationFleetOverviewResponse, OrganizationOverviewResponse, SensorHealthEventResponse,
     TelemetryStreamResponse,
 };
@@ -92,6 +93,169 @@ pub async fn get_or_create_demo_sensor(
 
     Ok((device_id, sensor_id))
 }
+
+// -----------------------------------------------------------------------------
+// Platform Management
+// -----------------------------------------------------------------------------
+
+pub async fn get_hardware_profile_sensors(
+    db_pool: &PgPool,
+    hardware_profile_id: Uuid,
+) -> Result<Vec<HardwareProfileSensor>> {
+    let sensors = sqlx::query_as!(
+        HardwareProfileSensor,
+        r#"
+        SELECT
+            id,
+            hardware_profile_id,
+            sensor_type,
+            unit,
+            created_at
+        FROM hardware_profile_sensors
+        WHERE hardware_profile_id = $1
+        ORDER BY sensor_type
+        "#,
+        hardware_profile_id
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    Ok(sensors)
+}
+
+pub async fn create_sensors_for_hardware_profile(
+    db_pool: &PgPool,
+    device_id: Uuid,
+    hardware_profile_id: Uuid,
+) -> Result<Vec<Uuid>> {
+    let profile_sensors = get_hardware_profile_sensors(db_pool, hardware_profile_id).await?;
+
+    let mut created_sensor_ids = Vec::new();
+
+    for profile_sensor in profile_sensors {
+        let sensor_code = profile_sensor.sensor_type.to_lowercase();
+
+        let sensor_id = get_or_create_sensor(
+            db_pool,
+            device_id,
+            &sensor_code,
+            &profile_sensor.sensor_type,
+            &profile_sensor.unit,
+        )
+        .await?;
+
+        created_sensor_ids.push(sensor_id);
+    }
+
+    Ok(created_sensor_ids)
+}
+
+pub async fn register_device(
+    db_pool: &PgPool,
+    asset_id: Uuid,
+    device_code: String,
+    hardware_profile_id: Uuid,
+) -> Result<Uuid> {
+    let device_id = Uuid::new_v4();
+
+    let row = sqlx::query!(
+        r#"
+        INSERT INTO devices (
+            id,
+            asset_id,
+            device_code,
+            hardware_profile_id
+        )
+        VALUES ($1, $2, $3, $4)
+        RETURNING id
+        "#,
+        device_id,
+        asset_id,
+        device_code,
+        hardware_profile_id
+    )
+    .fetch_one(db_pool)
+    .await?;
+
+    create_sensors_for_hardware_profile(db_pool, row.id, hardware_profile_id).await?;
+
+    Ok(row.id)
+}
+
+pub async fn list_hardware_profiles(db_pool: &PgPool) -> Result<Vec<HardwareProfile>> {
+    let profiles = sqlx::query_as!(
+        HardwareProfile,
+        r#"
+        SELECT
+            id,
+            profile_code,
+            name,
+            description,
+            created_at
+        FROM hardware_profiles
+        ORDER BY profile_code
+        "#
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    Ok(profiles)
+}
+
+pub async fn list_devices(db_pool: &PgPool) -> Result<Vec<DeviceSummary>> {
+    let devices = sqlx::query_as!(
+        DeviceSummary,
+        r#"
+        SELECT
+            d.id,
+            d.device_code,
+            d.asset_id,
+            d.hardware_profile_id,
+            hp.profile_code AS hardware_profile_code,
+            hp.name AS hardware_profile_name,
+            d.status,
+            d.created_at
+        FROM devices d
+        INNER JOIN hardware_profiles hp
+            ON hp.id = d.hardware_profile_id
+        ORDER BY d.created_at DESC
+        "#
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    Ok(devices)
+}
+
+pub async fn list_device_sensors(
+    db_pool: &PgPool,
+    device_id: Uuid,
+) -> Result<Vec<DeviceSensorSummary>> {
+    let sensors = sqlx::query_as!(
+        DeviceSensorSummary,
+        r#"
+        SELECT
+            id,
+            device_id,
+            sensor_code,
+            sensor_type,
+            unit,
+            created_at
+        FROM sensors
+        WHERE device_id = $1
+        ORDER BY sensor_type
+        "#,
+        device_id
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    Ok(sensors)
+}
+
+// -----------------------------------------------------------------------------
+// Fuel Simulator Bootstrap
+// -----------------------------------------------------------------------------
 
 async fn get_or_create_demo_organization(db_pool: &PgPool) -> Result<Uuid> {
     if let Some(row) = sqlx::query!(
@@ -190,7 +354,13 @@ async fn get_or_create_demo_device(
     Ok(row.id)
 }
 
-async fn get_or_create_fuel_sensor(db_pool: &PgPool, device_id: Uuid) -> Result<Uuid> {
+async fn get_or_create_sensor(
+    db_pool: &PgPool,
+    device_id: Uuid,
+    sensor_code: &str,
+    sensor_type: &str,
+    unit: &str,
+) -> Result<Uuid> {
     if let Some(row) = sqlx::query!(
         r#"
         SELECT id
@@ -198,7 +368,7 @@ async fn get_or_create_fuel_sensor(db_pool: &PgPool, device_id: Uuid) -> Result<
         WHERE device_id = $1 AND sensor_code = $2
         "#,
         device_id,
-        "fuel_level"
+        sensor_code
     )
     .fetch_optional(db_pool)
     .await?
@@ -213,14 +383,18 @@ async fn get_or_create_fuel_sensor(db_pool: &PgPool, device_id: Uuid) -> Result<
         RETURNING id
         "#,
         device_id,
-        "fuel_level",
-        "fuel_level",
-        "litres"
+        sensor_code,
+        sensor_type,
+        unit
     )
     .fetch_one(db_pool)
     .await?;
 
     Ok(row.id)
+}
+
+async fn get_or_create_fuel_sensor(db_pool: &PgPool, device_id: Uuid) -> Result<Uuid> {
+    get_or_create_sensor(db_pool, device_id, "fuel_level", "fuel_level", "litres").await
 }
 
 pub async fn save_fuel_reading_as_sensor_reading(

@@ -2,6 +2,8 @@ mod config;
 mod db;
 mod handlers;
 mod models;
+mod platform_handlers;
+mod platform_routes;
 mod repository;
 mod routes;
 mod services;
