@@ -882,6 +882,9 @@ Current capabilities:
 - duplicate suppression
 - sensor health event persistence
 - sensor health event APIs
+- Registered device validation
+- Production device provisioning workflow
+- Unknown device rejection
 
 ---
 
@@ -1333,17 +1336,50 @@ FUEL_IQR_MULTIPLIER=1.5
 # Current Architecture
 
 ```text
+Platform Management
+────────────────────────────────────
+
+Organizations
+        ↓
+Assets
+        ↓
+Devices
+        ↓
+Hardware Profiles
+        ↓
+Provisioned Sensors
+
+────────────────────────────────────
+
 Device / Simulator
-→ Offline Queue
-→ Batch Synchronization
-→ Axum API
-→ PostgreSQL
-→ Stored Telemetry Layer
-    ├── Fuel Telemetry
-    ├── GPS Telemetry
-    ├── Vibration Telemetry
-    └── Motion Telemetry
-    ├── Spatial Intelligence Layer
+        ↓
+Offline Queue
+        ↓
+Batch Synchronization
+        ↓
+Axum API
+        ↓
+Registered Device Validation
+        ↓
+PostgreSQL
+
+────────────────────────────────────
+
+Operational Intelligence Layer
+        ├── Fuel Event Detection
+        ├── Device Health Intelligence
+        ├── Sensor Health Intelligence
+        ├── Device State Engine
+        ├── Geofence Intelligence
+        ├── Replay Investigation
+        └── Analytics Intelligence
+
+────────────────────────────────────
+
+Live Distribution Layer
+        ├── Alert Hub
+        ├── WebSocket Streaming
+        └── Heartbeat Keepalive
 
 
 → Operational Intelligence Layer
@@ -1462,6 +1498,36 @@ Select Hardware Profile
 Automatically Provision Sensors
 ```
 
+## Production Provisioning Model
+
+The platform now separates **Platform Provisioning** from
+**Operational Telemetry Ingestion**.
+
+Business relationships are created only through Platform
+Management.
+
+```text
+Organization
+        ↓
+Asset
+        ↓
+Device
+        ↓
+Hardware Profile
+        ↓
+Provisioned Sensors
+```
+
+Only after a device has been provisioned will the backend accept:
+
+- telemetry batches
+- heartbeats
+
+Unknown devices are rejected and are **not** automatically created.
+
+This transition marks the move from development bootstrap behaviour
+to production-ready device provisioning.
+
 Automatic provisioning examples:
 
 ```text
@@ -1488,6 +1554,32 @@ GET  /api/devices
 GET  /api/devices/{device_id}/sensors
 ```
 
+## Ingestion Validation
+
+Telemetry ingestion now validates every incoming device against the
+registered Platform Management inventory.
+
+Current flow:
+
+```text
+Telemetry
+        ↓
+Lookup Registered Device
+        ↓
+Found
+        ↓
+Accept
+
+Unknown
+        ↓
+Reject
+```
+
+Heartbeat processing follows the same validation workflow.
+
+This guarantees that operational telemetry can only originate from
+devices that have been provisioned through Platform Management.
+
 This architecture separates Platform Management from Operational
 Intelligence, allowing the ingestion engine to process only the
 telemetry supported by the registered hardware profile.
@@ -1501,6 +1593,88 @@ Future hardware support includes:
 - Fuel + GPS + Vibration deployments
 - Custom PCB hardware
 - Additional hardware profiles without database redesign
+
+# Next Platform Milestones
+
+The next development focus is Platform Management rather than
+Operational Intelligence.
+
+Current implementation order:
+
+```text
+Organizations CRUD
+        ↓
+Assets CRUD
+        ↓
+Attach Device to Asset
+        ↓
+Device Activation
+        ↓
+Diagnostics
+        ↓
+Organizations CRUD
+        ↓
+Assets CRUD
+        ↓
+Attach Device to Asset
+        ↓
+Device Activation
+        ↓
+Diagnostics
+        ↓
+Sensor Profiles
+        ↓
+Hardware Profiles
+        ↓
+Adapter Layer
+        ↓
+Hardware Integration
+        ↓
+Operational Intelligence
+```
+
+### Sensor-Agnostic Hardware Strategy
+
+The platform is designed to be hardware and sensor agnostic.
+
+Future hardware integration will follow this architecture:
+
+```text
+Physical Sensor
+        ↓
+Sensor Adapter
+        ↓
+Normalized Telemetry
+        ↓
+Sensor Profile
+        ↓
+Hardware Profile
+        ↓
+Operational Intelligence
+```
+
+This architecture allows multiple hardware vendors and communication
+protocols (Modbus, RS485, CAN/J1939, MQTT, LoRaWAN, custom protocols,
+and future ORBI hardware) to be supported without changing the
+Operational Intelligence layer.
+
+Platform Management remains responsible for provisioning business
+relationships:
+
+Organization
+↓
+Asset
+↓
+Device
+↓
+Hardware Profile
+
+Operational Intelligence consumes only normalized telemetry from
+registered devices.
+
+The Sensor Adapter Layer will allow the platform to support multiple
+hardware vendors and communication protocols while maintaining a
+single normalized telemetry model.
 
 Pending:
 

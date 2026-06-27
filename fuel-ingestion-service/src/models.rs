@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct FuelReading {
@@ -396,4 +397,43 @@ pub struct DeviceSensorSummary {
     pub sensor_type: String,
     pub unit: String,
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateOrganizationRequest {
+    pub organization_name: String,
+    pub industry: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateOrganizationRequest {
+    pub organization_name: String,
+    pub industry: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OrganizationMutationResponse {
+    pub organization_id: Uuid,
+    pub message: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateAssetRequest {
+    pub organization_id: Uuid,
+    pub name: String,
+    pub asset_type: String,
+    pub metadata: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateAssetRequest {
+    pub name: String,
+    pub asset_type: String,
+    pub metadata: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AssetMutationResponse {
+    pub asset_id: Uuid,
+    pub message: String,
 }

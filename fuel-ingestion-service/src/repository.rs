@@ -6,13 +6,14 @@ use uuid::Uuid;
 
 use crate::models::{
     AlertAcknowledgementResponse, AlertResponse, AlertTrendPoint, AlertTrendSummary,
-    AlertTrendsResponse, CreateGeofenceRequest, DeviceHealthEventResponse, DeviceHealthTrendDevice,
-    DeviceHealthTrendResponse, DeviceSensorSummary, DeviceStateEventResponse, DeviceSummary,
-    FuelEventResponse, FuelReading, Geofence, GeofenceActivityTrendPoint,
-    GeofenceActivityTrendResponse, GeofencePositionMatch, GeofenceTransitionEventResponse,
-    GeofenceUtilizationResponse, GeofenceUtilizationZone, HardwareProfile, HardwareProfileSensor,
-    OrganizationFleetOverviewResponse, OrganizationOverviewResponse, SensorHealthEventResponse,
-    TelemetryStreamResponse,
+    AlertTrendsResponse, CreateAssetRequest, CreateGeofenceRequest, CreateOrganizationRequest,
+    DeviceHealthEventResponse, DeviceHealthTrendDevice, DeviceHealthTrendResponse,
+    DeviceSensorSummary, DeviceStateEventResponse, DeviceSummary, FuelEventResponse, FuelReading,
+    Geofence, GeofenceActivityTrendPoint, GeofenceActivityTrendResponse, GeofencePositionMatch,
+    GeofenceTransitionEventResponse, GeofenceUtilizationResponse, GeofenceUtilizationZone,
+    HardwareProfile, HardwareProfileSensor, OrganizationFleetOverviewResponse,
+    OrganizationOverviewResponse, SensorHealthEventResponse, TelemetryStreamResponse,
+    UpdateAssetRequest, UpdateOrganizationRequest,
 };
 use crate::services::device_health::classify_device_status;
 use crate::services::device_state::{
@@ -849,7 +850,16 @@ pub async fn mark_device_payload_seen(db_pool: &PgPool, device_id: Uuid) -> Resu
 }
 
 pub async fn mark_device_heartbeat_seen(db_pool: &PgPool, device_code: &str) -> Result<Uuid> {
-    let (device_id, _sensor_id) = get_or_create_demo_sensor(db_pool, device_code).await?;
+    let context = find_registered_device_context(db_pool, device_code).await?;
+
+    let Some(context) = context else {
+        anyhow::bail!(
+            "Unknown device '{}'. Device must be provisioned before heartbeats can be accepted.",
+            device_code
+        );
+    };
+
+    let device_id = context.device_id;
 
     let device = sqlx::query!(
         r#"
@@ -1729,6 +1739,136 @@ pub async fn get_organization_fleet_overview(
         .collect();
 
     Ok(overview)
+}
+
+pub async fn create_organization(
+    db_pool: &PgPool,
+    request: &CreateOrganizationRequest,
+) -> Result<Uuid> {
+    let organization_id = Uuid::new_v4();
+
+    sqlx::query!(
+        r#"
+        INSERT INTO organizations (
+            id,
+            name,
+            industry
+        )
+        VALUES ($1, $2, $3)
+        "#,
+        organization_id,
+        request.organization_name,
+        request.industry,
+    )
+    .execute(db_pool)
+    .await?;
+
+    Ok(organization_id)
+}
+
+pub async fn update_organization(
+    db_pool: &PgPool,
+    organization_id: Uuid,
+    request: &UpdateOrganizationRequest,
+) -> Result<()> {
+    sqlx::query!(
+        r#"
+        UPDATE organizations
+        SET
+            name = $2,
+            industry = $3
+        WHERE id = $1
+        "#,
+        organization_id,
+        request.organization_name,
+        request.industry,
+    )
+    .execute(db_pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn archive_organization(db_pool: &PgPool, organization_id: Uuid) -> Result<()> {
+    sqlx::query!(
+        r#"
+        UPDATE organizations
+        SET is_active = FALSE
+        WHERE id = $1
+        "#,
+        organization_id,
+    )
+    .execute(db_pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn create_asset(db_pool: &PgPool, request: &CreateAssetRequest) -> Result<Uuid> {
+    let asset_id = Uuid::new_v4();
+
+    sqlx::query!(
+        r#"
+        INSERT INTO assets (
+            id,
+            organization_id,
+            name,
+            asset_type,
+            metadata,
+            is_active
+        )
+        VALUES ($1, $2, $3, $4, $5, TRUE)
+        "#,
+        asset_id,
+        request.organization_id,
+        request.name,
+        request.asset_type,
+        request.metadata,
+    )
+    .execute(db_pool)
+    .await?;
+
+    Ok(asset_id)
+}
+
+pub async fn update_asset(
+    db_pool: &PgPool,
+    asset_id: Uuid,
+    request: &UpdateAssetRequest,
+) -> Result<()> {
+    sqlx::query!(
+        r#"
+        UPDATE assets
+        SET
+            name = $2,
+            asset_type = $3,
+            metadata = $4
+        WHERE id = $1
+        "#,
+        asset_id,
+        request.name,
+        request.asset_type,
+        request.metadata,
+    )
+    .execute(db_pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn archive_asset(db_pool: &PgPool, asset_id: Uuid) -> Result<()> {
+    sqlx::query!(
+        r#"
+        UPDATE assets
+        SET is_active = FALSE
+        WHERE id = $1
+        "#,
+        asset_id,
+    )
+    .execute(db_pool)
+    .await?;
+
+    Ok(())
 }
 
 pub async fn create_geofence(
