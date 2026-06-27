@@ -65,6 +65,12 @@ pub struct StoredSensorReading {
     pub longitude: Option<f64>,
 }
 
+#[derive(Debug)]
+pub struct RegisteredDeviceContext {
+    pub device_id: Uuid,
+    pub fuel_sensor_id: Uuid,
+}
+
 pub async fn get_latest_device_state(db_pool: &PgPool, device_id: Uuid) -> Result<Option<String>> {
     let row = sqlx::query!(
         r#"
@@ -97,6 +103,32 @@ pub async fn get_or_create_demo_sensor(
 // -----------------------------------------------------------------------------
 // Platform Management
 // -----------------------------------------------------------------------------
+pub async fn find_registered_device_context(
+    db_pool: &PgPool,
+    device_code: &str,
+) -> Result<Option<RegisteredDeviceContext>> {
+    let row = sqlx::query!(
+        r#"
+        SELECT
+            d.id AS device_id,
+            s.id AS fuel_sensor_id
+        FROM devices d
+        INNER JOIN sensors s
+            ON s.device_id = d.id
+        WHERE d.device_code = $1
+          AND s.sensor_type = 'FUEL'
+        LIMIT 1
+        "#,
+        device_code
+    )
+    .fetch_optional(db_pool)
+    .await?;
+
+    Ok(row.map(|row| RegisteredDeviceContext {
+        device_id: row.device_id,
+        fuel_sensor_id: row.fuel_sensor_id,
+    }))
+}
 
 pub async fn get_hardware_profile_sensors(
     db_pool: &PgPool,

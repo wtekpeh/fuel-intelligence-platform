@@ -1,4 +1,4 @@
-device_id = "DEV_CORR_TEST_005"
+device_id = "FUEL-FULL-TEST-001"
 simulation_time_mode = "realtime"
 tank_capacity_litres = 200.0
 initial_fuel_litres = 180.0

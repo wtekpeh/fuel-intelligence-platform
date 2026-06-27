@@ -27,7 +27,7 @@ interface PlatformStore {
   error: string | null;
 
   loadHardwareProfiles: () => Promise<void>;
-  selectHardwareProfile: (profile: HardwareProfile) => Promise<void>;
+  selectHardwareProfile: (profile: HardwareProfile | null) => Promise<void>;
 
   loadDevices: () => Promise<void>;
   selectDevice: (device: DeviceSummary) => Promise<void>;
@@ -64,6 +64,15 @@ export const usePlatformStore = create<PlatformStore>((set, get) => ({
   },
 
   selectHardwareProfile: async (profile) => {
+    if (!profile) {
+      set({
+        selectedHardwareProfile: null,
+        hardwareProfileSensors: [],
+      });
+
+      return;
+    }
+
     set({
       selectedHardwareProfile: profile,
       hardwareProfileSensors: [],

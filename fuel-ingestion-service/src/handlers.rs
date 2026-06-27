@@ -17,13 +17,13 @@ use crate::{
     },
     repository::{
         acknowledge_alert, check_position_against_geofences, create_geofence,
-        detect_and_store_geofence_transitions_from_previous_position, get_alert_trends,
-        get_device_health_trends, get_geofence_activity_trends, get_geofence_utilization,
-        get_or_create_demo_sensor, get_organization_fleet_overview, get_organization_id_for_device,
-        get_organization_overview, get_recent_alerts, get_recent_device_health_events,
-        get_recent_device_state_events, get_recent_fuel_events, get_recent_sensor_health_events,
-        get_recent_telemetry_stream, get_telemetry_history, list_geofences,
-        list_recent_geofence_transition_events, mark_device_heartbeat_seen,
+        detect_and_store_geofence_transitions_from_previous_position,
+        find_registered_device_context, get_alert_trends, get_device_health_trends,
+        get_geofence_activity_trends, get_geofence_utilization, get_organization_fleet_overview,
+        get_organization_id_for_device, get_organization_overview, get_recent_alerts,
+        get_recent_device_health_events, get_recent_device_state_events, get_recent_fuel_events,
+        get_recent_sensor_health_events, get_recent_telemetry_stream, get_telemetry_history,
+        list_geofences, list_recent_geofence_transition_events, mark_device_heartbeat_seen,
         mark_device_payload_seen, refresh_device_statuses, resolve_alert,
         save_fuel_reading_as_sensor_reading,
     },
@@ -41,7 +41,17 @@ pub async fn ingest_reading_batch(
 
     let db_pool = &app_state.db_pool;
     let result = async {
-        let (device_id, sensor_id) = get_or_create_demo_sensor(db_pool, &payload.device_id).await?;
+        let context = find_registered_device_context(db_pool, &payload.device_id).await?;
+
+        let Some(context) = context else {
+            return Err(anyhow::anyhow!(
+                "Unknown device '{}'. Device must be provisioned before telemetry can be ingested.",
+                payload.device_id
+            ));
+        };
+
+        let device_id = context.device_id;
+        let sensor_id = context.fuel_sensor_id;
 
         mark_device_payload_seen(db_pool, device_id).await?;
 
