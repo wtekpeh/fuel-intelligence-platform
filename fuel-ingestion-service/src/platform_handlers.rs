@@ -2,6 +2,7 @@ use crate::repository;
 use crate::routes::AppState;
 use axum::extract::Path;
 use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum::{Json, extract::State};
 use uuid::Uuid;
 
@@ -13,6 +14,16 @@ pub async fn list_hardware_profiles_handler(
         .expect("Failed to list hardware profiles");
 
     Json(profiles)
+}
+
+pub async fn list_device_models_handler(
+    State(app_state): State<AppState>,
+) -> Json<Vec<crate::models::DeviceModelResponse>> {
+    let models = repository::list_device_models(&app_state.db_pool)
+        .await
+        .expect("Failed to list device models");
+
+    Json(models)
 }
 
 pub async fn list_hardware_profile_sensors_handler(
@@ -29,17 +40,40 @@ pub async fn list_hardware_profile_sensors_handler(
 pub async fn register_device_handler(
     State(app_state): State<AppState>,
     Json(payload): Json<crate::models::RegisterDeviceRequest>,
-) -> Json<uuid::Uuid> {
-    let device_id = repository::register_device(
+) -> impl IntoResponse {
+    match repository::register_device(
         &app_state.db_pool,
         payload.asset_id,
+        payload.device_model_id,
         payload.device_code,
         payload.hardware_profile_id,
     )
     .await
-    .expect("Failed to register device");
+    {
+        Ok(device_id) => (StatusCode::CREATED, Json(device_id)).into_response(),
 
-    Json(device_id)
+        Err(error) => {
+            let message = error.to_string();
+
+            if message.contains("devices_device_code_key") {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(crate::models::ApiErrorResponse {
+                        message: "Device code already exists.".to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to register device.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
 }
 
 pub async fn list_devices_handler(
@@ -155,5 +189,49 @@ pub async fn delete_asset_handler(
     Json(crate::models::AssetMutationResponse {
         asset_id,
         message: "Asset deactivated successfully.".to_string(),
+    })
+}
+
+pub async fn update_device_handler(
+    State(app_state): State<AppState>,
+    Path(device_id): Path<Uuid>,
+    Json(payload): Json<crate::models::UpdateDeviceRequest>,
+) -> Json<crate::models::DeviceMutationResponse> {
+    repository::update_device(&app_state.db_pool, device_id, &payload)
+        .await
+        .expect("Failed to update device");
+
+    Json(crate::models::DeviceMutationResponse {
+        device_id,
+        message: "Device updated successfully.".to_string(),
+    })
+}
+
+pub async fn delete_device_handler(
+    State(app_state): State<AppState>,
+    Path(device_id): Path<Uuid>,
+) -> Json<crate::models::DeviceMutationResponse> {
+    repository::deactivate_device(&app_state.db_pool, device_id)
+        .await
+        .expect("Failed to deactivate device");
+
+    Json(crate::models::DeviceMutationResponse {
+        device_id,
+        message: "Device deactivated successfully.".to_string(),
+    })
+}
+
+pub async fn assign_device_asset_handler(
+    State(app_state): State<AppState>,
+    Path(device_id): Path<Uuid>,
+    Json(payload): Json<crate::models::AssignDeviceAssetRequest>,
+) -> Json<crate::models::DeviceMutationResponse> {
+    repository::assign_device_to_asset(&app_state.db_pool, device_id, &payload)
+        .await
+        .expect("Failed to assign device");
+
+    Json(crate::models::DeviceMutationResponse {
+        device_id,
+        message: "Device assigned successfully.".to_string(),
     })
 }

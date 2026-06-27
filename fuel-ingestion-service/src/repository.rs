@@ -6,14 +6,14 @@ use uuid::Uuid;
 
 use crate::models::{
     AlertAcknowledgementResponse, AlertResponse, AlertTrendPoint, AlertTrendSummary,
-    AlertTrendsResponse, CreateAssetRequest, CreateGeofenceRequest, CreateOrganizationRequest,
-    DeviceHealthEventResponse, DeviceHealthTrendDevice, DeviceHealthTrendResponse,
-    DeviceSensorSummary, DeviceStateEventResponse, DeviceSummary, FuelEventResponse, FuelReading,
-    Geofence, GeofenceActivityTrendPoint, GeofenceActivityTrendResponse, GeofencePositionMatch,
-    GeofenceTransitionEventResponse, GeofenceUtilizationResponse, GeofenceUtilizationZone,
-    HardwareProfile, HardwareProfileSensor, OrganizationFleetOverviewResponse,
-    OrganizationOverviewResponse, SensorHealthEventResponse, TelemetryStreamResponse,
-    UpdateAssetRequest, UpdateOrganizationRequest,
+    AlertTrendsResponse, AssignDeviceAssetRequest, CreateAssetRequest, CreateGeofenceRequest,
+    CreateOrganizationRequest, DeviceHealthEventResponse, DeviceHealthTrendDevice,
+    DeviceHealthTrendResponse, DeviceModelResponse, DeviceSensorSummary, DeviceStateEventResponse,
+    DeviceSummary, FuelEventResponse, FuelReading, Geofence, GeofenceActivityTrendPoint,
+    GeofenceActivityTrendResponse, GeofencePositionMatch, GeofenceTransitionEventResponse,
+    GeofenceUtilizationResponse, GeofenceUtilizationZone, HardwareProfile, HardwareProfileSensor,
+    OrganizationFleetOverviewResponse, OrganizationOverviewResponse, SensorHealthEventResponse,
+    TelemetryStreamResponse, UpdateAssetRequest, UpdateDeviceRequest, UpdateOrganizationRequest,
 };
 use crate::services::device_health::classify_device_status;
 use crate::services::device_state::{
@@ -186,6 +186,7 @@ pub async fn create_sensors_for_hardware_profile(
 pub async fn register_device(
     db_pool: &PgPool,
     asset_id: Uuid,
+    device_model_id: Option<Uuid>,
     device_code: String,
     hardware_profile_id: Uuid,
 ) -> Result<Uuid> {
@@ -196,16 +197,18 @@ pub async fn register_device(
         INSERT INTO devices (
             id,
             asset_id,
+            device_model_id,
             device_code,
             hardware_profile_id
         )
-        VALUES ($1, $2, $3, $4)
+        VALUES ($1, $2, $3, $4, $5)
         RETURNING id
         "#,
         device_id,
         asset_id,
+        device_model_id,
         device_code,
-        hardware_profile_id
+        hardware_profile_id,
     )
     .fetch_one(db_pool)
     .await?;
@@ -233,6 +236,41 @@ pub async fn list_hardware_profiles(db_pool: &PgPool) -> Result<Vec<HardwareProf
     .await?;
 
     Ok(profiles)
+}
+
+pub async fn list_device_models(db_pool: &PgPool) -> Result<Vec<DeviceModelResponse>> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT
+            id,
+            model_code,
+            model_name,
+            manufacturer,
+            description,
+            is_active,
+            created_at
+        FROM device_models
+        WHERE is_active = TRUE
+        ORDER BY model_name
+        "#
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    let models = rows
+        .into_iter()
+        .map(|row| DeviceModelResponse {
+            id: row.id,
+            model_code: row.model_code,
+            model_name: row.model_name,
+            manufacturer: row.manufacturer,
+            description: row.description,
+            is_active: row.is_active,
+            created_at: row.created_at,
+        })
+        .collect();
+
+    Ok(models)
 }
 
 pub async fn list_devices(db_pool: &PgPool) -> Result<Vec<DeviceSummary>> {
@@ -1864,6 +1902,64 @@ pub async fn archive_asset(db_pool: &PgPool, asset_id: Uuid) -> Result<()> {
         WHERE id = $1
         "#,
         asset_id,
+    )
+    .execute(db_pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn update_device(
+    db_pool: &PgPool,
+    device_id: Uuid,
+    request: &UpdateDeviceRequest,
+) -> Result<()> {
+    sqlx::query!(
+        r#"
+        UPDATE devices
+        SET
+            device_code = $2,
+            hardware_profile_id = $3
+        WHERE id = $1
+        "#,
+        device_id,
+        request.device_code,
+        request.hardware_profile_id,
+    )
+    .execute(db_pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn deactivate_device(db_pool: &PgPool, device_id: Uuid) -> Result<()> {
+    sqlx::query!(
+        r#"
+        UPDATE devices
+        SET is_active = FALSE
+        WHERE id = $1
+        "#,
+        device_id,
+    )
+    .execute(db_pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn assign_device_to_asset(
+    db_pool: &PgPool,
+    device_id: Uuid,
+    request: &AssignDeviceAssetRequest,
+) -> Result<()> {
+    sqlx::query!(
+        r#"
+        UPDATE devices
+        SET asset_id = $2
+        WHERE id = $1
+        "#,
+        device_id,
+        request.asset_id,
     )
     .execute(db_pool)
     .await?;

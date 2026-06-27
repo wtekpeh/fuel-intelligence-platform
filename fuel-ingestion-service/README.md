@@ -1345,6 +1345,8 @@ Assets
         ↓
 Devices
         ↓
+Device Models
+        ↓
 Hardware Profiles
         ↓
 Provisioned Sensors
@@ -1470,9 +1472,15 @@ tracking hardware independently of telemetry ingestion.
 
 Current capabilities:
 
+- Organization CRUD
+- Asset CRUD
+- Device Model management
 - Hardware Profile management
 - Hardware Profile sensor definitions
 - Device registration
+- Device update
+- Device reassignment
+- Device deactivation
 - Automatic sensor provisioning
 - Device listing
 - Device sensor listing
@@ -1484,19 +1492,25 @@ GPS_ONLY
 FUEL_FULL
 ```
 
+Current device models:
+
+ORBI-A100
+ORBI-GPS-LITE
+ORBI-FULL-KIT
+
 Current onboarding workflow:
 
-```text
 Create Organization
-        ↓
+↓
 Create Asset
-        ↓
-Register Device
-        ↓
+↓
+Select Device Model
+↓
 Select Hardware Profile
-        ↓
+↓
+Register Device
+↓
 Automatically Provision Sensors
-```
 
 ## Production Provisioning Model
 
@@ -1506,17 +1520,17 @@ The platform now separates **Platform Provisioning** from
 Business relationships are created only through Platform
 Management.
 
-```text
 Organization
-        ↓
+↓
 Asset
-        ↓
+↓
 Device
-        ↓
+↓
+Device Model
+↓
 Hardware Profile
-        ↓
+↓
 Provisioned Sensors
-```
 
 Only after a device has been provisioned will the backend accept:
 
@@ -1542,17 +1556,35 @@ FUEL_FULL
 
 Current Platform Management APIs:
 
-```http
-GET  /api/hardware-profiles
+# Organizations
 
-GET  /api/hardware-profiles/{hardware_profile_id}/sensors
+POST /api/organizations
+PATCH /api/organizations/{organization_id}
+DELETE /api/organizations/{organization_id}
+
+# Assets
+
+POST /api/assets
+PATCH /api/assets/{asset_id}
+DELETE /api/assets/{asset_id}
+
+# Device Models
+
+GET /api/device-models
+
+# Hardware Profiles
+
+GET /api/hardware-profiles
+GET /api/hardware-profiles/{hardware_profile_id}/sensors
+
+# Devices
 
 POST /api/devices
-
-GET  /api/devices
-
-GET  /api/devices/{device_id}/sensors
-```
+GET /api/devices
+PATCH /api/devices/{device_id}
+PATCH /api/devices/{device_id}/assign-asset
+DELETE /api/devices/{device_id}
+GET /api/devices/{device_id}/sensors
 
 ## Ingestion Validation
 
@@ -1577,6 +1609,26 @@ Reject
 
 Heartbeat processing follows the same validation workflow.
 
+## Device Lifecycle
+
+The platform separates operational device health from platform lifecycle.
+
+Operational Health
+
+ONLINE
+STALE
+OFFLINE
+UNKNOWN
+
+Platform Lifecycle
+
+is_active = true
+is_active = false
+
+This allows a device to be operationally offline while still being an
+active provisioned device, or to be administratively deactivated
+without affecting the operational health model.
+
 This guarantees that operational telemetry can only originate from
 devices that have been provisioned through Platform Management.
 
@@ -1596,42 +1648,25 @@ Future hardware support includes:
 
 # Next Platform Milestones
 
-The next development focus is Platform Management rather than
-Operational Intelligence.
-
-Current implementation order:
-
-```text
-Organizations CRUD
-        ↓
-Assets CRUD
-        ↓
-Attach Device to Asset
-        ↓
-Device Activation
-        ↓
-Diagnostics
-        ↓
-Organizations CRUD
-        ↓
-Assets CRUD
-        ↓
-Attach Device to Asset
-        ↓
-Device Activation
-        ↓
-Diagnostics
-        ↓
-Sensor Profiles
-        ↓
-Hardware Profiles
-        ↓
-Adapter Layer
-        ↓
+Frontend Platform Management
+↓
+Provisioning Workspace
+↓
+Organization Management UI
+↓
+Asset Management UI
+↓
+Device Management UI
+↓
+Provisioning Wizard
+↓
+Sensor Adapter Layer
+↓
 Hardware Integration
-        ↓
-Operational Intelligence
-```
+↓
+LilyGO Firmware
+↓
+Production ORBI Hardware
 
 ### Sensor-Agnostic Hardware Strategy
 

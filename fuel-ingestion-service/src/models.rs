@@ -373,6 +373,7 @@ pub struct HardwareProfileSensor {
 #[derive(Debug, Deserialize)]
 pub struct RegisterDeviceRequest {
     pub asset_id: uuid::Uuid,
+    pub device_model_id: Option<uuid::Uuid>,
     pub device_code: String,
     pub hardware_profile_id: uuid::Uuid,
 }
@@ -435,5 +436,38 @@ pub struct UpdateAssetRequest {
 #[derive(Debug, Serialize)]
 pub struct AssetMutationResponse {
     pub asset_id: Uuid,
+    pub message: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateDeviceRequest {
+    pub device_code: String,
+    pub hardware_profile_id: Uuid,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AssignDeviceAssetRequest {
+    pub asset_id: Uuid,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeviceMutationResponse {
+    pub device_id: Uuid,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeviceModelResponse {
+    pub id: Uuid,
+    pub model_code: String,
+    pub model_name: String,
+    pub manufacturer: Option<String>,
+    pub description: Option<String>,
+    pub is_active: bool,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ApiErrorResponse {
     pub message: String,
 }
