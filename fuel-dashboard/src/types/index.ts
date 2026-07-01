@@ -6,3 +6,6 @@ export * from "./fleet";
 export * from "./investigation";
 export * from "./geofence";
 export * from "./analytics";
+export * from "./device";
+export * from "./hardware";
+export * from "./asset";

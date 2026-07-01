@@ -23,6 +23,9 @@ export interface DeviceSummary {
   hardware_profile_name: string;
   status: string;
   created_at: string;
+  device_model_id?: string | null;
+  device_model_code?: string | null;
+  device_model_name?: string | null;
 }
 
 export interface DeviceSensorSummary {
@@ -36,6 +39,7 @@ export interface DeviceSensorSummary {
 
 export interface RegisterDeviceRequest {
   asset_id: string;
+  device_model_id?: string | null;
   device_code: string;
   hardware_profile_id: string;
 }

@@ -1,3 +1,4 @@
+mod catalogue_repository;
 mod config;
 mod db;
 mod handlers;

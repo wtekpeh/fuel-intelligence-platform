@@ -1,9 +1,10 @@
 use crate::platform_handlers::{
     assign_device_asset_handler, create_asset_handler, create_organization_handler,
     delete_asset_handler, delete_device_handler, delete_organization_handler,
-    list_device_models_handler, list_device_sensors_handler, list_devices_handler,
-    list_hardware_profile_sensors_handler, list_hardware_profiles_handler, register_device_handler,
-    update_asset_handler, update_device_handler, update_organization_handler,
+    list_device_catalogue_handler, list_device_models_handler, list_device_sensors_handler,
+    list_devices_handler, list_hardware_profile_sensors_handler, list_hardware_profiles_handler,
+    register_device_handler, update_asset_handler, update_device_handler,
+    update_organization_handler,
 };
 
 use crate::routes::AppState;
@@ -59,4 +60,5 @@ pub fn platform_routes() -> Router<AppState> {
             get(list_device_sensors_handler),
         )
         .route("/api/device-models", get(list_device_models_handler))
+        .route("/api/device-catalogue", get(list_device_catalogue_handler))
 }

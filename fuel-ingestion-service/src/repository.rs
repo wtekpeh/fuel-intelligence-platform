@@ -281,14 +281,26 @@ pub async fn list_devices(db_pool: &PgPool) -> Result<Vec<DeviceSummary>> {
             d.id,
             d.device_code,
             d.asset_id,
+
+            d.device_model_id,
+            dm.model_code AS "device_model_code?",
+            dm.model_name AS "device_model_name?",
+
             d.hardware_profile_id,
             hp.profile_code AS hardware_profile_code,
             hp.name AS hardware_profile_name,
+
             d.status,
             d.created_at
+
         FROM devices d
+
+        LEFT JOIN device_models dm
+            ON dm.id = d.device_model_id
+
         INNER JOIN hardware_profiles hp
             ON hp.id = d.hardware_profile_id
+
         ORDER BY d.created_at DESC
         "#
     )

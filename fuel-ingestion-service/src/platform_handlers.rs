@@ -1,3 +1,4 @@
+use crate::catalogue_repository;
 use crate::repository;
 use crate::routes::AppState;
 use axum::extract::Path;
@@ -234,4 +235,14 @@ pub async fn assign_device_asset_handler(
         device_id,
         message: "Device assigned successfully.".to_string(),
     })
+}
+
+pub async fn list_device_catalogue_handler(
+    State(app_state): State<AppState>,
+) -> Json<Vec<crate::models::DeviceCatalogueModelResponse>> {
+    let catalogue = catalogue_repository::list_device_catalogue(&app_state.db_pool)
+        .await
+        .expect("Failed to load device catalogue");
+
+    Json(catalogue)
 }

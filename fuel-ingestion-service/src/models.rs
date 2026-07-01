@@ -383,6 +383,9 @@ pub struct DeviceSummary {
     pub id: uuid::Uuid,
     pub device_code: String,
     pub asset_id: uuid::Uuid,
+    pub device_model_id: Option<uuid::Uuid>,
+    pub device_model_code: Option<String>,
+    pub device_model_name: Option<String>,
     pub hardware_profile_id: uuid::Uuid,
     pub hardware_profile_code: String,
     pub hardware_profile_name: String,
@@ -470,4 +473,32 @@ pub struct DeviceModelResponse {
 #[derive(Debug, Serialize)]
 pub struct ApiErrorResponse {
     pub message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeviceCatalogueSensorResponse {
+    pub id: Uuid,
+    pub sensor_type: String,
+    pub unit: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeviceCatalogueHardwareProfileResponse {
+    pub id: Uuid,
+    pub profile_code: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub is_default: bool,
+    pub sensors: Vec<DeviceCatalogueSensorResponse>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeviceCatalogueModelResponse {
+    pub id: Uuid,
+    pub model_code: String,
+    pub model_name: String,
+    pub manufacturer: Option<String>,
+    pub description: Option<String>,
+    pub is_active: bool,
+    pub profiles: Vec<DeviceCatalogueHardwareProfileResponse>,
 }
