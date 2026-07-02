@@ -14,3 +14,4 @@ export interface OrganizationFleetOverview {
 
   open_alert_count: number;
 }
+
