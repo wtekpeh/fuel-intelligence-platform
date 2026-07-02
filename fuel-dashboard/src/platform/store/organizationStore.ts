@@ -1,6 +1,10 @@
 import { create } from "zustand";
 
-import { fetchOrganizationOverview } from "../../api/organizationApi";
+import {
+  createOrganization,
+  fetchOrganizationOverview,
+  type CreateOrganizationRequest,
+} from "../../api/organizationApi";
 
 import type { OrganizationOverview } from "../../types";
 
@@ -15,6 +19,10 @@ interface OrganizationStore {
   selectOrganization: (organization: OrganizationOverview | null) => void;
 
   clearError: () => void;
+
+  createOrganization: (
+    request: CreateOrganizationRequest,
+  ) => Promise<string | null>;
 }
 
 export const useOrganizationStore = create<OrganizationStore>((set) => ({
@@ -50,6 +58,38 @@ export const useOrganizationStore = create<OrganizationStore>((set) => ({
     set({
       selectedOrganization: organization,
     });
+  },
+
+  createOrganization: async (request) => {
+    set({ loading: true, error: null });
+
+    try {
+      const result = await createOrganization(request);
+      const organizations = await fetchOrganizationOverview();
+
+      const createdOrganization =
+        organizations.find(
+          (organization) =>
+            organization.organization_id === result.organization_id,
+        ) ??
+        organizations[0] ??
+        null;
+
+      set({
+        organizations,
+        selectedOrganization: createdOrganization,
+        loading: false,
+      });
+
+      return result.organization_id;
+    } catch {
+      set({
+        loading: false,
+        error: "Failed to create organization.",
+      });
+
+      return null;
+    }
   },
 
   clearError: () => {

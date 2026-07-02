@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import RegisterDeviceSheet from "../components/RegisterDeviceSheet";
+import DeviceOnboardingWizard from "../components/DeviceOnboardingWizard";
 import { useAssetStore } from "../store/assetStore";
 import { useDeviceStore } from "../store/deviceStore";
 import { useDeviceModelStore } from "../store/deviceModelStore";
@@ -9,6 +10,7 @@ import "../styles/platform.css";
 
 export default function PlatformManagementPage() {
   const [registerDeviceOpen, setRegisterDeviceOpen] = useState(false);
+  const [deviceOnboardingOpen, setDeviceOnboardingOpen] = useState(false);
 
   const {
     organizations,
@@ -71,6 +73,25 @@ export default function PlatformManagementPage() {
     const model = deviceModels.find((item) => item.id === deviceModelId);
 
     return model?.modelName ?? "-";
+  };
+
+  const selectDefaultHardwareProfile = (deviceModelId: string) => {
+    const model = deviceModels.find((item) => item.id === deviceModelId);
+
+    if (!model) {
+      return;
+    }
+
+    const profileCode =
+      model.modelCode === "ORBI-GPS-LITE" ? "GPS_ONLY" : "FUEL_FULL";
+
+    const profile = hardwareProfiles.find(
+      (item) => item.profileCode === profileCode,
+    );
+
+    if (profile) {
+      selectHardwareProfile(profile);
+    }
   };
 
   const overviewCards = [
@@ -209,7 +230,10 @@ export default function PlatformManagementPage() {
               <button
                 key={model.id}
                 type="button"
-                onClick={() => setSelectedDeviceModelId(model.id)}
+                onClick={() => {
+                  setSelectedDeviceModelId(model.id);
+                  selectDefaultHardwareProfile(model.id);
+                }}
                 className={`platform-list-card ${
                   selectedDeviceModelId === model.id
                     ? "platform-list-card--selected"
@@ -272,7 +296,7 @@ export default function PlatformManagementPage() {
             <button
               type="button"
               className="platform-primary-button"
-              onClick={() => setRegisterDeviceOpen(true)}
+              onClick={() => setDeviceOnboardingOpen(true)}
             >
               Register Device
             </button>
@@ -351,6 +375,12 @@ export default function PlatformManagementPage() {
           </div>
         </aside>
       </section>
+
+      <DeviceOnboardingWizard
+        open={deviceOnboardingOpen}
+        onClose={() => setDeviceOnboardingOpen(false)}
+        organizations={organizations}
+      />
 
       <RegisterDeviceSheet
         open={registerDeviceOpen}
