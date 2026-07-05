@@ -27,7 +27,10 @@ export async function createOrganization(
 ): Promise<OrganizationMutationResponse> {
   const response = await httpClient.post<OrganizationMutationResponse>(
     "/api/organizations",
-    request,
+    {
+      organization_name: request.name,
+      industry: request.industry,
+    },
   );
 
   return response.data;
