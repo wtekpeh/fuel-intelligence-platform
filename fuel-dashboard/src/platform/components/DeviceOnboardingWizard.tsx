@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useOrganizationStore } from "../store/organizationStore";
 import { useDeviceOnboardingStore } from "../store/deviceOnboardingStore";
 import { useAssetStore } from "../store/assetStore";
+import { useDeviceCatalogueStore } from "../store/deviceCatalogueStore";
 
 interface WizardOrganization {
   organization_id: string;
@@ -27,16 +28,34 @@ export default function DeviceOnboardingWizard({
   const [showCreateOrganization, setShowCreateOrganization] = useState(false);
   const [organizationName, setOrganizationName] = useState("");
   const [industry, setIndustry] = useState("");
+  const [showCreateAsset, setShowCreateAsset] = useState(false);
+  const [assetName, setAssetName] = useState("");
+  const [assetType, setAssetType] = useState("");
+  const [registrationNumber, setRegistrationNumber] = useState("");
 
   const createOrganization = useOrganizationStore(
     (state) => state.createOrganization,
   );
-  const { assets, loadAssets, selectedAsset, selectAsset } = useAssetStore();
+  const {
+    assets,
+    loadAssets,
+    selectedAsset,
+    selectAsset,
+    addLocalAsset,
+    createAsset,
+  } = useAssetStore();
+
+  const { models, selectedModel, loadCatalogue, selectModel } =
+    useDeviceCatalogueStore();
 
   const {
     step,
     selectedOrganizationId,
+    selectedAssetId,
+    selectedDeviceModelId,
     selectOrganization,
+    selectAsset: selectAssetForOnboarding,
+    selectDeviceModel,
     nextStep,
     previousStep,
   } = useDeviceOnboardingStore();
@@ -46,6 +65,26 @@ export default function DeviceOnboardingWizard({
       loadAssets(selectedOrganizationId);
     }
   }, [step, selectedOrganizationId, loadAssets]);
+
+  useEffect(() => {
+    if (step === "device-model") {
+      loadCatalogue();
+    }
+  }, [step, loadCatalogue]);
+
+  const canProceed =
+    (step === "organization" && selectedOrganizationId !== null) ||
+    (step === "asset" && selectedAssetId !== null) ||
+    (step === "device-model" && selectedDeviceModelId !== null) ||
+    step === "review";
+
+  const stepKeys = [
+    "organization",
+    "asset",
+    "device-model",
+    "review",
+    "complete",
+  ] as const;
 
   if (!open) {
     return null;
@@ -66,15 +105,15 @@ export default function DeviceOnboardingWizard({
         </header>
 
         <div className="platform-wizard__steps">
-          {steps.map((step, index) => (
+          {steps.map((label, index) => (
             <div
-              key={step}
+              key={label}
               className={`platform-wizard__step ${
-                index === 0 ? "platform-wizard__step--active" : ""
+                stepKeys[index] === step ? "platform-wizard__step--active" : ""
               }`}
             >
               <span>{index + 1}</span>
-              <p>{step}</p>
+              <p>{label}</p>
             </div>
           ))}
         </div>
@@ -214,17 +253,124 @@ export default function DeviceOnboardingWizard({
                     marginBottom: "18px",
                   }}
                 >
-                  <button type="button" className="platform-primary-button">
+                  <button
+                    type="button"
+                    className="platform-primary-button"
+                    onClick={() => setShowCreateAsset(!showCreateAsset)}
+                  >
                     + Create Asset
                   </button>
                 </div>
+
+                {showCreateAsset && (
+                  <div
+                    className="platform-form"
+                    style={{ marginBottom: "24px" }}
+                  >
+                    <label>
+                      Asset Name *
+                      <input
+                        value={assetName}
+                        onChange={(event) => setAssetName(event.target.value)}
+                        placeholder="Example: Fuel Truck GH-101"
+                      />
+                    </label>
+
+                    <label>
+                      Asset Type *
+                      <input
+                        value={assetType}
+                        onChange={(event) => setAssetType(event.target.value)}
+                        placeholder="Example: Truck, Generator, Excavator"
+                      />
+                    </label>
+
+                    <label>
+                      Registration Number
+                      <input
+                        value={registrationNumber}
+                        onChange={(event) =>
+                          setRegistrationNumber(event.target.value)
+                        }
+                        placeholder="Example: GT-1234-25"
+                      />
+                    </label>
+
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "flex-end",
+                        gap: "12px",
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="platform-secondary-button"
+                        onClick={() => setShowCreateAsset(false)}
+                      >
+                        Cancel
+                      </button>
+
+                      <button
+                        type="button"
+                        className="platform-primary-button"
+                        disabled={
+                          !assetName.trim() ||
+                          !assetType.trim() ||
+                          !selectedOrganizationId
+                        }
+                        onClick={async () => {
+                          if (!selectedOrganizationId) {
+                            return;
+                          }
+
+                          const assetId = await createAsset({
+                            organizationId: selectedOrganizationId,
+                            name: assetName.trim(),
+                            assetType: assetType.trim(),
+                            metadata: {
+                              registration_number:
+                                registrationNumber.trim() || null,
+                            },
+                          });
+
+                          if (assetId) {
+                            const newAsset = {
+                              asset_id: assetId,
+                              asset_name: assetName.trim(),
+                              asset_type: assetType.trim(),
+                              capacity_litres: null,
+                              device_count: 0,
+                              sensor_count: 0,
+                              open_alert_count: 0,
+                              rows: [],
+                            };
+
+                            addLocalAsset(newAsset);
+                            selectAssetForOnboarding(assetId);
+
+                            setAssetName("");
+                            setAssetType("");
+                            setRegistrationNumber("");
+                            setShowCreateAsset(false);
+                          }
+                        }}
+                      >
+                        Create Asset
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 <div className="platform-list">
                   {assets.map((asset) => (
                     <button
                       key={asset.asset_id}
                       type="button"
-                      onClick={() => selectAsset(asset)}
+                      onClick={() => {
+                        selectAsset(asset);
+                        selectAssetForOnboarding(asset.asset_id);
+                      }}
                       className={`platform-list-card ${
                         selectedAsset?.asset_id === asset.asset_id
                           ? "platform-list-card--selected"
@@ -249,6 +395,107 @@ export default function DeviceOnboardingWizard({
               </div>
             </>
           )}
+
+          {step === "device-model" && (
+            <>
+              <p className="platform-eyebrow">Step 3</p>
+
+              <h3>Select Device Model</h3>
+
+              <p>Choose the physical hardware being installed.</p>
+
+              <div className="platform-list" style={{ marginTop: "24px" }}>
+                {models.map((model) => {
+                  const defaultProfile =
+                    model.profiles.find((profile) => profile.isDefault) ??
+                    model.profiles[0];
+
+                  return (
+                    <button
+                      key={model.id}
+                      type="button"
+                      onClick={() => {
+                        selectModel(model);
+                        selectDeviceModel(model.id);
+                      }}
+                      className={`platform-list-card ${
+                        selectedModel?.id === model.id
+                          ? "platform-list-card--selected"
+                          : ""
+                      }`}
+                    >
+                      <div>
+                        <p>{model.manufacturer ?? "Device Model"}</p>
+
+                        <h3>{model.modelName}</h3>
+
+                        <span
+                          style={{
+                            marginTop: "10px",
+                            color: "#94a3b8",
+                            fontSize: "0.95rem",
+                            fontWeight: 500,
+                            lineHeight: 1.6,
+                            textTransform: "none",
+                            letterSpacing: "normal",
+                          }}
+                        >
+                          {model.description}
+                        </span>
+
+                        <div
+                          className="platform-chip-row"
+                          style={{ marginTop: "18px" }}
+                        >
+                          {defaultProfile?.sensors.map((sensor) => (
+                            <span key={sensor.id} className="platform-tag">
+                              {sensor.sensorType}
+                            </span>
+                          ))}
+                        </div>
+
+                        <div style={{ marginTop: "16px" }}>
+                          <p
+                            style={{
+                              margin: 0,
+                              color: "#64748b",
+                              fontSize: "0.7rem",
+                              fontWeight: 900,
+                              letterSpacing: "0.08em",
+                              textTransform: "uppercase",
+                            }}
+                          >
+                            Auto Configuration
+                          </p>
+
+                          <span className="platform-tag">
+                            {defaultProfile?.name}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "flex-end",
+                          gap: "10px",
+                        }}
+                      >
+                        <strong>
+                          {model.isActive ? "ACTIVE" : "INACTIVE"}
+                        </strong>
+
+                        {selectedModel?.id === model.id && (
+                          <span className="platform-tag">✓ Selected</span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </div>
 
         <footer className="platform-wizard__footer">
@@ -269,7 +516,7 @@ export default function DeviceOnboardingWizard({
             <button
               type="button"
               className="platform-primary-button"
-              disabled={!selectedOrganizationId}
+              disabled={!canProceed}
               onClick={nextStep}
             >
               Next

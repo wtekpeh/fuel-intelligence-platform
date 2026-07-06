@@ -168,9 +168,9 @@ pub struct OrganizationFleetOverviewResponse {
     pub asset_type: String,
     pub capacity_litres: Option<f64>,
 
-    pub device_id: uuid::Uuid,
-    pub device_code: String,
-    pub device_status: String,
+    pub device_id: Option<uuid::Uuid>,
+    pub device_code: Option<String>,
+    pub device_status: Option<String>,
     pub last_seen_at: Option<DateTime<Utc>>,
 
     pub sensor_count: i64,

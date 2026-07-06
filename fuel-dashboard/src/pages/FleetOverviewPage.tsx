@@ -113,9 +113,9 @@ export function FleetOverviewPage() {
               </div>
 
               <span
-                className={`fleet-status fleet-status--${item.device_status.toLowerCase()}`}
+                className={`fleet-status fleet-status--${(item.device_status ?? "unassigned").toLowerCase()}`}
               >
-                {item.device_status}
+                {item.device_status ?? "UNASSIGNED"}
               </span>
             </div>
 

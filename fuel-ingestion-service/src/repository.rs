@@ -1715,9 +1715,9 @@ pub async fn get_organization_fleet_overview(
             assets.asset_type AS asset_type,
             assets.capacity_litres AS capacity_litres,
 
-            devices.id AS device_id,
-            devices.device_code AS device_code,
-            devices.status AS device_status,
+            devices.id AS "device_id?",
+            devices.device_code AS "device_code?",
+            devices.status AS "device_status?",
             devices.last_seen_at AS last_seen_at,
 
             COUNT(DISTINCT sensors.id) AS sensor_count,
@@ -1734,7 +1734,7 @@ pub async fn get_organization_fleet_overview(
 
         FROM assets
 
-        INNER JOIN devices
+        LEFT JOIN devices
             ON devices.asset_id = assets.id
 
         LEFT JOIN sensors

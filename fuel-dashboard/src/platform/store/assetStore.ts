@@ -4,6 +4,9 @@ import { fetchOrganizationFleetOverview } from "../../api/fleetApi";
 
 import type { OrganizationFleetOverview } from "../../types";
 
+import { createAsset } from "../../api/platformApi";
+import type { CreateAssetRequest } from "../../types";
+
 export interface PlatformAssetSummary {
   asset_id: string;
   asset_name: string;
@@ -25,7 +28,11 @@ interface AssetStore {
 
   loadAssets: (organizationId: string) => Promise<void>;
 
+  createAsset: (request: CreateAssetRequest) => Promise<string | null>;
+
   selectAsset: (asset: PlatformAssetSummary | null) => void;
+
+  addLocalAsset: (asset: PlatformAssetSummary) => void;
 
   clearAssets: () => void;
 }
@@ -100,6 +107,38 @@ export const useAssetStore = create<AssetStore>((set) => ({
         error: "Failed to load organization assets.",
       });
     }
+  },
+
+  createAsset: async (request) => {
+    set({
+      loading: true,
+      error: null,
+    });
+
+    try {
+      const result = await createAsset(request);
+
+      set({
+        loading: false,
+      });
+
+      return result.assetId;
+    } catch {
+      set({
+        loading: false,
+        error: "Failed to create asset.",
+      });
+
+      return null;
+    }
+  },
+
+  addLocalAsset: (asset) => {
+    set((state) => ({
+      assets: [asset, ...state.assets],
+      selectedAsset: asset,
+      selectedAssetRows: asset.rows,
+    }));
   },
 
   selectAsset: (asset) => {

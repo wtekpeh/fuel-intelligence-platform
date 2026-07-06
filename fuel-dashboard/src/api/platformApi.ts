@@ -69,12 +69,20 @@ interface DeviceCatalogueModelApiResponse {
 export async function createAsset(
   request: CreateAssetRequest,
 ): Promise<AssetMutationResponse> {
-  const response = await httpClient.post<AssetMutationResponse>(
-    "/api/assets",
-    request,
-  );
+  const response = await httpClient.post<{
+    asset_id: string;
+    message: string;
+  }>("/api/assets", {
+    organization_id: request.organizationId,
+    name: request.name,
+    asset_type: request.assetType,
+    metadata: request.metadata,
+  });
 
-  return response.data;
+  return {
+    assetId: response.data.asset_id,
+    message: response.data.message,
+  };
 }
 
 export async function updateAsset(

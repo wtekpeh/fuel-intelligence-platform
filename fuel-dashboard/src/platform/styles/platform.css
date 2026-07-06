@@ -121,7 +121,7 @@
 
 .platform-list-card {
   width: 100%;
-  padding: 16px;
+  padding: 14px 16px;
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 18px;
   background: rgba(2, 6, 23, 0.42);
@@ -714,4 +714,18 @@
 .platform-secondary-button:hover {
   border-color: rgba(56, 189, 248, 0.42);
   background: rgba(30, 41, 59, 0.95);
+}
+
+.platform-tag {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 6px 10px;
+  border-radius: 999px;
+  color: #bae6fd;
+  background: rgba(14, 165, 233, 0.14);
+  font-size: 0.76rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
