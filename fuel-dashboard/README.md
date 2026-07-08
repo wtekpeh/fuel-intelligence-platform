@@ -2,7 +2,18 @@
 
 ## Overview
 
-The Fuel Dashboard is the React + TypeScript frontend for the Fuel Intelligence Platform.
+The Fuel Dashboard is the React + TypeScript frontend for the Sensor Intelligence Platform.
+
+The frontend is divided into two major application domains:
+
+- Platform Administration
+- Operational Intelligence
+
+Platform Administration manages organizations, assets, device inventory,
+device provisioning, and lifecycle management.
+
+Operational Intelligence provides live telemetry, investigation,
+mapping, analytics, and operational decision support.
 
 It provides a professional operational interface for:
 
@@ -111,6 +122,72 @@ This architecture provides the frontend foundation for future features such as:
 - forensic operational investigation
 
 ---
+
+# Platform Administration
+
+The frontend now includes a dedicated Platform Administration workspace
+that is independent from the Operational Intelligence dashboard.
+
+Current capabilities:
+
+- Organization Management
+- Asset Management
+- Device Model Catalogue
+- Hardware Profile Catalogue
+- Device Onboarding Wizard
+
+Current onboarding workflow:
+
+Platform Administration
+↓
+Organizations
+↓
+Assets
+↓
+Select Device Model
+↓
+Automatic Hardware Profile Selection
+↓
+Review Provisioning
+↓
+Provision Device
+
+The onboarding wizard intentionally separates business
+relationships from telemetry processing.
+
+Operational dashboards only become available after a device
+has been provisioned.
+
+# ORBI Device Inventory
+
+The platform is evolving toward an inventory-first provisioning model.
+
+Instead of creating devices during installation, installers will
+verify devices that already exist within ORBI inventory.
+
+Planned workflow:
+
+Manufactured
+↓
+Quality Tested
+↓
+Inventory
+↓
+Verified
+↓
+Assigned
+↓
+Operational
+
+Future inventory records will include:
+
+- Device Code
+- Serial Number
+- IMEI
+- Device Model
+- Hardware Profile
+- Firmware Version
+- Inventory Status
 
 # Shared Operational State Architecture
 
@@ -780,33 +857,117 @@ Analytics API Integration
 
 Pending:
 
-landing page / company overview
-company/device/sensor selection
-alert filters
-investigation timeline
-authentication
-Capacitor Android/iOS packaging
-Product Direction
+- ORBI Device Inventory
+- Inventory Verification
+- Device Lifecycle Management
+- Firmware Management
+- Authentication & RBAC
+- Report Generation (PDF / Excel)
+- Notification Integrations
+- Capacitor Android/iOS Packaging
 
-The frontend is being built as an Operational Intelligence Platform.
+## Product Direction
 
-The platform supports:
+The frontend is evolving from a Fuel Dashboard into a complete
+Sensor Intelligence Platform.
 
-- GPS-only deployments
-- Fuel monitoring deployments
-- Fuel + GPS deployments
-- Fuel + GPS + Vibration deployments
+The architecture separates:
 
-The platform architecture is designed to evolve into a broader operational intelligence system while remaining useful for customers who only require fleet tracking and geospatial visibility.
+Platform Administration
 
-Upcoming Architecture Initiative
+- Organizations
+- Assets
+- Device Inventory
+- Provisioning
+- Device Lifecycle
 
-Device Capability Profiles
+Operational Intelligence
 
-The platform is transitioning toward explicit device capability
-profiles so that GPS-only, Fuel-only, Fuel+GPS, and
-Fuel+GPS+Vibration deployments can be onboarded and managed
-through a common operational intelligence architecture.
+- Operations
+- Investigation
+- Map Intelligence
+- Replay Intelligence
+- Analytics
 
-Then commit mentally that every time we add a major frontend capability, we update this README.
+Future intelligence domains include:
+
+- Fleet Intelligence
+- Fuel Intelligence
+- Payload Intelligence
+- Cold Chain Intelligence
+- Generator Intelligence
+- Energy Monitoring
+
+# Next Platform Milestones
+
+Platform Administration
+↓
+ORBI Device Inventory
+↓
+Inventory Verification
+↓
+Device Provisioning
+↓
+Device Lifecycle Management
+↓
+Firmware Management
+↓
+Sensor Adapter Layer
+↓
+Production ORBI Hardware
+↓
+Production ORBI PCB
+↓
+Fleet Intelligence Expansion
+↓
+Generator Intelligence
+↓
+Cold Chain Intelligence
+↓
+Payload Intelligence
+↓
+Energy Monitoring
+
+# Frontend Application Architecture
+Frontend
+
+Platform Administration
+────────────────────────────
+
+Organizations
+↓
+
+Assets
+↓
+
+Device Inventory
+
+↓
+
+Provisioning
+
+↓
+
+Provisioned Devices
+
+Operational Intelligence
+────────────────────────────
+
+Operations
+
+↓
+
+Investigation
+
+↓
+
+Map Intelligence
+
+↓
+
+Replay
+
+↓
+
+Analytics
 `````

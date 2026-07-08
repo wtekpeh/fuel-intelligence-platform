@@ -1,5 +1,33 @@
 # Fuel Ingestion Service
 
+## Platform Philosophy
+
+The Sensor Intelligence Platform separates business management,
+hardware management, and operational intelligence into distinct
+layers.
+
+Platform Administration
+
+- Organizations
+- Assets
+- Device Inventory
+- Provisioning
+- Device Lifecycle
+
+Operational Intelligence
+
+- Telemetry Ingestion
+- Event Detection
+- Investigation
+- Analytics
+- Decision Support
+
+This separation allows the platform to manage the complete
+lifecycle of intelligent devices, from manufacturing and
+inventory through deployment, telemetry processing, and
+retirement, without coupling operational analytics to
+hardware administration.
+
 ## Overview
 
 The Fuel Ingestion Service is the operational intelligence backend for the Sensor Intelligence Platform.
@@ -1477,13 +1505,24 @@ Current capabilities:
 - Device Model management
 - Hardware Profile management
 - Hardware Profile sensor definitions
-- Device registration
-- Device update
-- Device reassignment
 - Device deactivation
 - Automatic sensor provisioning
 - Device listing
 - Device sensor listing
+- ORBI Device Inventory module
+- Dedicated inventory repository
+- Inventory creation APIs
+- Inventory listing APIs
+- Inventory verification by Device Code
+- Inventory retrieval by ID
+- Inventory lifecycle management
+- Inventory status updates
+- Manufacturing-first provisioning foundation
+- Installed Devices
+- Provision device
+- Reassign device
+- Deactivate device
+- Retire device
 
 Current hardware profiles:
 
@@ -1500,17 +1539,109 @@ ORBI-FULL-KIT
 
 Current onboarding workflow:
 
-Create Organization
+Organization
 ↓
-Create Asset
+Asset
 ↓
-Select Device Model
+Device Model
 ↓
-Select Hardware Profile
+Automatic Hardware Profile Selection
 ↓
-Register Device
+Review Provisioning
 ↓
-Automatically Provision Sensors
+Verify Device Code
+↓
+Provision Device
+↓
+Automatic Sensor Provisioning
+
+# ORBI Device Inventory
+
+The platform now includes a fully implemented ORBI Device Inventory
+module that manages physical ORBI hardware before it is provisioned
+to customers.
+
+Unlike Operational Intelligence, Device Inventory represents the
+manufacturing and inventory lifecycle of ORBI hardware.
+
+Current implemented capabilities:
+
+- Create inventory device
+- List inventory devices
+- Retrieve inventory device by ID
+- Verify inventory device by Device Code
+- Update inventory lifecycle status
+
+Current inventory lifecycle:
+
+```text
+ASSEMBLED
+↓
+PROGRAMMED
+↓
+TESTED
+↓
+IN_STOCK
+↓
+RESERVED
+↓
+PROVISIONED
+↓
+RETIRED
+```
+
+Each inventory record contains:
+
+- Device Code
+- Serial Number
+- IMEI
+- Device Model
+- Hardware Profile
+- Firmware Version
+- Production Batch
+- Inventory Status
+- Quality Test Status
+- Notes
+
+Platform installers never create devices.
+
+Instead the workflow is:
+
+```text
+PCB Assembly
+↓
+Firmware Programming
+↓
+Quality Testing
+↓
+Create Inventory Record
+↓
+Inventory Management
+↓
+Installer Verification
+↓
+Provision From Inventory
+↓
+Operational Device
+↓
+Telemetry Ingestion
+↓
+Operational Intelligence
+```
+
+Current Inventory APIs:
+
+POST /api/device-inventory
+
+GET /api/device-inventory
+
+GET /api/device-inventory/{inventory_device_id}
+
+GET /api/device-inventory/verify/{device_code}
+
+PATCH /api/device-inventory/{inventory_device_id}/status
+
+POST /api/devices/provision-from-inventory
 
 ## Production Provisioning Model
 
@@ -1520,17 +1651,24 @@ The platform now separates **Platform Provisioning** from
 Business relationships are created only through Platform
 Management.
 
-Organization
+Platform Administration
+────────────────────────────────
+
+Organizations
 ↓
-Asset
+Assets
 ↓
-Device
+ORBI Device Inventory
 ↓
-Device Model
+Provisioning
 ↓
-Hardware Profile
+Provisioned Devices
 ↓
-Provisioned Sensors
+Telemetry Ingestion
+↓
+Operational Intelligence
+↓
+Analytics
 
 Only after a device has been provisioned will the backend accept:
 
@@ -1544,7 +1682,6 @@ to production-ready device provisioning.
 
 Automatic provisioning examples:
 
-```text
 GPS_ONLY
 → GPS
 
@@ -1552,7 +1689,6 @@ FUEL_FULL
 → Fuel
 → GPS
 → Vibration
-```
 
 Current Platform Management APIs:
 
@@ -1580,11 +1716,29 @@ GET /api/hardware-profiles/{hardware_profile_id}/sensors
 # Devices
 
 POST /api/devices
+POST /api/devices/provision-from-inventory
+
 GET /api/devices
+
 PATCH /api/devices/{device_id}
+
 PATCH /api/devices/{device_id}/assign-asset
+
 DELETE /api/devices/{device_id}
+
 GET /api/devices/{device_id}/sensors
+
+# ORBI Device Inventory
+
+POST /api/device-inventory
+
+GET /api/device-inventory
+
+GET /api/device-inventory/{inventory_device_id}
+
+GET /api/device-inventory/verify/{device_code}
+
+PATCH /api/device-inventory/{inventory_device_id}/status
 
 ## Ingestion Validation
 
@@ -1648,17 +1802,23 @@ Future hardware support includes:
 
 # Next Platform Milestones
 
-Frontend Platform Management
-↓
-Provisioning Workspace
+Platform Administration
 ↓
 Organization Management UI
 ↓
 Asset Management UI
 ↓
-Device Management UI
+ORBI Device Inventory
+↓
+Inventory Verification
+↓
+Provisioning Workspace
 ↓
 Provisioning Wizard
+↓
+Device Lifecycle Management
+↓
+Firmware Management
 ↓
 Sensor Adapter Layer
 ↓
@@ -1667,6 +1827,18 @@ Hardware Integration
 LilyGO Firmware
 ↓
 Production ORBI Hardware
+↓
+Production Custom ORBI PCB
+↓
+Fleet Intelligence Expansion
+↓
+Generator Intelligence
+↓
+Cold Chain Intelligence
+↓
+Payload Intelligence
+↓
+Energy Monitoring Platform
 
 ### Sensor-Agnostic Hardware Strategy
 

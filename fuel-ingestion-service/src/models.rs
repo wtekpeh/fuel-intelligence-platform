@@ -349,6 +349,66 @@ pub struct GeofenceUtilizationResponse {
 }
 
 // -----------------------------------------------------------------------------
+// ORBI Device Inventory
+// -----------------------------------------------------------------------------
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct OrbiDeviceInventory {
+    pub id: Uuid,
+
+    pub device_code: String,
+    pub serial_number: String,
+    pub imei: Option<String>,
+
+    pub device_model_id: Uuid,
+    pub hardware_profile_id: Uuid,
+
+    pub firmware_version: Option<String>,
+    pub production_batch: Option<String>,
+
+    pub inventory_status: String,
+    pub quality_test_status: String,
+
+    pub notes: Option<String>,
+
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateOrbiDeviceInventoryRequest {
+    pub device_code: String,
+    pub serial_number: String,
+    pub imei: Option<String>,
+
+    pub device_model_id: Uuid,
+    pub hardware_profile_id: Uuid,
+
+    pub firmware_version: Option<String>,
+    pub production_batch: Option<String>,
+
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateOrbiDeviceInventoryStatusRequest {
+    pub inventory_status: String,
+    pub quality_test_status: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OrbiDeviceInventoryMutationResponse {
+    pub inventory_device_id: Uuid,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct VerifyOrbiDeviceResponse {
+    pub found: bool,
+    pub device: Option<OrbiDeviceInventory>,
+}
+
+// -----------------------------------------------------------------------------
 // Device Management
 // -----------------------------------------------------------------------------
 
@@ -376,6 +436,12 @@ pub struct RegisterDeviceRequest {
     pub device_model_id: Option<uuid::Uuid>,
     pub device_code: String,
     pub hardware_profile_id: uuid::Uuid,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProvisionInventoryDeviceRequest {
+    pub inventory_device_id: Uuid,
+    pub asset_id: Uuid,
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow)]

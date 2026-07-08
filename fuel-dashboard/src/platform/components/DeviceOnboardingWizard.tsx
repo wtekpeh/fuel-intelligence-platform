@@ -56,6 +56,7 @@ export default function DeviceOnboardingWizard({
     selectOrganization,
     selectAsset: selectAssetForOnboarding,
     selectDeviceModel,
+    selectHardwareProfile,
     nextStep,
     previousStep,
   } = useDeviceOnboardingStore();
@@ -416,7 +417,14 @@ export default function DeviceOnboardingWizard({
                       type="button"
                       onClick={() => {
                         selectModel(model);
+
+                        const defaultProfile =
+                          model.profiles.find((p) => p.isDefault) ??
+                          model.profiles[0];
+
                         selectDeviceModel(model.id);
+
+                        selectHardwareProfile(defaultProfile?.id ?? null);
                       }}
                       className={`platform-list-card ${
                         selectedModel?.id === model.id
@@ -496,6 +504,124 @@ export default function DeviceOnboardingWizard({
               </div>
             </>
           )}
+
+          {step === "review" && (
+            <>
+              <p className="platform-eyebrow">Step 4</p>
+
+              <h3>Review Device Provisioning</h3>
+
+              <p>
+                Confirm the information below before provisioning the device.
+              </p>
+
+              <div className="platform-panel" style={{ marginTop: "24px" }}>
+                <p className="platform-eyebrow">Ready to Provision</p>
+
+                <h3 style={{ marginTop: "8px" }}>
+                  The platform has validated your selections.
+                </h3>
+
+                <span>
+                  This device will be registered, linked to the selected asset,
+                  and configured automatically.
+                </span>
+              </div>
+
+              <div
+                style={{
+                  display: "grid",
+                  gap: "18px",
+                  marginTop: "28px",
+                }}
+              >
+                <div className="platform-panel">
+                  <p className="platform-eyebrow">Organization</p>
+
+                  <h3 style={{ marginTop: "8px" }}>
+                    {organizations.find(
+                      (item) => item.organization_id === selectedOrganizationId,
+                    )?.organization_name ?? "-"}
+                  </h3>
+                </div>
+
+                <div className="platform-panel">
+                  <p className="platform-eyebrow">Asset</p>
+
+                  <h3 style={{ marginTop: "8px" }}>
+                    {selectedAsset?.asset_name ?? "-"}
+                  </h3>
+                </div>
+
+                <div className="platform-panel">
+                  <p className="platform-eyebrow">Device Model</p>
+
+                  <h3 style={{ marginTop: "8px" }}>
+                    {selectedModel?.modelName ?? "-"}
+                  </h3>
+                </div>
+
+                <div className="platform-panel">
+                  <p className="platform-eyebrow">Device Identification</p>
+
+                  <h3 style={{ marginTop: "8px" }}>
+                    To be assigned during provisioning
+                  </h3>
+
+                  <div className="platform-chip-row">
+                    <span className="platform-tag">Device Code Pending</span>
+                    <span className="platform-tag">Serial Optional</span>
+                    <span className="platform-tag">IMEI Optional</span>
+                  </div>
+                </div>
+
+                <div className="platform-panel">
+                  <p className="platform-eyebrow">Automatic Configuration</p>
+
+                  <h3 style={{ marginTop: "8px" }}>
+                    {selectedModel?.profiles.find((p) => p.isDefault)?.name ??
+                      selectedModel?.profiles[0]?.name ??
+                      "-"}
+                  </h3>
+
+                  <div className="platform-chip-row">
+                    {(
+                      selectedModel?.profiles.find((p) => p.isDefault)
+                        ?.sensors ??
+                      selectedModel?.profiles[0]?.sensors ??
+                      []
+                    ).map((sensor) => (
+                      <span key={sensor.id} className="platform-tag">
+                        {sensor.sensorType}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="platform-panel">
+                  <p className="platform-eyebrow">Provisioning Summary</p>
+
+                  <div
+                    style={{
+                      marginTop: "16px",
+                      display: "grid",
+                      gap: "10px",
+                    }}
+                  >
+                    <span>✓ Register device in the platform</span>
+
+                    <span>✓ Link device to selected asset</span>
+
+                    <span>✓ Apply hardware profile automatically</span>
+
+                    <span>✓ Enable installed sensors</span>
+
+                    <span>✓ Activate operational intelligence</span>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         <footer className="platform-wizard__footer">
@@ -519,7 +645,7 @@ export default function DeviceOnboardingWizard({
               disabled={!canProceed}
               onClick={nextStep}
             >
-              Next
+              {step == "review" ? "Provision Device" : "Next"}
             </button>
           </div>
         </footer>

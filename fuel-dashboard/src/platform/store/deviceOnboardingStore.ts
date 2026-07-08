@@ -12,6 +12,10 @@ interface DeviceOnboardingStore {
   selectedOrganizationId: string | null;
   selectedAssetId: string | null;
   selectedDeviceModelId: string | null;
+  selectedHardwareProfileId: string | null;
+  deviceCode: string;
+  serialNumber: string;
+  imei: string;
 
   setStep: (step: OnboardingStep) => void;
   nextStep: () => void;
@@ -20,6 +24,12 @@ interface DeviceOnboardingStore {
   selectOrganization: (organizationId: string) => void;
   selectAsset: (assetId: string) => void;
   selectDeviceModel: (deviceModelId: string) => void;
+  selectHardwareProfile: (hardwareProfileId: string | null) => void;
+  setDeviceIdentification: (payload: {
+    deviceCode: string;
+    serialNumber: string;
+    imei: string;
+  }) => void;
 
   reset: () => void;
 }
@@ -38,6 +48,10 @@ export const useDeviceOnboardingStore = create<DeviceOnboardingStore>(
     selectedOrganizationId: null,
     selectedAssetId: null,
     selectedDeviceModelId: null,
+    selectedHardwareProfileId: null,
+    deviceCode: "",
+    serialNumber: "",
+    imei: "",
 
     setStep: (step) => set({ step }),
 
@@ -62,17 +76,37 @@ export const useDeviceOnboardingStore = create<DeviceOnboardingStore>(
         selectedOrganizationId: organizationId,
         selectedAssetId: null,
         selectedDeviceModelId: null,
+        selectedHardwareProfileId: null,
+        deviceCode: "",
+        serialNumber: "",
+        imei: "",
       }),
 
     selectAsset: (assetId) =>
       set({
         selectedAssetId: assetId,
         selectedDeviceModelId: null,
+        selectedHardwareProfileId: null,
+        deviceCode: "",
+        serialNumber: "",
+        imei: "",
       }),
 
     selectDeviceModel: (deviceModelId) =>
       set({
         selectedDeviceModelId: deviceModelId,
+      }),
+
+    selectHardwareProfile: (hardwareProfileId) =>
+      set({
+        selectedHardwareProfileId: hardwareProfileId,
+      }),
+
+    setDeviceIdentification: ({ deviceCode, serialNumber, imei }) =>
+      set({
+        deviceCode,
+        serialNumber,
+        imei,
       }),
 
     reset: () =>
@@ -81,6 +115,9 @@ export const useDeviceOnboardingStore = create<DeviceOnboardingStore>(
         selectedOrganizationId: null,
         selectedAssetId: null,
         selectedDeviceModelId: null,
+        deviceCode: "",
+        serialNumber: "",
+        imei: "",
       }),
   }),
 );

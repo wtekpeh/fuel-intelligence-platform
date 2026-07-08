@@ -12,8 +12,9 @@ use crate::models::{
     DeviceSummary, FuelEventResponse, FuelReading, Geofence, GeofenceActivityTrendPoint,
     GeofenceActivityTrendResponse, GeofencePositionMatch, GeofenceTransitionEventResponse,
     GeofenceUtilizationResponse, GeofenceUtilizationZone, HardwareProfile, HardwareProfileSensor,
-    OrganizationFleetOverviewResponse, OrganizationOverviewResponse, SensorHealthEventResponse,
-    TelemetryStreamResponse, UpdateAssetRequest, UpdateDeviceRequest, UpdateOrganizationRequest,
+    OrganizationFleetOverviewResponse, OrganizationOverviewResponse,
+    ProvisionInventoryDeviceRequest, SensorHealthEventResponse, TelemetryStreamResponse,
+    UpdateAssetRequest, UpdateDeviceRequest, UpdateOrganizationRequest,
 };
 use crate::services::device_health::classify_device_status;
 use crate::services::device_state::{
@@ -216,6 +217,48 @@ pub async fn register_device(
     create_sensors_for_hardware_profile(db_pool, row.id, hardware_profile_id).await?;
 
     Ok(row.id)
+}
+
+pub async fn provision_inventory_device(
+    db_pool: &PgPool,
+    request: &ProvisionInventoryDeviceRequest,
+) -> Result<Uuid> {
+    let inventory_device = crate::orbi_inventory_repository::get_orbi_inventory_device(
+        db_pool,
+        request.inventory_device_id,
+    )
+    .await?;
+
+    let Some(inventory_device) = inventory_device else {
+        anyhow::bail!("Inventory device not found.");
+    };
+
+    if inventory_device.inventory_status == "PROVISIONED" {
+        anyhow::bail!("Inventory device has already been provisioned.");
+    }
+
+    if inventory_device.inventory_status == "RETIRED" {
+        anyhow::bail!("Retired inventory device cannot be provisioned.");
+    }
+
+    let device_id = register_device(
+        db_pool,
+        request.asset_id,
+        Some(inventory_device.device_model_id),
+        inventory_device.device_code,
+        inventory_device.hardware_profile_id,
+    )
+    .await?;
+
+    crate::orbi_inventory_repository::update_orbi_inventory_status(
+        db_pool,
+        request.inventory_device_id,
+        "PROVISIONED",
+        &inventory_device.quality_test_status,
+    )
+    .await?;
+
+    Ok(device_id)
 }
 
 pub async fn list_hardware_profiles(db_pool: &PgPool) -> Result<Vec<HardwareProfile>> {

@@ -1,4 +1,5 @@
 use crate::catalogue_repository;
+use crate::orbi_inventory_repository;
 use crate::repository;
 use crate::routes::AppState;
 use axum::extract::Path;
@@ -245,4 +246,232 @@ pub async fn list_device_catalogue_handler(
         .expect("Failed to load device catalogue");
 
     Json(catalogue)
+}
+
+//--------Inventory Management
+pub async fn create_orbi_inventory_device_handler(
+    State(app_state): State<AppState>,
+    Json(payload): Json<crate::models::CreateOrbiDeviceInventoryRequest>,
+) -> impl IntoResponse {
+    match orbi_inventory_repository::create_orbi_inventory_device(&app_state.db_pool, &payload)
+        .await
+    {
+        Ok(inventory_device_id) => (
+            StatusCode::CREATED,
+            Json(crate::models::OrbiDeviceInventoryMutationResponse {
+                inventory_device_id,
+                message: "ORBI device added to inventory successfully.".to_string(),
+            }),
+        )
+            .into_response(),
+
+        Err(error) => {
+            let message = error.to_string();
+
+            if message.contains("orbi_device_inventory_device_code_key") {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(crate::models::ApiErrorResponse {
+                        message: "Device code already exists.".to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+
+            if message.contains("orbi_device_inventory_serial_number_key") {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(crate::models::ApiErrorResponse {
+                        message: "Serial number already exists.".to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+
+            if message.contains("orbi_device_inventory_imei_key") {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(crate::models::ApiErrorResponse {
+                        message: "IMEI already exists.".to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to create ORBI inventory device.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
+pub async fn list_orbi_inventory_devices_handler(
+    State(app_state): State<AppState>,
+) -> impl IntoResponse {
+    match orbi_inventory_repository::list_orbi_inventory_devices(&app_state.db_pool).await {
+        Ok(devices) => (StatusCode::OK, Json(devices)).into_response(),
+
+        Err(error) => {
+            eprintln!("Failed to list ORBI inventory devices: {}", error);
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to list ORBI inventory devices.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
+pub async fn verify_orbi_inventory_device_handler(
+    State(app_state): State<AppState>,
+    Path(device_code): Path<String>,
+) -> impl IntoResponse {
+    match orbi_inventory_repository::verify_orbi_inventory_device_by_code(
+        &app_state.db_pool,
+        &device_code,
+    )
+    .await
+    {
+        Ok(device) => (
+            StatusCode::OK,
+            Json(crate::models::VerifyOrbiDeviceResponse {
+                found: device.is_some(),
+                device,
+            }),
+        )
+            .into_response(),
+
+        Err(error) => {
+            eprintln!("Failed to verify ORBI inventory device: {}", error);
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to verify ORBI inventory device.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
+pub async fn update_orbi_inventory_status_handler(
+    State(app_state): State<AppState>,
+    Path(inventory_device_id): Path<Uuid>,
+    Json(payload): Json<crate::models::UpdateOrbiDeviceInventoryStatusRequest>,
+) -> impl IntoResponse {
+    match orbi_inventory_repository::update_orbi_inventory_status(
+        &app_state.db_pool,
+        inventory_device_id,
+        &payload.inventory_status,
+        &payload.quality_test_status,
+    )
+    .await
+    {
+        Ok(_) => Json(crate::models::OrbiDeviceInventoryMutationResponse {
+            inventory_device_id,
+            message: "ORBI inventory status updated successfully.".to_string(),
+        })
+        .into_response(),
+
+        Err(error) => {
+            eprintln!("Failed to update ORBI inventory status: {}", error);
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to update ORBI inventory status.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
+pub async fn get_orbi_inventory_device_handler(
+    State(app_state): State<AppState>,
+    Path(inventory_device_id): Path<Uuid>,
+) -> impl IntoResponse {
+    match orbi_inventory_repository::get_orbi_inventory_device(
+        &app_state.db_pool,
+        inventory_device_id,
+    )
+    .await
+    {
+        Ok(Some(device)) => (StatusCode::OK, Json(device)).into_response(),
+
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(crate::models::ApiErrorResponse {
+                message: "ORBI inventory device not found.".to_string(),
+            }),
+        )
+            .into_response(),
+
+        Err(error) => {
+            eprintln!("Failed to fetch ORBI inventory device: {}", error);
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to fetch ORBI inventory device.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
+pub async fn provision_inventory_device_handler(
+    State(app_state): State<AppState>,
+    Json(payload): Json<crate::models::ProvisionInventoryDeviceRequest>,
+) -> impl IntoResponse {
+    match repository::provision_inventory_device(&app_state.db_pool, &payload).await {
+        Ok(device_id) => (
+            StatusCode::CREATED,
+            Json(crate::models::DeviceMutationResponse {
+                device_id,
+                message: "Inventory device provisioned successfully.".to_string(),
+            }),
+        )
+            .into_response(),
+
+        Err(error) => {
+            let message = error.to_string();
+
+            if message.contains("Inventory device not found") {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(crate::models::ApiErrorResponse { message }),
+                )
+                    .into_response();
+            }
+
+            if message.contains("already been provisioned")
+                || message.contains("Retired inventory device")
+                || message.contains("Device code already exists")
+            {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(crate::models::ApiErrorResponse { message }),
+                )
+                    .into_response();
+            }
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to provision inventory device.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
 }
