@@ -233,12 +233,10 @@ pub async fn provision_inventory_device(
         anyhow::bail!("Inventory device not found.");
     };
 
-    if inventory_device.inventory_status == "PROVISIONED" {
-        anyhow::bail!("Inventory device has already been provisioned.");
-    }
-
-    if inventory_device.inventory_status == "RETIRED" {
-        anyhow::bail!("Retired inventory device cannot be provisioned.");
+    if inventory_device.inventory_status != "READY_FOR_DEPLOYMENT" {
+        anyhow::bail!(
+            "Inventory device must be in READY_FOR_DEPLOYMENT status before provisioning."
+        );
     }
 
     let device_id = register_device(

@@ -367,7 +367,7 @@ pub async fn update_orbi_inventory_status_handler(
     Path(inventory_device_id): Path<Uuid>,
     Json(payload): Json<crate::models::UpdateOrbiDeviceInventoryStatusRequest>,
 ) -> impl IntoResponse {
-    match orbi_inventory_repository::update_orbi_inventory_status(
+    match crate::services::inventory_lifecycle::update_inventory_status(
         &app_state.db_pool,
         inventory_device_id,
         &payload.inventory_status,
@@ -382,7 +382,21 @@ pub async fn update_orbi_inventory_status_handler(
         .into_response(),
 
         Err(error) => {
-            eprintln!("Failed to update ORBI inventory status: {}", error);
+            let message = error.to_string();
+
+            if message.contains("Invalid inventory lifecycle transition")
+                || message.contains("Unknown current inventory status")
+                || message.contains("Unknown requested inventory status")
+                || message.contains("Inventory device not found")
+            {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(crate::models::ApiErrorResponse { message }),
+                )
+                    .into_response();
+            }
+
+            eprintln!("Failed to update ORBI inventory status: {}", message);
 
             (
                 StatusCode::INTERNAL_SERVER_ERROR,

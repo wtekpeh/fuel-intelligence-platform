@@ -1,6 +1,7 @@
 mod catalogue_repository;
 mod config;
 mod db;
+mod domain;
 mod handlers;
 mod models;
 mod orbi_inventory_repository;

@@ -18,7 +18,7 @@ interface DeviceOnboardingWizardProps {
   onClose: () => void;
   organizations: WizardOrganization[];
 }
-const steps = ["Organization", "Asset", "Device Model", "Review", "Complete"];
+const steps = ["Organization", "Asset", "Verify ORBI Device", "Complete"];
 
 export default function DeviceOnboardingWizard({
   open,
@@ -45,18 +45,23 @@ export default function DeviceOnboardingWizard({
     createAsset,
   } = useAssetStore();
 
-  const { models, selectedModel, loadCatalogue, selectModel } =
-    useDeviceCatalogueStore();
+  const { models, loadCatalogue } = useDeviceCatalogueStore();
 
   const {
     step,
     selectedOrganizationId,
     selectedAssetId,
-    selectedDeviceModelId,
+    deviceCode,
+    verifiedInventoryDevice,
+    isVerifyingDevice,
+    verificationError,
+    isProvisioningDevice,
+    provisioningError,
+    setDeviceCode,
+    verifyDeviceCode,
+    provisionVerifiedDevice,
     selectOrganization,
     selectAsset: selectAssetForOnboarding,
-    selectDeviceModel,
-    selectHardwareProfile,
     nextStep,
     previousStep,
   } = useDeviceOnboardingStore();
@@ -68,24 +73,26 @@ export default function DeviceOnboardingWizard({
   }, [step, selectedOrganizationId, loadAssets]);
 
   useEffect(() => {
-    if (step === "device-model") {
-      loadCatalogue();
-    }
-  }, [step, loadCatalogue]);
+    loadCatalogue();
+  }, [loadCatalogue]);
+
+  const verifiedModel = verifiedInventoryDevice
+    ? models.find(
+        (model) => model.id === verifiedInventoryDevice.device_model_id,
+      )
+    : null;
+
+  const verifiedProfile =
+    verifiedModel?.profiles.find(
+      (profile) => profile.id === verifiedInventoryDevice?.hardware_profile_id,
+    ) ?? null;
 
   const canProceed =
     (step === "organization" && selectedOrganizationId !== null) ||
     (step === "asset" && selectedAssetId !== null) ||
-    (step === "device-model" && selectedDeviceModelId !== null) ||
     step === "review";
 
-  const stepKeys = [
-    "organization",
-    "asset",
-    "device-model",
-    "review",
-    "complete",
-  ] as const;
+  const stepKeys = ["organization", "asset", "review", "complete"] as const;
 
   if (!open) {
     return null;
@@ -397,134 +404,34 @@ export default function DeviceOnboardingWizard({
             </>
           )}
 
-          {step === "device-model" && (
+          {step === "review" && (
             <>
               <p className="platform-eyebrow">Step 3</p>
 
-              <h3>Select Device Model</h3>
-
-              <p>Choose the physical hardware being installed.</p>
-
-              <div className="platform-list" style={{ marginTop: "24px" }}>
-                {models.map((model) => {
-                  const defaultProfile =
-                    model.profiles.find((profile) => profile.isDefault) ??
-                    model.profiles[0];
-
-                  return (
-                    <button
-                      key={model.id}
-                      type="button"
-                      onClick={() => {
-                        selectModel(model);
-
-                        const defaultProfile =
-                          model.profiles.find((p) => p.isDefault) ??
-                          model.profiles[0];
-
-                        selectDeviceModel(model.id);
-
-                        selectHardwareProfile(defaultProfile?.id ?? null);
-                      }}
-                      className={`platform-list-card ${
-                        selectedModel?.id === model.id
-                          ? "platform-list-card--selected"
-                          : ""
-                      }`}
-                    >
-                      <div>
-                        <p>{model.manufacturer ?? "Device Model"}</p>
-
-                        <h3>{model.modelName}</h3>
-
-                        <span
-                          style={{
-                            marginTop: "10px",
-                            color: "#94a3b8",
-                            fontSize: "0.95rem",
-                            fontWeight: 500,
-                            lineHeight: 1.6,
-                            textTransform: "none",
-                            letterSpacing: "normal",
-                          }}
-                        >
-                          {model.description}
-                        </span>
-
-                        <div
-                          className="platform-chip-row"
-                          style={{ marginTop: "18px" }}
-                        >
-                          {defaultProfile?.sensors.map((sensor) => (
-                            <span key={sensor.id} className="platform-tag">
-                              {sensor.sensorType}
-                            </span>
-                          ))}
-                        </div>
-
-                        <div style={{ marginTop: "16px" }}>
-                          <p
-                            style={{
-                              margin: 0,
-                              color: "#64748b",
-                              fontSize: "0.7rem",
-                              fontWeight: 900,
-                              letterSpacing: "0.08em",
-                              textTransform: "uppercase",
-                            }}
-                          >
-                            Auto Configuration
-                          </p>
-
-                          <span className="platform-tag">
-                            {defaultProfile?.name}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          alignItems: "flex-end",
-                          gap: "10px",
-                        }}
-                      >
-                        <strong>
-                          {model.isActive ? "ACTIVE" : "INACTIVE"}
-                        </strong>
-
-                        {selectedModel?.id === model.id && (
-                          <span className="platform-tag">✓ Selected</span>
-                        )}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </>
-          )}
-
-          {step === "review" && (
-            <>
-              <p className="platform-eyebrow">Step 4</p>
-
-              <h3>Review Device Provisioning</h3>
+              <h3>Verify ORBI Device</h3>
 
               <p>
-                Confirm the information below before provisioning the device.
+                Verify the manufactured ORBI device before assigning it to the
+                selected asset.
               </p>
 
               <div className="platform-panel" style={{ marginTop: "24px" }}>
-                <p className="platform-eyebrow">Ready to Provision</p>
+                <p className="platform-eyebrow">
+                  {verifiedInventoryDevice
+                    ? "Ready to Provision"
+                    : "Ready to Verify"}
+                </p>
 
                 <h3 style={{ marginTop: "8px" }}>
-                  The platform has validated your selections.
+                  {verifiedInventoryDevice
+                    ? "The ORBI device has been verified."
+                    : "Verify the ORBI device before provisioning."}
                 </h3>
 
                 <span>
-                  This device will be registered, linked to the selected asset,
-                  and configured automatically.
+                  {verifiedInventoryDevice
+                    ? "The platform has confirmed this manufactured device and it is ready to be assigned to the selected asset."
+                    : "Enter the ORBI Device Code below to verify the manufactured device."}
                 </span>
               </div>
 
@@ -554,47 +461,148 @@ export default function DeviceOnboardingWizard({
                 </div>
 
                 <div className="platform-panel">
-                  <p className="platform-eyebrow">Device Model</p>
+                  <p className="platform-eyebrow">ORBI Device Verification</p>
 
-                  <h3 style={{ marginTop: "8px" }}>
-                    {selectedModel?.modelName ?? "-"}
-                  </h3>
-                </div>
+                  <label
+                    style={{
+                      display: "grid",
+                      gap: "8px",
+                      marginTop: "18px",
+                    }}
+                  >
+                    Device Code
+                    <input
+                      value={deviceCode}
+                      onChange={(event) => setDeviceCode(event.target.value)}
+                      placeholder="Example: ORBI-TEST-001"
+                    />
+                  </label>
 
-                <div className="platform-panel">
-                  <p className="platform-eyebrow">Device Identification</p>
-
-                  <h3 style={{ marginTop: "8px" }}>
-                    To be assigned during provisioning
-                  </h3>
-
-                  <div className="platform-chip-row">
-                    <span className="platform-tag">Device Code Pending</span>
-                    <span className="platform-tag">Serial Optional</span>
-                    <span className="platform-tag">IMEI Optional</span>
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "12px",
+                      marginTop: "18px",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className="platform-primary-button"
+                      disabled={isVerifyingDevice || !deviceCode.trim()}
+                      onClick={verifyDeviceCode}
+                    >
+                      {isVerifyingDevice ? "Verifying..." : "Verify Device"}
+                    </button>
                   </div>
+
+                  {verificationError && (
+                    <p
+                      style={{
+                        marginTop: "16px",
+                        color: "#dc2626",
+                        fontWeight: 600,
+                      }}
+                    >
+                      {verificationError}
+                    </p>
+                  )}
+
+                  {verifiedInventoryDevice && (
+                    <div
+                      style={{
+                        marginTop: "24px",
+                        display: "grid",
+                        gap: "14px",
+                      }}
+                    >
+                      <span>
+                        ✅ Device Code: {verifiedInventoryDevice.device_code}
+                      </span>
+
+                      <span>
+                        ✅ Serial: {verifiedInventoryDevice.serial_number}
+                      </span>
+
+                      <span>✅ IMEI: {verifiedInventoryDevice.imei}</span>
+
+                      <span>
+                        ✅ Firmware: {verifiedInventoryDevice.firmware_version}
+                      </span>
+
+                      <span>
+                        ✅ Production Batch:{" "}
+                        {verifiedInventoryDevice.production_batch}
+                      </span>
+
+                      <span>
+                        ✅ Inventory Status:{" "}
+                        {verifiedInventoryDevice.inventory_status}
+                      </span>
+                    </div>
+                  )}
+
+                  {provisioningError && (
+                    <p
+                      style={{
+                        marginTop: "16px",
+                        color: "#dc2626",
+                        fontWeight: 600,
+                      }}
+                    >
+                      {provisioningError}
+                    </p>
+                  )}
                 </div>
 
                 <div className="platform-panel">
-                  <p className="platform-eyebrow">Automatic Configuration</p>
+                  <p className="platform-eyebrow">Installed Capabilities</p>
 
                   <h3 style={{ marginTop: "8px" }}>
-                    {selectedModel?.profiles.find((p) => p.isDefault)?.name ??
-                      selectedModel?.profiles[0]?.name ??
-                      "-"}
+                    {verifiedModel?.modelName ?? "Verify device first"}
                   </h3>
 
-                  <div className="platform-chip-row">
-                    {(
-                      selectedModel?.profiles.find((p) => p.isDefault)
-                        ?.sensors ??
-                      selectedModel?.profiles[0]?.sensors ??
-                      []
-                    ).map((sensor) => (
-                      <span key={sensor.id} className="platform-tag">
-                        {sensor.sensorType}
-                      </span>
-                    ))}
+                  <div
+                    style={{
+                      display: "grid",
+                      gap: "8px",
+                      marginTop: "18px",
+                    }}
+                  >
+                    <span>
+                      <strong>Profile:</strong>{" "}
+                      {verifiedProfile?.name ?? "Pending"}
+                    </span>
+
+                    <span>
+                      <strong>Firmware:</strong>{" "}
+                      {verifiedInventoryDevice?.firmware_version ?? "Pending"}
+                    </span>
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: "20px",
+                    }}
+                  >
+                    <p className="platform-eyebrow">Installed Capabilities</p>
+
+                    <div
+                      className="platform-chip-row"
+                      style={{ marginTop: "12px" }}
+                    >
+                      {(verifiedProfile?.sensors ?? []).map((sensor) => (
+                        <span key={sensor.id} className="platform-tag">
+                          {sensor.sensorType === "GPS" && "GPS Tracking"}
+                          {sensor.sensorType === "FUEL" && "Fuel Monitoring"}
+                          {sensor.sensorType === "VIBRATION" &&
+                            "Vibration Detection"}
+                        </span>
+                      ))}
+
+                      {verifiedModel?.modelCode === "ORBI-FULL-KIT" && (
+                        <span className="platform-tag">Remote Kill Switch</span>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -642,8 +650,23 @@ export default function DeviceOnboardingWizard({
             <button
               type="button"
               className="platform-primary-button"
-              disabled={!canProceed}
-              onClick={nextStep}
+              disabled={
+                step === "review"
+                  ? !verifiedInventoryDevice || isProvisioningDevice
+                  : !canProceed
+              }
+              onClick={async () => {
+                if (step === "organization" || step === "asset") {
+                  nextStep();
+                  return;
+                }
+
+                const success = await provisionVerifiedDevice();
+
+                if (success) {
+                  nextStep();
+                }
+              }}
             >
               {step == "review" ? "Provision Device" : "Next"}
             </button>

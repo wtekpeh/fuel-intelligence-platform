@@ -66,6 +66,30 @@ interface DeviceCatalogueModelApiResponse {
   profiles: DeviceCatalogueHardwareProfileApiResponse[];
 }
 
+interface VerifyInventoryDeviceApiResponse {
+  found: boolean;
+  device: {
+    id: string;
+    device_code: string;
+    serial_number: string;
+    imei: string;
+    device_model_id: string;
+    hardware_profile_id: string;
+    firmware_version: string;
+    production_batch: string;
+    inventory_status: string;
+    quality_test_status: string;
+    notes: string | null;
+    created_at: string;
+    updated_at: string;
+  } | null;
+}
+
+interface ProvisionInventoryDeviceRequest {
+  inventoryDeviceId: string;
+  assetId: string;
+}
+
 export async function createAsset(
   request: CreateAssetRequest,
 ): Promise<AssetMutationResponse> {
@@ -227,4 +251,26 @@ export async function fetchDeviceCatalogue(): Promise<DeviceCatalogueModel[]> {
       })),
     })),
   }));
+}
+
+export async function verifyInventoryDevice(deviceCode: string) {
+  const response = await httpClient.get<VerifyInventoryDeviceApiResponse>(
+    `/api/device-inventory/verify/${deviceCode}`,
+  );
+
+  return response.data;
+}
+
+export async function provisionInventoryDevice(
+  request: ProvisionInventoryDeviceRequest,
+): Promise<DeviceMutationResponse> {
+  const response = await httpClient.post<DeviceMutationResponse>(
+    "/api/devices/provision-from-inventory",
+    {
+      inventory_device_id: request.inventoryDeviceId,
+      asset_id: request.assetId,
+    },
+  );
+
+  return response.data;
 }
