@@ -87,6 +87,14 @@ export default function DeviceOnboardingWizard({
       (profile) => profile.id === verifiedInventoryDevice?.hardware_profile_id,
     ) ?? null;
 
+  const lifecycle = [
+    "ASSEMBLED",
+    "PROGRAMMED",
+    "TESTED",
+    "READY_FOR_DEPLOYMENT",
+    "PROVISIONED",
+  ];
+
   const canProceed =
     (step === "organization" && selectedOrganizationId !== null) ||
     (step === "asset" && selectedAssetId !== null) ||
@@ -534,10 +542,110 @@ export default function DeviceOnboardingWizard({
                         {verifiedInventoryDevice.production_batch}
                       </span>
 
-                      <span>
-                        ✅ Inventory Status:{" "}
-                        {verifiedInventoryDevice.inventory_status}
-                      </span>
+                      <div
+                        style={{
+                          marginTop: "10px",
+                          display: "grid",
+                          gap: "12px",
+                        }}
+                      >
+                        <div>
+                          <p className="platform-eyebrow">Inventory Status</p>
+
+                          <span
+                            className="platform-tag"
+                            style={{
+                              display: "inline-flex",
+                              marginTop: "8px",
+                              background:
+                                verifiedInventoryDevice.inventory_status ===
+                                "READY_FOR_DEPLOYMENT"
+                                  ? "#dcfce7"
+                                  : "#fef3c7",
+                              color:
+                                verifiedInventoryDevice.inventory_status ===
+                                "READY_FOR_DEPLOYMENT"
+                                  ? "#166534"
+                                  : "#92400e",
+                            }}
+                          >
+                            {verifiedInventoryDevice.inventory_status.replaceAll(
+                              "_",
+                              " ",
+                            )}
+                          </span>
+                        </div>
+
+                        {verifiedInventoryDevice.inventory_status !==
+                          "READY_FOR_DEPLOYMENT" && (
+                          <p
+                            style={{
+                              margin: 0,
+                              color: "#b45309",
+                              fontWeight: 600,
+                              lineHeight: 1.5,
+                            }}
+                          >
+                            This device cannot be provisioned until it reaches
+                            READY FOR DEPLOYMENT.
+                          </p>
+                        )}
+                      </div>
+
+                      <div
+                        style={{
+                          marginTop: "24px",
+                        }}
+                      >
+                        <p className="platform-eyebrow">
+                          Manufacturing Progress
+                        </p>
+
+                        <div
+                          style={{
+                            display: "grid",
+                            gap: "7px",
+                            marginTop: "10px",
+                          }}
+                        >
+                          {lifecycle.map((status) => {
+                            const currentIndex = lifecycle.indexOf(
+                              verifiedInventoryDevice.inventory_status,
+                            );
+
+                            const statusIndex = lifecycle.indexOf(status);
+
+                            const completed = statusIndex < currentIndex;
+
+                            const current = statusIndex === currentIndex;
+
+                            return (
+                              <div
+                                key={status}
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "9px",
+                                  minHeight: "22px",
+                                }}
+                              >
+                                <span style={{ width: "20px" }}>
+                                  {completed ? "🟢" : current ? "🟡" : "⚪"}
+                                </span>
+
+                                <span
+                                  style={{
+                                    fontWeight: current ? 700 : 500,
+                                    opacity: completed || current ? 1 : 0.6,
+                                  }}
+                                >
+                                  {status.replaceAll("_", " ")}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
                     </div>
                   )}
 
@@ -568,6 +676,11 @@ export default function DeviceOnboardingWizard({
                       marginTop: "18px",
                     }}
                   >
+                    <span>
+                      <strong>Product Code:</strong>{" "}
+                      {verifiedModel?.modelCode ?? "Pending"}
+                    </span>
+
                     <span>
                       <strong>Profile:</strong>{" "}
                       {verifiedProfile?.name ?? "Pending"}
@@ -652,7 +765,10 @@ export default function DeviceOnboardingWizard({
               className="platform-primary-button"
               disabled={
                 step === "review"
-                  ? !verifiedInventoryDevice || isProvisioningDevice
+                  ? !verifiedInventoryDevice ||
+                    verifiedInventoryDevice.inventory_status !==
+                      "READY_FOR_DEPLOYMENT" ||
+                    isProvisioningDevice
                   : !canProceed
               }
               onClick={async () => {

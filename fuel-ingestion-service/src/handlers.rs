@@ -18,14 +18,14 @@ use crate::{
     repository::{
         acknowledge_alert, check_position_against_geofences, create_geofence,
         detect_and_store_geofence_transitions_from_previous_position,
-        find_registered_device_context, get_alert_trends, get_device_health_trends,
+        find_registered_telemetry_context, get_alert_trends, get_device_health_trends,
         get_geofence_activity_trends, get_geofence_utilization, get_organization_fleet_overview,
         get_organization_id_for_device, get_organization_overview, get_recent_alerts,
         get_recent_device_health_events, get_recent_device_state_events, get_recent_fuel_events,
         get_recent_sensor_health_events, get_recent_telemetry_stream, get_telemetry_history,
         list_geofences, list_recent_geofence_transition_events, mark_device_heartbeat_seen,
         mark_device_payload_seen, refresh_device_statuses, resolve_alert,
-        save_fuel_reading_as_sensor_reading,
+        save_fuel_reading_as_sensor_reading, save_gps_reading_as_sensor_reading,
     },
 };
 
@@ -41,7 +41,7 @@ pub async fn ingest_reading_batch(
 
     let db_pool = &app_state.db_pool;
     let result = async {
-        let context = find_registered_device_context(db_pool, &payload.device_id).await?;
+        let context = find_registered_telemetry_context(db_pool, &payload.device_id).await?;
 
         let Some(context) = context else {
             return Err(anyhow::anyhow!(
@@ -51,57 +51,68 @@ pub async fn ingest_reading_batch(
         };
 
         let device_id = context.device_id;
-        let sensor_id = context.fuel_sensor_id;
 
         mark_device_payload_seen(db_pool, device_id).await?;
 
-        let mut previous_reading = None;
+        let mut previous_reading: Option<&crate::models::FuelReading> = None;
 
         let organization_id = get_organization_id_for_device(db_pool, device_id).await?;
 
         for reading in &payload.readings {
-            save_fuel_reading_as_sensor_reading(
-                db_pool,
-                device_id,
-                sensor_id,
-                reading,
-                previous_reading,
-            )
-            .await?;
-
-            if let Some(previous_reading) = previous_reading {
-                detect_and_store_geofence_transitions_from_previous_position(
-                    db_pool,
-                    organization_id,
-                    device_id,
-                    previous_reading.latitude,
-                    previous_reading.longitude,
-                    reading.latitude,
-                    reading.longitude,
-                    reading.timestamp,
-                )
-                .await?;
+            // Store GPS observations when this device has a GPS sensor.
+            if let Some(gps_sensor_id) = context.gps_sensor_id {
+                save_gps_reading_as_sensor_reading(db_pool, device_id, gps_sensor_id, reading)
+                    .await?;
             }
 
-            detect_fuel_event(
-                db_pool,
-                &app_state.alert_hub,
-                &app_state.config,
-                device_id,
-                sensor_id,
-            )
-            .await?;
+            // Preserve geofence intelligence for GPS-capable devices.
+            if context.gps_sensor_id.is_some() {
+                if let Some(previous_reading) = previous_reading {
+                    detect_and_store_geofence_transitions_from_previous_position(
+                        db_pool,
+                        organization_id,
+                        device_id,
+                        previous_reading.latitude,
+                        previous_reading.longitude,
+                        reading.latitude,
+                        reading.longitude,
+                        reading.timestamp,
+                    )
+                    .await?;
+                }
+            }
 
-            detect_possible_leak(
-                db_pool,
-                &app_state.alert_hub,
-                &app_state.config,
-                device_id,
-                sensor_id,
-            )
-            .await?;
+            // Run Fuel Intelligence only when the device has a fuel sensor.
+            if let Some(fuel_sensor_id) = context.fuel_sensor_id {
+                save_fuel_reading_as_sensor_reading(
+                    db_pool,
+                    device_id,
+                    fuel_sensor_id,
+                    reading,
+                    previous_reading,
+                )
+                .await?;
 
-            detect_frozen_fuel_sensor(db_pool, device_id, sensor_id).await?;
+                detect_fuel_event(
+                    db_pool,
+                    &app_state.alert_hub,
+                    &app_state.config,
+                    device_id,
+                    fuel_sensor_id,
+                )
+                .await?;
+
+                detect_possible_leak(
+                    db_pool,
+                    &app_state.alert_hub,
+                    &app_state.config,
+                    device_id,
+                    fuel_sensor_id,
+                )
+                .await?;
+
+                detect_frozen_fuel_sensor(db_pool, device_id, fuel_sensor_id).await?;
+            }
 
             previous_reading = Some(reading);
         }

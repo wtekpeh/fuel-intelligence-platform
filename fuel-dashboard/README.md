@@ -130,11 +130,14 @@ that is independent from the Operational Intelligence dashboard.
 
 Current capabilities:
 
-- Organization Management
-- Asset Management
-- Device Model Catalogue
-- Hardware Profile Catalogue
-- Device Onboarding Wizard
+Organization Management
+Asset Management
+ORBI Product Catalogue
+Hardware Profile Catalogue
+ORBI Device Inventory
+Device Verification
+Lifecycle-aware Provisioning
+Device Onboarding Wizard
 
 Current onboarding workflow:
 
@@ -158,36 +161,69 @@ relationships from telemetry processing.
 Operational dashboards only become available after a device
 has been provisioned.
 
+## ORBI Product Catalogue
+
+Current ORBI products:
+
+| Product                    | Capabilities                                                           |
+| -------------------------- | ---------------------------------------------------------------------- |
+| ORBI GPS Lite              | GPS Tracking                                                           |
+| ORBI GPS Control Kit       | GPS Tracking, Remote Kill Switch                                       |
+| ORBI Fuel Intelligence Kit | Fuel Monitoring, GPS Tracking, Vibration Detection                     |
+| ORBI Full Intelligence Kit | Fuel Monitoring, GPS Tracking, Vibration Detection, Remote Kill Switch |
+
 # ORBI Device Inventory
 
-The platform is evolving toward an inventory-first provisioning model.
+The platform now follows an inventory-first provisioning workflow.
 
-Instead of creating devices during installation, installers will
-verify devices that already exist within ORBI inventory.
+Manufactured ORBI devices are created in inventory before deployment and
+progress through a controlled manufacturing lifecycle.
 
-Planned workflow:
+Current lifecycle:
 
-Manufactured
-↓
-Quality Tested
-↓
-Inventory
-↓
-Verified
-↓
-Assigned
-↓
-Operational
+```text
+ASSEMBLED
+        ↓
+PROGRAMMED
+        ↓
+TESTED
+        ↓
+READY_FOR_DEPLOYMENT
+        ↓
+PROVISIONED
+        ↓
+RETIRED
+```
 
-Future inventory records will include:
+Only devices in the `READY_FOR_DEPLOYMENT` state can be provisioned.
 
-- Device Code
+Inventory records include:
+
+- ORBI Device Code
 - Serial Number
 - IMEI
-- Device Model
+- Product
+- Product Code
 - Hardware Profile
 - Firmware Version
-- Inventory Status
+- Manufacturing Status
+- Quality Test Status
+
+Provisioning workflow:
+
+Platform Administration
+↓
+Select Organization
+↓
+Select Asset
+↓
+Verify ORBI Device
+↓
+Validate Manufacturing Status
+↓
+Provision Device
+↓
+Operational Intelligence
 
 # Shared Operational State Architecture
 
@@ -857,11 +893,12 @@ Analytics API Integration
 
 Pending:
 
-- ORBI Device Inventory
-- Inventory Verification
-- Device Lifecycle Management
 - Firmware Management
 - Authentication & RBAC
+- OTA Firmware Updates
+- Report Generation (PDF / Excel)
+- Notification Integrations
+- Capacitor Android/iOS Packaging
 - Report Generation (PDF / Excel)
 - Notification Integrations
 - Capacitor Android/iOS Packaging
@@ -900,15 +937,9 @@ Future intelligence domains include:
 
 # Next Platform Milestones
 
-Platform Administration
+Platform Administration (Completed)
 ↓
-ORBI Device Inventory
-↓
-Inventory Verification
-↓
-Device Provisioning
-↓
-Device Lifecycle Management
+Embedded Rust Firmware
 ↓
 Firmware Management
 ↓

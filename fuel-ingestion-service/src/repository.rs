@@ -73,6 +73,14 @@ pub struct RegisteredDeviceContext {
     pub fuel_sensor_id: Uuid,
 }
 
+#[derive(Debug)]
+pub struct RegisteredTelemetryContext {
+    pub device_id: Uuid,
+    pub gps_sensor_id: Option<Uuid>,
+    pub fuel_sensor_id: Option<Uuid>,
+    pub vibration_sensor_id: Option<Uuid>,
+}
+
 pub async fn get_latest_device_state(db_pool: &PgPool, device_id: Uuid) -> Result<Option<String>> {
     let row = sqlx::query!(
         r#"
@@ -105,6 +113,77 @@ pub async fn get_or_create_demo_sensor(
 // -----------------------------------------------------------------------------
 // Platform Management
 // -----------------------------------------------------------------------------
+pub async fn find_registered_device_id(
+    db_pool: &PgPool,
+    device_code: &str,
+) -> Result<Option<Uuid>> {
+    let row = sqlx::query!(
+        r#"
+        SELECT id
+        FROM devices
+        WHERE device_code = $1
+          AND is_active = TRUE
+        LIMIT 1
+        "#,
+        device_code
+    )
+    .fetch_optional(db_pool)
+    .await?;
+
+    Ok(row.map(|row| row.id))
+}
+
+pub async fn find_registered_telemetry_context(
+    db_pool: &PgPool,
+    device_code: &str,
+) -> Result<Option<RegisteredTelemetryContext>> {
+    let row = sqlx::query!(
+        r#"
+        SELECT
+            d.id AS device_id,
+
+            (
+                SELECT s.id
+                FROM sensors s
+                WHERE s.device_id = d.id
+                  AND s.sensor_type = 'GPS'
+                LIMIT 1
+            ) AS gps_sensor_id,
+
+            (
+                SELECT s.id
+                FROM sensors s
+                WHERE s.device_id = d.id
+                  AND s.sensor_type = 'FUEL'
+                LIMIT 1
+            ) AS fuel_sensor_id,
+
+            (
+                SELECT s.id
+                FROM sensors s
+                WHERE s.device_id = d.id
+                  AND s.sensor_type = 'VIBRATION'
+                LIMIT 1
+            ) AS vibration_sensor_id
+
+        FROM devices d
+        WHERE d.device_code = $1
+          AND d.is_active = TRUE
+        LIMIT 1
+        "#,
+        device_code
+    )
+    .fetch_optional(db_pool)
+    .await?;
+
+    Ok(row.map(|row| RegisteredTelemetryContext {
+        device_id: row.device_id,
+        gps_sensor_id: row.gps_sensor_id,
+        fuel_sensor_id: row.fuel_sensor_id,
+        vibration_sensor_id: row.vibration_sensor_id,
+    }))
+}
+
 pub async fn find_registered_device_context(
     db_pool: &PgPool,
     device_code: &str,
@@ -613,6 +692,38 @@ pub async fn save_fuel_reading_as_sensor_reading(
     .await
 }
 
+pub async fn save_gps_reading_as_sensor_reading(
+    db_pool: &PgPool,
+    device_id: Uuid,
+    gps_sensor_id: Uuid,
+    reading: &FuelReading,
+) -> Result<()> {
+    let raw_payload: Value = serde_json::to_value(reading)?;
+
+    insert_sensor_reading(
+        db_pool,
+        NewSensorReading {
+            sensor_id: gps_sensor_id,
+            device_id,
+            recorded_at: reading.timestamp,
+
+            // The current sensor_readings schema requires a numeric value.
+            // GPS truth is stored in latitude/longitude, so value remains 0.0.
+            value: 0.0,
+            unit: "coordinates".to_string(),
+
+            latitude: Some(reading.latitude),
+            longitude: Some(reading.longitude),
+
+            vibration_level: None,
+            motion_detected: Some(reading.motion_detected),
+
+            raw_payload,
+        },
+    )
+    .await
+}
+
 async fn insert_sensor_reading(db_pool: &PgPool, new_reading: NewSensorReading) -> Result<()> {
     sqlx::query!(
         r#"
@@ -941,16 +1052,14 @@ pub async fn mark_device_payload_seen(db_pool: &PgPool, device_id: Uuid) -> Resu
 }
 
 pub async fn mark_device_heartbeat_seen(db_pool: &PgPool, device_code: &str) -> Result<Uuid> {
-    let context = find_registered_device_context(db_pool, device_code).await?;
-
-    let Some(context) = context else {
-        anyhow::bail!(
+    let device_id = find_registered_device_id(db_pool, device_code)
+    .await?
+    .ok_or_else(|| {
+        anyhow::anyhow!(
             "Unknown device '{}'. Device must be provisioned before heartbeats can be accepted.",
             device_code
-        );
-    };
-
-    let device_id = context.device_id;
+        )
+    })?;
 
     let device = sqlx::query!(
         r#"

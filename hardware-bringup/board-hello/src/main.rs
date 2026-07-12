@@ -2,10 +2,14 @@
 #![no_main]
 
 mod board;
+mod device_identity;
 mod gnss;
 mod http;
 mod i2c_scan;
+
+mod heartbeat;
 mod modem;
+mod telemetry_payload;
 
 use board::BoardPins;
 use esp_backtrace as _;
@@ -13,7 +17,8 @@ use esp_hal::delay::Delay;
 use esp_hal::i2c::master::{Config as I2cConfig, I2c};
 use esp_hal::main;
 use modem::Modem;
-mod telemetry_payload;
+
+use device_identity::DEVICE_IDENTITY;
 use esp_println::{print, println};
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -24,6 +29,23 @@ fn main() -> ! {
     let delay = Delay::new();
 
     println!("A7670E modem AT test starting from modules...");
+    println!("========================");
+    println!("ORBI DEVICE IDENTITY");
+    println!("========================");
+    println!("Device Code: {}", DEVICE_IDENTITY.device_code);
+    println!("Firmware: {}", DEVICE_IDENTITY.firmware_version);
+    println!("Product: {}", DEVICE_IDENTITY.product_code);
+    println!(
+        "Hardware Profile: {}",
+        DEVICE_IDENTITY.hardware_profile_code
+    );
+    println!(
+        "Capabilities: GPS={} FUEL={} VIBRATION={} KILL_SWITCH={}",
+        DEVICE_IDENTITY.capabilities.gps,
+        DEVICE_IDENTITY.capabilities.fuel,
+        DEVICE_IDENTITY.capabilities.vibration,
+        DEVICE_IDENTITY.capabilities.kill_switch,
+    );
 
     let mut board_pins = BoardPins::new(peripherals.GPIO12, peripherals.GPIO5, peripherals.GPIO4);
 
@@ -46,7 +68,7 @@ fn main() -> ! {
     i2c_scan::scan_i2c_bus(&mut i2c);
 
     let test_reading = telemetry_payload::GpsReading {
-        device_id: "ORBI-GPS-001",
+        device_id: DEVICE_IDENTITY.device_code,
         timestamp: "2026-06-16T14:37:02Z",
         latitude: 51.8776168,
         longitude: -0.4291513,
@@ -123,8 +145,13 @@ fn main() -> ! {
                 println!("Speed: {}", gps_info.speed);
                 println!("Timestamp: {}", gps_info.timestamp);
 
+                let heartbeat_payload =
+                    heartbeat::build_heartbeat_payload(gps_info.timestamp.as_str());
+
+                http::send_heartbeat(&mut modem, &delay, &heartbeat_payload);
+
                 let live_reading = telemetry_payload::GpsReading {
-                    device_id: "ORBI-GPS-001",
+                    device_id: DEVICE_IDENTITY.device_code,
                     timestamp: gps_info.timestamp.as_str(),
                     latitude: gps_info.latitude,
                     longitude: gps_info.longitude,

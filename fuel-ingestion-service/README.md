@@ -1526,15 +1526,16 @@ Current capabilities:
 
 Current hardware profiles:
 
-```text
 GPS_ONLY
-FUEL_FULL
-```
+GPS_CONTROL
+FUEL_INTELLIGENCE
+FULL_INTELLIGENCE
 
 Current device models:
 
-ORBI-A100
 ORBI-GPS-LITE
+ORBI-GPS-CONTROL
+ORBI-FUEL-KIT
 ORBI-FULL-KIT
 
 Current onboarding workflow:
@@ -1555,6 +1556,15 @@ Provision Device
 ↓
 Automatic Sensor Provisioning
 
+## ORBI Product Catalogue
+
+| Product                    | Hardware Profile  | Capabilities                                                           |
+| -------------------------- | ----------------- | ---------------------------------------------------------------------- |
+| ORBI GPS Lite              | GPS_ONLY          | GPS Tracking                                                           |
+| ORBI GPS Control Kit       | GPS_CONTROL       | GPS Tracking, Remote Kill Switch                                       |
+| ORBI Fuel Intelligence Kit | FUEL_INTELLIGENCE | Fuel Monitoring, GPS Tracking, Vibration Detection                     |
+| ORBI Full Intelligence Kit | FULL_INTELLIGENCE | Fuel Monitoring, GPS Tracking, Vibration Detection, Remote Kill Switch |
+
 # ORBI Device Inventory
 
 The platform now includes a fully implemented ORBI Device Inventory
@@ -1574,21 +1584,17 @@ Current implemented capabilities:
 
 Current inventory lifecycle:
 
-```text
 ASSEMBLED
 ↓
 PROGRAMMED
 ↓
 TESTED
 ↓
-IN_STOCK
-↓
-RESERVED
+READY_FOR_DEPLOYMENT
 ↓
 PROVISIONED
 ↓
 RETIRED
-```
 
 Each inventory record contains:
 
@@ -1685,10 +1691,20 @@ Automatic provisioning examples:
 GPS_ONLY
 → GPS
 
-FUEL_FULL
+GPS_CONTROL
+→ GPS
+→ Kill Switch
+
+FUEL_INTELLIGENCE
 → Fuel
 → GPS
 → Vibration
+
+FULL_INTELLIGENCE
+→ Fuel
+→ GPS
+→ Vibration
+→ Kill Switch
 
 Current Platform Management APIs:
 
@@ -1792,39 +1808,31 @@ telemetry supported by the registered hardware profile.
 
 Future hardware support includes:
 
-- LilyGO devices
-- GPS-only deployments
-- Fuel monitoring deployments
-- Fuel + GPS deployments
-- Fuel + GPS + Vibration deployments
-- Custom PCB hardware
-- Additional hardware profiles without database redesign
+LilyGO devices
+
+GPS-only deployments
+
+GPS + Kill Switch deployments
+
+Fuel Intelligence deployments
+
+Full Intelligence deployments
+
+Custom PCB hardware
+
+Additional hardware profiles without database redesign
 
 # Next Platform Milestones
 
-Platform Administration
+Platform Foundation ✅
 ↓
-Organization Management UI
-↓
-Asset Management UI
-↓
-ORBI Device Inventory
-↓
-Inventory Verification
-↓
-Provisioning Workspace
-↓
-Provisioning Wizard
-↓
-Device Lifecycle Management
+Embedded Rust Firmware
 ↓
 Firmware Management
 ↓
 Sensor Adapter Layer
 ↓
 Hardware Integration
-↓
-LilyGO Firmware
 ↓
 Production ORBI Hardware
 ↓
