@@ -78,3 +78,4 @@ lerna-debug.log*
 
 # Optional: if using pnpm, uncomment the line below
 # pnpm-lock.yaml
+orbi-firmware/src/telemetry/payload.rs:8:9
