@@ -1,5 +1,5 @@
 [package]
-name = "board-hello"
+name = "orbi-firmware"
 version = "0.1.0"
 authors = ["William <wtekpeh@murphygs.com>"]
 edition = "2021"
