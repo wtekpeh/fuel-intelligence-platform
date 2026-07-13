@@ -1,6 +1,6 @@
 use heapless::String;
 
-use crate::device_identity::DEVICE_IDENTITY;
+use crate::device::DEVICE_IDENTITY;
 
 pub fn build_heartbeat_payload(timestamp: &str) -> String<256> {
     let mut payload = String::<256>::new();

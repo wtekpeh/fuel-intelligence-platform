@@ -2,8 +2,10 @@ use esp_hal::delay::Delay;
 use esp_println::println;
 
 use crate::{
-    device_identity::DEVICE_IDENTITY, gnss::GpsInfo, heartbeat, http, modem::Modem,
-    telemetry_payload,
+    device::DEVICE_IDENTITY,
+    drivers::{gnss::GpsInfo, Modem},
+    network::{heartbeat, http},
+    telemetry::payload,
 };
 
 pub fn publish_live_fix(modem: &mut Modem, delay: &Delay, gps_info: &GpsInfo) {
@@ -19,7 +21,7 @@ pub fn publish_live_fix(modem: &mut Modem, delay: &Delay, gps_info: &GpsInfo) {
 
     http::send_heartbeat(modem, delay, &heartbeat_payload);
 
-    let live_reading = telemetry_payload::GpsReading {
+    let live_reading = payload::GpsReading {
         device_id: DEVICE_IDENTITY.device_code,
         timestamp: gps_info.timestamp.as_str(),
         latitude: gps_info.latitude,
@@ -28,7 +30,7 @@ pub fn publish_live_fix(modem: &mut Modem, delay: &Delay, gps_info: &GpsInfo) {
         heading: 0.0,
     };
 
-    let live_payload = telemetry_payload::build_gps_only_payload(&live_reading);
+    let live_payload = payload::build_gps_only_payload(&live_reading);
 
     println!("========================");
     println!("LIVE GPS PAYLOAD");

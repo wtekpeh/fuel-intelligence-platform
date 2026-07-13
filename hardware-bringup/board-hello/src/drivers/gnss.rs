@@ -1,7 +1,7 @@
 use esp_hal::delay::Delay;
 use esp_println::{print, println};
 
-use crate::modem::Modem;
+use crate::drivers::Modem;
 
 pub fn get_live_fix(modem: &mut Modem, delay: &Delay) -> Option<GpsInfo> {
     modem.send_command_and_print_response(b"AT+CGNSSPWR=1\r\n", "AT+CGNSSPWR=1", delay);

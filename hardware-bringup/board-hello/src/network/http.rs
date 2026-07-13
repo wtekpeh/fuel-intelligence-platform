@@ -1,7 +1,7 @@
 use esp_hal::delay::Delay;
 use esp_println::println;
 
-use crate::modem::Modem;
+use crate::drivers::Modem;
 
 fn post_json<const N: usize>(
     modem: &mut Modem,

@@ -1,6 +1,6 @@
 use esp_hal::delay::Delay;
 
-use crate::modem::Modem;
+use crate::drivers::Modem;
 
 pub fn run_network_diagnostics(modem: &mut Modem, delay: &Delay) {
     modem.send_command_and_print_response(b"AT\r\n", "AT", delay);
