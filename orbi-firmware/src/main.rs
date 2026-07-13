@@ -17,6 +17,7 @@ use esp_hal::main;
 
 use device::DEVICE_IDENTITY;
 use esp_println::println;
+use telemetry::record::TelemetryRecord;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -44,7 +45,13 @@ fn main() -> ! {
         DEVICE_IDENTITY.capabilities.kill_switch,
     );
 
-    storage::sdcard::initialize();
+    let mut persistent_storage = storage::sdcard::initialize(
+        peripherals.SPI2,
+        peripherals.GPIO2,
+        peripherals.GPIO15,
+        peripherals.GPIO14,
+        peripherals.GPIO13,
+    );
 
     let mut board_pins = BoardPins::new(peripherals.GPIO12, peripherals.GPIO5, peripherals.GPIO4);
 
@@ -66,13 +73,23 @@ fn main() -> ! {
 
     drivers::i2c::scan_i2c_bus(&mut i2c);
 
-    let test_reading = telemetry::payload::GpsReading {
+    let test_reading = TelemetryRecord {
         device_id: DEVICE_IDENTITY.device_code,
         timestamp: "2026-06-16T14:37:02Z",
+
         latitude: 51.8776168,
         longitude: -0.4291513,
+
+        fuel_level_litres: 0.0,
+        fuel_level_percentage: 0.0,
+
+        vibration_level: 0.0,
+        motion_detected: false,
+
         speed: 0.0,
         heading: 335.36,
+
+        simulation_mode: "real_gps_only",
     };
 
     let payload = telemetry::payload::build_gps_only_payload(&test_reading);
@@ -96,7 +113,12 @@ fn main() -> ! {
         network::diagnostics::run_network_diagnostics(&mut modem, &delay);
 
         if let Some(gps_info) = drivers::gnss::get_live_fix(&mut modem, &delay) {
-            telemetry::publisher::publish_live_fix(&mut modem, &delay, &gps_info);
+            telemetry::publisher::publish_live_fix(
+                &mut modem,
+                &delay,
+                &gps_info,
+                persistent_storage.as_mut(),
+            );
         } else {
             println!("Could not obtain or parse GPS response.");
         }
