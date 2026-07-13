@@ -4,11 +4,12 @@
 mod board;
 mod device_identity;
 mod gnss;
+mod heartbeat;
 mod http;
 mod i2c_scan;
-
-mod heartbeat;
 mod modem;
+mod network;
+mod telemetry;
 mod telemetry_payload;
 
 use board::BoardPins;
@@ -19,7 +20,7 @@ use esp_hal::main;
 use modem::Modem;
 
 use device_identity::DEVICE_IDENTITY;
-use esp_println::{print, println};
+use esp_println::println;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -94,81 +95,12 @@ fn main() -> ! {
     println!("Longitude: {}", longitude);
 
     loop {
-        modem.send_command_and_print_response(b"AT\r\n", "AT", &delay);
-        delay.delay_millis(1000);
+        network::run_network_diagnostics(&mut modem, &delay);
 
-        modem.send_command_and_print_response(b"AT+CPIN?\r\n", "AT+CPIN?", &delay);
-        delay.delay_millis(1000);
-
-        modem.send_command_and_print_response(b"AT+CSQ\r\n", "AT+CSQ", &delay);
-        delay.delay_millis(1000);
-
-        modem.send_command_and_print_response(b"AT+CEREG?\r\n", "AT+CEREG?", &delay);
-        delay.delay_millis(1000);
-
-        modem.send_command_and_print_response(b"AT+CGATT?\r\n", "AT+CGATT?", &delay);
-        delay.delay_millis(1000);
-
-        modem.send_command_and_print_response(b"AT+CGPADDR\r\n", "AT+CGPADDR", &delay);
-        delay.delay_millis(1000);
-
-        modem.send_command_and_print_response(b"AT+CGNSSPWR=1\r\n", "AT+CGNSSPWR=1", &delay);
-        delay.delay_millis(2000);
-
-        modem.send_command_and_print_response(b"AT+CGNSSPWR?\r\n", "AT+CGNSSPWR?", &delay);
-        delay.delay_millis(1000);
-
-        modem.send_command_and_print_response(b"AT+CGNSINF\r\n", "AT+CGNSINF", &delay);
-        delay.delay_millis(1000);
-
-        modem.send_command_and_print_response(b"AT+CGPS=1\r\n", "AT+CGPS=1", &delay);
-        delay.delay_millis(2000);
-
-        let gps_response =
-            modem.send_command_and_collect_response(b"AT+CGPSINFO\r\n", "AT+CGPSINFO", &delay);
-
-        if let Some(response_buffer) = gps_response {
-            println!("Raw GPS response buffer:");
-            for byte in response_buffer {
-                if byte != 0 {
-                    print!("{}", byte as char);
-                }
-            }
-            println!();
-
-            if let Some(gps_info) = gnss::parse_cgpsinfo_response(&response_buffer) {
-                println!("========================");
-                println!("LIVE GPS PARSED");
-                println!("========================");
-                println!("Latitude: {}", gps_info.latitude);
-                println!("Longitude: {}", gps_info.longitude);
-                println!("Speed: {}", gps_info.speed);
-                println!("Timestamp: {}", gps_info.timestamp);
-
-                let heartbeat_payload =
-                    heartbeat::build_heartbeat_payload(gps_info.timestamp.as_str());
-
-                http::send_heartbeat(&mut modem, &delay, &heartbeat_payload);
-
-                let live_reading = telemetry_payload::GpsReading {
-                    device_id: DEVICE_IDENTITY.device_code,
-                    timestamp: gps_info.timestamp.as_str(),
-                    latitude: gps_info.latitude,
-                    longitude: gps_info.longitude,
-                    speed: gps_info.speed,
-                    heading: 0.0,
-                };
-
-                let live_payload = telemetry_payload::build_gps_only_payload(&live_reading);
-
-                println!("========================");
-                println!("LIVE GPS PAYLOAD");
-                println!("========================");
-                println!("{}", live_payload);
-                http::send_payload(&mut modem, &delay, &live_payload);
-            } else {
-                println!("Could not parse GPS response.");
-            }
+        if let Some(gps_info) = gnss::get_live_fix(&mut modem, &delay) {
+            telemetry::publish_live_fix(&mut modem, &delay, &gps_info);
+        } else {
+            println!("Could not obtain or parse GPS response.");
         }
         delay.delay_millis(5000);
     }

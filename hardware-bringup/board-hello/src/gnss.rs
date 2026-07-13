@@ -1,3 +1,37 @@
+use esp_hal::delay::Delay;
+use esp_println::{print, println};
+
+use crate::modem::Modem;
+
+pub fn get_live_fix(modem: &mut Modem, delay: &Delay) -> Option<GpsInfo> {
+    modem.send_command_and_print_response(b"AT+CGNSSPWR=1\r\n", "AT+CGNSSPWR=1", delay);
+    delay.delay_millis(2000);
+
+    modem.send_command_and_print_response(b"AT+CGNSSPWR?\r\n", "AT+CGNSSPWR?", delay);
+    delay.delay_millis(1000);
+
+    modem.send_command_and_print_response(b"AT+CGNSINF\r\n", "AT+CGNSINF", delay);
+    delay.delay_millis(1000);
+
+    modem.send_command_and_print_response(b"AT+CGPS=1\r\n", "AT+CGPS=1", delay);
+    delay.delay_millis(2000);
+
+    let response_buffer =
+        modem.send_command_and_collect_response(b"AT+CGPSINFO\r\n", "AT+CGPSINFO", delay)?;
+
+    println!("Raw GPS response buffer:");
+
+    for byte in response_buffer {
+        if byte != 0 {
+            print!("{}", byte as char);
+        }
+    }
+
+    println!();
+
+    parse_cgpsinfo_response(&response_buffer)
+}
+
 pub fn convert_nmea_latitude(value: &str, hemisphere: &str) -> Option<f64> {
     if value.len() < 4 {
         return None;
