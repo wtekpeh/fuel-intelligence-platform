@@ -1,155 +1,198 @@
-# Fuel Intelligence Platform — ESP32 Hardware Bring-up
+1. Project Overview
 
-## Board
+Explain that orbi-firmware is the production embedded firmware for ORBI Sensor Intelligence Platform.
 
-LILYGO T-SIM / T-A7670E ESP32 board.
+2. System Architecture
+   Drivers
+   │
+   ├── GNSS
+   ├── LTE Modem
+   ├── I2C
+   │
+   ▼
+   TelemetryRecord
+   │
+   ├── Storage
+   └── Network
+   │
+   ▼
+   Rust Backend
+   │
+   ▼
+   Dashboard
+3. Repository Structure
 
-## Confirmed Pin Map
+The new structure:
 
-### Modem
-
-| Function               |   GPIO |
-| ---------------------- | -----: |
-| ESP TX to modem RX     | GPIO26 |
-| ESP RX from modem TX   | GPIO27 |
-| Modem PWRKEY           |  GPIO4 |
-| Modem RESET            |  GPIO5 |
-| Board peripheral power | GPIO12 |
-
-### SD Card
-
-| Function |   GPIO |
-| -------- | -----: |
-| SD MISO  |  GPIO2 |
-| SD MOSI  | GPIO15 |
-| SD SCLK  | GPIO14 |
-| SD CS    | GPIO13 |
-
-### External GPS Header
-
-| Function   |   GPIO |
-| ---------- | -----: |
-| GPS TX     | GPIO21 |
-| GPS RX     | GPIO22 |
-| GPS PPS    | GPIO23 |
-| GPS WAKEUP | GPIO19 |
-
-## Build Environment
-
-Before building in WSL, load the ESP toolchain:
-
-```bash
-source ~/export-esp.sh
-
-Then build:
-
-cd ~/projects/fuel-intelligence-platform/hardware-bringup/board-hello
-cargo build --release
-Flash Command
-
-Run from PowerShell:
-
-espflash flash --monitor --ignore-app-descriptor --port COM3 "\\wsl.localhost\Ubuntu\home\william\projects\fuel-intelligence-platform\hardware-bringup\board-hello\target\xtensa-esp32-none-elf\release\board-hello"
-Monitor Only
-espflash monitor --port COM3
-Important Flashing Rule
-
-Do not flash firmware while the SD card is inserted.
-
-Use this order:
-
-Remove SD card.
-Flash firmware.
-Stop monitor.
-Insert SD card if needed.
-Run monitor only.
-Press RST.
-Confirmed Hardware Tests
-Test	Status
-ESP32 boot	Done
-ESP32 flash	Done
-Serial monitor	Done
-SD card SPI bus	Done
-SD card detect	Done
-SD card read/open volume	Done
-SD card write	Done
-A7670E AT command	Done
-SIM detection	Done
-LTE signal	Done
-LTE registration	Done
-Packet data attach	Done
-IP address allocation	Done
-HTTP request	Pending
-GNSS/GPS	Pending
-Fuel sensor	Pending
-Vibration sensor	Pending
-Verified Modem Results
-Basic AT
-AT
-OK
-SIM Status
-AT+CPIN?
-+CPIN: READY
-OK
-Signal Strength
-
-Working signal example:
-
-AT+CSQ
-+CSQ: 25,99
-OK
-Operator
-AT+COPS?
-+COPS: 0,2,"23420",7
-OK
-
-23420 is the connected operator code.
-
-7 means LTE.
-
-LTE Registration
-AT+CEREG?
-+CEREG: 0,1
-OK
-Packet Data Attached
-AT+CGATT?
-+CGATT: 1
-OK
-IP Address
-AT+CGPADDR
-+CGPADDR: 1,10.20.80.36
-OK
-
-This confirms the modem received an IP address.
-
-Current Source Structure
 src/
-├── main.rs
-├── board.rs
-└── modem.rs
-Current Module Responsibility
-board.rs
+├── board/
+├── device/
+├── drivers/
+├── network/
+├── storage/
+├── telemetry/
+└── main.rs
 
-Owns the board-level control pins:
+with an explanation of every folder.
 
-GPIO12 board peripheral power
-GPIO5 modem reset
-GPIO4 modem power key
-modem.rs
+4. Hardware
 
-Owns:
+Include all confirmed GPIO assignments:
 
-UART setup
-modem power-on sequence
-sending AT commands
-reading/printing modem responses
-Next Steps
-Add HTTP modem test.
-Add SD logging module.
-Log modem diagnostics to FUEL_LOG.TXT.
-Add GNSS/GPS test.
-Add fuel sensor test.
-Add vibration sensor test.
-Build reusable diagnostic firmware for new boards.
-Later flash production firmware.
-```
+Modem
+SD
+I²C
+External GNSS
+UART 5. Build Environment
+
+Update to:
+
+cd ~/projects/fuel-intelligence-platform/orbi-firmware
+source ~/export-esp.sh
+cargo build --release 6. Flash Commands
+
+Update to:
+
+espflash flash --monitor --ignore-app-descriptor --port COM5 "\\wsl.localhost\Ubuntu\home\william\projects\fuel-intelligence-platform\orbi-firmware\target\xtensa-esp32-none-elf\release\orbi-firmware"
+
+and:
+
+espflash monitor --port COM5 7. Provisioning
+
+Document that the firmware uses:
+
+DEVICE_IDENTITY
+
+and that every physical ORBI device must first be:
+
+Manufactured
+↓
+
+Programmed
+
+↓
+
+Tested
+
+↓
+
+Provisioned
+
+↓
+
+Activated
+
+before telemetry is accepted by the backend.
+
+8. Runtime Flow
+
+Document the exact runtime sequence we have now proven:
+
+Power On
+
+↓
+
+Modem
+
+↓
+
+Network
+
+↓
+
+GNSS Fix
+
+↓
+
+TelemetryRecord
+
+↓
+
+Append ORBIQUE.LOG
+
+↓
+
+Flush SD
+
+↓
+
+Heartbeat
+
+↓
+
+HTTP Upload
+
+↓
+
+Backend Storage 9. SD Storage
+
+Document:
+
+ORBITEST.TXT
+
+and:
+
+ORBIQUE.LOG
+
+Explain that:
+
+ORBITEST.TXT is the filesystem verification file.
+ORBIQUE.LOG stores live telemetry before transmission. 10. Verified Features
+
+Everything we have physically verified:
+
+Feature Status
+ESP32 Boot ✅
+Flashing ✅
+Serial Monitor ✅
+LTE Modem ✅
+SIM Detection ✅
+LTE Registration ✅
+HTTP ✅
+GNSS ✅
+Device Identity ✅
+TelemetryRecord ✅
+SD Detection ✅
+FAT Mount ✅
+File Creation ✅
+Live SD Logging ✅
+Backend Upload ✅
+End-to-End Rust Pipeline ✅ 11. Current Architecture Milestone
+
+Something like:
+
+v0.1.0
+
+✓ Rust no_std firmware
+
+✓ LTE
+
+✓ GNSS
+
+✓ SD logging
+
+✓ TelemetryRecord
+
+✓ Heartbeat
+
+✓ HTTP upload
+
+✓ Backend integration 12. Next Milestones
+
+The roadmap should now be:
+
+□ Offline retry queue
+
+□ Upload acknowledgement
+
+□ Fuel (RS485)
+
+□ Vibration
+
+□ Ignition
+
+□ Remote configuration
+
+□ OTA firmware updates
+
+□ Production PCB
