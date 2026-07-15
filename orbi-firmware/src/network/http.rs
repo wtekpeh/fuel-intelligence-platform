@@ -3,6 +3,27 @@ use esp_println::println;
 
 use crate::drivers::Modem;
 
+fn extract_http_status(response: &[u8]) -> Option<u16> {
+    const PREFIX: &[u8] = b"+HTTPACTION: 1,";
+
+    let prefix_start = response
+        .windows(PREFIX.len())
+        .position(|window| window == PREFIX)?;
+
+    let status_start = prefix_start + PREFIX.len();
+    let status_bytes = response.get(status_start..status_start + 3)?;
+
+    if !status_bytes.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+
+    let status = ((status_bytes[0] - b'0') as u16 * 100)
+        + ((status_bytes[1] - b'0') as u16 * 10)
+        + (status_bytes[2] - b'0') as u16;
+
+    Some(status)
+}
+
 fn post_json<const N: usize>(
     modem: &mut Modem,
     delay: &Delay,
@@ -14,7 +35,7 @@ fn post_json<const N: usize>(
     read_label: &str,
     sent_message: &str,
     final_httpterm_delay: u32,
-) {
+) -> bool {
     modem.send_command_and_print_response(b"AT+HTTPTERM\r\n", "AT+HTTPTERM", delay);
     delay.delay_millis(1000);
 
@@ -48,12 +69,38 @@ fn post_json<const N: usize>(
     }
 
     println!("{}", sent_message);
-
     delay.delay_millis(final_httpterm_delay);
 
-    modem.send_command_and_print_response(b"AT+HTTPACTION=1\r\n", action_label, delay);
+    let action_response =
+        modem.send_command_and_collect_response(b"AT+HTTPACTION=1\r\n", action_label, delay);
 
-    delay.delay_millis(15000);
+    let upload_succeeded = if let Some((response_buffer, bytes_read)) = action_response {
+        let response = &response_buffer[..bytes_read];
+
+        match extract_http_status(response) {
+            Some(status) => {
+                println!("HTTP status: {}", status);
+
+                if (200..300).contains(&status) {
+                    println!("HTTP upload succeeded.");
+                    true
+                } else {
+                    println!("HTTP upload failed.");
+                    false
+                }
+            }
+
+            None => {
+                println!("Could not parse HTTPACTION status.");
+                false
+            }
+        }
+    } else {
+        println!("No HTTPACTION response received.");
+        false
+    };
+
+    delay.delay_millis(1000);
 
     modem.send_command_and_print_response(b"AT+HTTPREAD\r\n", read_label, delay);
 
@@ -62,9 +109,11 @@ fn post_json<const N: usize>(
     modem.send_command_and_print_response(b"AT+HTTPTERM\r\n", "AT+HTTPTERM", delay);
 
     delay.delay_millis(1000);
+
+    upload_succeeded
 }
 
-pub fn send_payload(modem: &mut Modem, delay: &Delay, payload: &heapless::String<1024>) {
+pub fn send_payload(modem: &mut Modem, delay: &Delay, payload: &heapless::String<1024>) -> bool {
     post_json(
         modem,
         delay,
@@ -76,10 +125,10 @@ pub fn send_payload(modem: &mut Modem, delay: &Delay, payload: &heapless::String
         "AT+HTTPREAD",
         "Sent HTTP JSON PAYLOAD",
         5000,
-    );
+    )
 }
 
-pub fn send_heartbeat(modem: &mut Modem, delay: &Delay, payload: &heapless::String<256>) {
+pub fn send_heartbeat(modem: &mut Modem, delay: &Delay, payload: &heapless::String<256>) -> bool {
     println!("========================");
     println!("SENDING ORBI HEARTBEAT");
     println!("========================");
@@ -96,5 +145,5 @@ pub fn send_heartbeat(modem: &mut Modem, delay: &Delay, payload: &heapless::Stri
         "AT+HTTPREAD HEARTBEAT",
         "Heartbeat JSON sent to modem.",
         3000,
-    );
+    )
 }

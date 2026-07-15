@@ -13,7 +13,7 @@ pub fn publish_live_fix<S>(
     modem: &mut Modem,
     delay: &Delay,
     gps_info: &GpsInfo,
-    storage: Option<&mut S>,
+    mut storage: Option<&mut S>,
 ) where
     S: RecordStorage,
 {
@@ -48,21 +48,17 @@ pub fn publish_live_fix<S>(
     println!("SAVING TELEMETRY TO SD");
     println!("========================");
 
-    match storage {
-        Some(storage) => {
-            if !storage.append_record(&live_reading) {
-                println!("Telemetry SD append failed.");
-            }
+    if let Some(storage) = storage.as_mut() {
+        if !storage.append_record(&live_reading) {
+            println!("Telemetry SD append failed.");
         }
-
-        None => {
-            println!("SD storage unavailable. Continuing with upload.");
-        }
+    } else {
+        println!("SD storage unavailable. Continuing with upload.");
     }
 
     let heartbeat_payload = heartbeat::build_heartbeat_payload(gps_info.timestamp.as_str());
 
-    http::send_heartbeat(modem, delay, &heartbeat_payload);
+    let _heartbeat_success = http::send_heartbeat(modem, delay, &heartbeat_payload);
 
     let live_payload = payload::build_gps_only_payload(&live_reading);
 
@@ -71,5 +67,17 @@ pub fn publish_live_fix<S>(
     println!("========================");
     println!("{}", live_payload);
 
-    http::send_payload(modem, delay, &live_payload);
+    let upload_success = http::send_payload(modem, delay, &live_payload);
+
+    if upload_success {
+        if let Some(storage) = storage.as_mut() {
+            if !storage.append_ack(live_reading.device_id, live_reading.timestamp) {
+                println!("Telemetry ACK append failed.");
+            }
+        } else {
+            println!("Upload succeeded, but SD storage is unavailable for ACK.");
+        }
+    } else {
+        println!("Telemetry upload failed. Record remains pending in ORBIQ.LOG.");
+    }
 }

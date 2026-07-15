@@ -82,7 +82,7 @@ impl<'d> Modem<'d> {
         command: &[u8],
         label: &str,
         delay: &Delay,
-    ) -> Option<[u8; 256]> {
+    ) -> Option<([u8; 256], usize)> {
         let _ = self.uart.write(command);
 
         println!("Sent: {}", label);
@@ -95,7 +95,7 @@ impl<'d> Modem<'d> {
             Ok(bytes_read) => {
                 println!("Collected {} byte(s)", bytes_read);
 
-                Some(buffer)
+                Some((buffer, bytes_read))
             }
             Err(_) => {
                 println!("No response received.");

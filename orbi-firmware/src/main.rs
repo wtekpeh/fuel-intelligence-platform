@@ -109,6 +109,33 @@ fn main() -> ! {
     println!("Latitude: {}", latitude);
     println!("Longitude: {}", longitude);
 
+    println!("========================");
+    println!("WAITING FOR NETWORK BEFORE REPLAY");
+    println!("========================");
+
+    let mut network_ready = false;
+
+    for attempt in 1..=6 {
+        println!("Network readiness attempt {}/6", attempt);
+
+        let state = network::state::read_network_state(&mut modem, &delay);
+
+        if state.is_ready() {
+            network_ready = true;
+            println!("Network ready for queued telemetry replay.");
+            break;
+        }
+
+        println!("Network not ready yet. Waiting 5 seconds...");
+        delay.delay_millis(5000);
+    }
+
+    if network_ready {
+        telemetry::replay::replay_pending_records(&mut modem, &delay, persistent_storage.as_mut());
+    } else {
+        println!("Network did not become ready. Replay skipped for this boot.");
+    }
+
     loop {
         network::diagnostics::run_network_diagnostics(&mut modem, &delay);
 

@@ -16,15 +16,13 @@ pub fn get_live_fix(modem: &mut Modem, delay: &Delay) -> Option<GpsInfo> {
     modem.send_command_and_print_response(b"AT+CGPS=1\r\n", "AT+CGPS=1", delay);
     delay.delay_millis(2000);
 
-    let response_buffer =
+    let (response_buffer, bytes_read) =
         modem.send_command_and_collect_response(b"AT+CGPSINFO\r\n", "AT+CGPSINFO", delay)?;
 
     println!("Raw GPS response buffer:");
 
-    for byte in response_buffer {
-        if byte != 0 {
-            print!("{}", byte as char);
-        }
+    for byte in &response_buffer[..bytes_read] {
+        print!("{}", *byte as char);
     }
 
     println!();
