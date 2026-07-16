@@ -14,7 +14,9 @@ pub fn publish_live_fix<S>(
     delay: &Delay,
     gps_info: &GpsInfo,
     mut storage: Option<&mut S>,
-) where
+    send_heartbeat: bool,
+) -> bool
+where
     S: RecordStorage,
 {
     println!("========================");
@@ -56,9 +58,14 @@ pub fn publish_live_fix<S>(
         println!("SD storage unavailable. Continuing with upload.");
     }
 
-    let heartbeat_payload = heartbeat::build_heartbeat_payload(gps_info.timestamp.as_str());
+    let heartbeat_success = if send_heartbeat {
+        let heartbeat_payload = heartbeat::build_heartbeat_payload(gps_info.timestamp.as_str());
 
-    let _heartbeat_success = http::send_heartbeat(modem, delay, &heartbeat_payload);
+        http::send_heartbeat(modem, delay, &heartbeat_payload)
+    } else {
+        println!("Heartbeat not due. Telemetry upload will confirm device activity.");
+        false
+    };
 
     let live_payload = payload::build_gps_only_payload(&live_reading);
 
@@ -80,4 +87,6 @@ pub fn publish_live_fix<S>(
     } else {
         println!("Telemetry upload failed. Record remains pending in ORBIQ.LOG.");
     }
+
+    upload_success || heartbeat_success
 }

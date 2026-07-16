@@ -3,7 +3,11 @@ use esp_println::{print, println};
 
 use crate::drivers::Modem;
 
-pub fn get_live_fix(modem: &mut Modem, delay: &Delay) -> Option<GpsInfo> {
+pub fn initialize(modem: &mut Modem, delay: &Delay) {
+    println!("========================");
+    println!("ORBI GNSS INITIALIZATION");
+    println!("========================");
+
     modem.send_command_and_print_response(b"AT+CGNSSPWR=1\r\n", "AT+CGNSSPWR=1", delay);
     delay.delay_millis(2000);
 
@@ -16,6 +20,10 @@ pub fn get_live_fix(modem: &mut Modem, delay: &Delay) -> Option<GpsInfo> {
     modem.send_command_and_print_response(b"AT+CGPS=1\r\n", "AT+CGPS=1", delay);
     delay.delay_millis(2000);
 
+    println!("GNSS initialization commands completed.");
+}
+
+pub fn get_live_fix(modem: &mut Modem, delay: &Delay) -> Option<GpsInfo> {
     let (response_buffer, bytes_read) =
         modem.send_command_and_collect_response(b"AT+CGPSINFO\r\n", "AT+CGPSINFO", delay)?;
 
@@ -27,7 +35,7 @@ pub fn get_live_fix(modem: &mut Modem, delay: &Delay) -> Option<GpsInfo> {
 
     println!();
 
-    parse_cgpsinfo_response(&response_buffer)
+    parse_cgpsinfo_response(&response_buffer[..bytes_read])
 }
 
 pub fn convert_nmea_latitude(value: &str, hemisphere: &str) -> Option<f64> {
@@ -90,12 +98,14 @@ pub fn parse_cgpsinfo_response(buffer: &[u8]) -> Option<GpsInfo> {
     let time = parts.next()?.trim();
 
     let timestamp = build_iso_timestamp(date, time)?;
+
     let _altitude = parts.next()?.trim();
 
     let speed_text = parts.next()?.trim();
     let speed = speed_text.parse::<f64>().unwrap_or(0.0);
 
     let latitude = convert_nmea_latitude(lat_value, lat_hemisphere)?;
+
     let longitude = convert_nmea_longitude(lon_value, lon_hemisphere)?;
 
     Some(GpsInfo {

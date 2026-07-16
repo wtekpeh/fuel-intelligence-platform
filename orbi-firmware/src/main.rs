@@ -5,15 +5,16 @@ mod board;
 mod device;
 mod drivers;
 mod network;
+mod scheduler;
 mod storage;
 mod telemetry;
 
 use board::BoardPins;
 use drivers::Modem;
 use esp_backtrace as _;
-use esp_hal::delay::Delay;
 use esp_hal::i2c::master::{Config as I2cConfig, I2c};
 use esp_hal::main;
+use esp_hal::{delay::Delay, time::Instant};
 
 use device::DEVICE_IDENTITY;
 use esp_println::println;
@@ -63,6 +64,8 @@ fn main() -> ! {
     );
 
     let mut modem = Modem::new(peripherals.UART1, peripherals.GPIO26, peripherals.GPIO27);
+
+    drivers::gnss::initialize(&mut modem, &delay);
 
     drivers::i2c::print_scan_banner();
 
@@ -136,19 +139,73 @@ fn main() -> ! {
         println!("Network did not become ready. Replay skipped for this boot.");
     }
 
+    let reporting_policy = scheduler::reporting::ReportingPolicy::default();
+
+    let mut next_reporting_interval_ms = reporting_policy.parked_interval_ms;
+
+    const HEARTBEAT_INTERVAL_SECONDS: u64 = 300;
+    const DIAGNOSTICS_INTERVAL_SECONDS: u64 = 600;
+
+    let mut last_successful_cloud_contact = Instant::now();
+
+    let mut last_network_diagnostics = Instant::now();
+
     loop {
-        network::diagnostics::run_network_diagnostics(&mut modem, &delay);
+        let diagnostics_due =
+            last_network_diagnostics.elapsed().as_secs() >= DIAGNOSTICS_INTERVAL_SECONDS;
+
+        if diagnostics_due {
+            println!("========================");
+            println!("PERIODIC NETWORK DIAGNOSTICS");
+            println!("========================");
+
+            network::diagnostics::run_network_diagnostics(&mut modem, &delay);
+
+            last_network_diagnostics = Instant::now();
+        } else {
+            println!("Periodic network diagnostics not due.");
+        }
 
         if let Some(gps_info) = drivers::gnss::get_live_fix(&mut modem, &delay) {
-            telemetry::publisher::publish_live_fix(
+            let heartbeat_due =
+                last_successful_cloud_contact.elapsed().as_secs() >= HEARTBEAT_INTERVAL_SECONDS;
+
+            println!("Heartbeat due: {}", heartbeat_due);
+
+            let cloud_contact_succeeded = telemetry::publisher::publish_live_fix(
                 &mut modem,
                 &delay,
                 &gps_info,
                 persistent_storage.as_mut(),
+                heartbeat_due,
             );
+
+            if cloud_contact_succeeded {
+                last_successful_cloud_contact = Instant::now();
+            } else {
+                println!("========================");
+                println!("CLOUD CONTACT FAILED");
+                println!("Running immediate network diagnostics...");
+                println!("========================");
+
+                network::diagnostics::run_network_diagnostics(&mut modem, &delay);
+
+                last_network_diagnostics = Instant::now();
+            }
+
+            next_reporting_interval_ms = reporting_policy.next_interval_from_speed(gps_info.speed);
         } else {
             println!("Could not obtain or parse GPS response.");
+
+            // Retry sooner when a GNSS fix temporarily fails.
+            next_reporting_interval_ms = 30_000;
         }
-        delay.delay_millis(5000);
+
+        println!(
+            "Waiting {} seconds before the next telemetry cycle.",
+            next_reporting_interval_ms / 1000
+        );
+
+        delay.delay_millis(next_reporting_interval_ms);
     }
 }
