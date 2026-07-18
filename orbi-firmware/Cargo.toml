@@ -1,6 +1,6 @@
 [package]
 name = "orbi-firmware"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["William <wtekpeh@murphygs.com>"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
@@ -18,6 +18,8 @@ embedded-sdmmc = "0.9.0"
 embedded-hal-bus = "0.3.0"
 log = "0.4.22"
 heapless = "0.8.0"
+esp-storage = { version = "0.9.0", features = ["esp32"] }
+embedded-storage = "0.3.1"
 [profile.dev]
 # Rust debug is too slow.
 # For debug builds always builds with some optimization
@@ -31,3 +33,6 @@ incremental = false
 lto = 'fat'
 opt-level = 's'
 overflow-checks = false
+
+[profile.dev.package.esp-storage]
+opt-level = 3

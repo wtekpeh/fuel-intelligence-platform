@@ -16,7 +16,7 @@ use esp_hal::i2c::master::{Config as I2cConfig, I2c};
 use esp_hal::main;
 use esp_hal::{delay::Delay, time::Instant};
 
-use device::DEVICE_IDENTITY;
+use device::{load_runtime_identity, FIRMWARE_IDENTITY};
 use esp_println::println;
 use telemetry::record::TelemetryRecord;
 
@@ -27,23 +27,27 @@ fn main() -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default());
     let delay = Delay::new();
 
+    let runtime_identity = device::storage::load_runtime_identity_from_flash(peripherals.FLASH)
+        .unwrap_or_else(load_runtime_identity);
+
     println!("A7670E modem AT test starting from modules...");
     println!("========================");
     println!("ORBI DEVICE IDENTITY");
     println!("========================");
-    println!("Device Code: {}", DEVICE_IDENTITY.device_code);
-    println!("Firmware: {}", DEVICE_IDENTITY.firmware_version);
-    println!("Product: {}", DEVICE_IDENTITY.product_code);
+    println!("Device Code: {}", runtime_identity.device_code());
+    println!("Provisioned: {}", runtime_identity.is_provisioned());
+    println!("Firmware: {}", FIRMWARE_IDENTITY.firmware_version);
+    println!("Product: {}", FIRMWARE_IDENTITY.product_code);
     println!(
         "Hardware Profile: {}",
-        DEVICE_IDENTITY.hardware_profile_code
+        FIRMWARE_IDENTITY.hardware_profile_code
     );
     println!(
         "Capabilities: GPS={} FUEL={} VIBRATION={} KILL_SWITCH={}",
-        DEVICE_IDENTITY.capabilities.gps,
-        DEVICE_IDENTITY.capabilities.fuel,
-        DEVICE_IDENTITY.capabilities.vibration,
-        DEVICE_IDENTITY.capabilities.kill_switch,
+        FIRMWARE_IDENTITY.capabilities.gps,
+        FIRMWARE_IDENTITY.capabilities.fuel,
+        FIRMWARE_IDENTITY.capabilities.vibration,
+        FIRMWARE_IDENTITY.capabilities.kill_switch,
     );
 
     let mut persistent_storage = storage::sdcard::initialize(
@@ -77,7 +81,7 @@ fn main() -> ! {
     drivers::i2c::scan_i2c_bus(&mut i2c);
 
     let test_reading = TelemetryRecord {
-        device_id: DEVICE_IDENTITY.device_code,
+        device_id: runtime_identity.device_code(),
         timestamp: "2026-06-16T14:37:02Z",
 
         latitude: 51.8776168,
@@ -175,6 +179,7 @@ fn main() -> ! {
             let cloud_contact_succeeded = telemetry::publisher::publish_live_fix(
                 &mut modem,
                 &delay,
+                runtime_identity.device_code(),
                 &gps_info,
                 persistent_storage.as_mut(),
                 heartbeat_due,

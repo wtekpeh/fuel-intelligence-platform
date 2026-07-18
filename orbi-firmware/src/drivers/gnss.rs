@@ -76,6 +76,7 @@ pub struct GpsInfo {
     pub latitude: f64,
     pub longitude: f64,
     pub speed: f64,
+    pub heading: f64,
     pub timestamp: heapless::String<32>,
 }
 
@@ -104,6 +105,9 @@ pub fn parse_cgpsinfo_response(buffer: &[u8]) -> Option<GpsInfo> {
     let speed_text = parts.next()?.trim();
     let speed = speed_text.parse::<f64>().unwrap_or(0.0);
 
+    let heading_text = parts.next()?.trim();
+    let heading = heading_text.parse::<f64>().unwrap_or(0.0);
+
     let latitude = convert_nmea_latitude(lat_value, lat_hemisphere)?;
 
     let longitude = convert_nmea_longitude(lon_value, lon_hemisphere)?;
@@ -112,6 +116,7 @@ pub fn parse_cgpsinfo_response(buffer: &[u8]) -> Option<GpsInfo> {
         latitude,
         longitude,
         speed,
+        heading,
         timestamp,
     })
 }

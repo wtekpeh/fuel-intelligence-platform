@@ -2,16 +2,16 @@ use esp_hal::delay::Delay;
 use esp_println::println;
 
 use crate::{
-    device::DEVICE_IDENTITY,
     drivers::{gnss::GpsInfo, Modem},
     network::{heartbeat, http},
     storage::RecordStorage,
-    telemetry::{payload, record::TelemetryRecord},
+    telemetry::{payload, record::TelemetryRecord, replay},
 };
 
 pub fn publish_live_fix<S>(
     modem: &mut Modem,
     delay: &Delay,
+    device_code: &str,
     gps_info: &GpsInfo,
     mut storage: Option<&mut S>,
     send_heartbeat: bool,
@@ -25,10 +25,11 @@ where
     println!("Latitude: {}", gps_info.latitude);
     println!("Longitude: {}", gps_info.longitude);
     println!("Speed: {}", gps_info.speed);
+    println!("Heading: {}", gps_info.heading);
     println!("Timestamp: {}", gps_info.timestamp);
 
     let live_reading = TelemetryRecord {
-        device_id: DEVICE_IDENTITY.device_code,
+        device_id: device_code,
         timestamp: gps_info.timestamp.as_str(),
 
         latitude: gps_info.latitude,
@@ -41,7 +42,7 @@ where
         motion_detected: false,
 
         speed: gps_info.speed,
-        heading: 0.0,
+        heading: gps_info.heading,
 
         simulation_mode: "real_gps_only",
     };
@@ -59,7 +60,8 @@ where
     }
 
     let heartbeat_success = if send_heartbeat {
-        let heartbeat_payload = heartbeat::build_heartbeat_payload(gps_info.timestamp.as_str());
+        let heartbeat_payload =
+            heartbeat::build_heartbeat_payload(device_code, gps_info.timestamp.as_str());
 
         http::send_heartbeat(modem, delay, &heartbeat_payload)
     } else {
@@ -78,8 +80,12 @@ where
 
     if upload_success {
         if let Some(storage) = storage.as_mut() {
-            if !storage.append_ack(live_reading.device_id, live_reading.timestamp) {
-                println!("Telemetry ACK append failed.");
+            if storage.append_ack(live_reading.device_id, live_reading.timestamp) {
+                println!("Telemetry upload acknowledged. Cleaning completed queue records.");
+
+                replay::cleanup_acknowledged_records(Some(&mut **storage));
+            } else {
+                println!("Telemetry ACK append failed. Record remains in ORBIQ.LOG.");
             }
         } else {
             println!("Upload succeeded, but SD storage is unavailable for ACK.");

@@ -201,12 +201,20 @@ where
     fn is_acknowledged(&mut self, device_id: &str, timestamp: &str) -> bool {
         let volume = match self.volume_manager.open_volume(VolumeIdx(0)) {
             Ok(volume) => volume,
-            Err(_) => return false,
+
+            Err(error) => {
+                println!("Failed to open SD volume for ACK lookup: {:?}", error);
+                return false;
+            }
         };
 
         let root_directory = match volume.open_root_dir() {
             Ok(directory) => directory,
-            Err(_) => return false,
+
+            Err(error) => {
+                println!("Failed to open SD root for ACK lookup: {:?}", error);
+                return false;
+            }
         };
 
         let ack_file = match root_directory.open_file_in_dir("ORBIACK.LOG", Mode::ReadOnly) {
@@ -217,20 +225,48 @@ where
             }
         };
 
-        let mut buffer = [0u8; 2048];
-
-        let bytes_read = match ack_file.read(&mut buffer) {
-            Ok(count) => count,
-            Err(_) => return false,
-        };
-
-        let content = core::str::from_utf8(&buffer[..bytes_read]).unwrap_or("");
-
         let mut expected = heapless::String::<128>::new();
 
-        let _ = core::fmt::write(&mut expected, format_args!("{},{}", device_id, timestamp));
+        if core::fmt::write(&mut expected, format_args!("{},{}", device_id, timestamp)).is_err() {
+            println!("Failed to build ACK lookup value.");
+            return false;
+        }
 
-        content.contains(expected.as_str())
+        let expected_bytes = expected.as_bytes();
+
+        let mut buffer = [0u8; 256];
+        let mut matched_bytes = 0usize;
+
+        loop {
+            let bytes_read = match ack_file.read(&mut buffer) {
+                Ok(count) => count,
+
+                Err(error) => {
+                    println!("Failed while reading ORBIACK.LOG: {:?}", error);
+                    return false;
+                }
+            };
+
+            if bytes_read == 0 {
+                break;
+            }
+
+            for byte in &buffer[..bytes_read] {
+                if *byte == expected_bytes[matched_bytes] {
+                    matched_bytes += 1;
+
+                    if matched_bytes == expected_bytes.len() {
+                        return true;
+                    }
+                } else if *byte == expected_bytes[0] {
+                    matched_bytes = 1;
+                } else {
+                    matched_bytes = 0;
+                }
+            }
+        }
+
+        false
     }
 
     fn remove_first_record(&mut self) -> bool {

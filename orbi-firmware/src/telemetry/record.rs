@@ -1,5 +1,5 @@
 pub struct TelemetryRecord<'a> {
-    pub device_id: &'static str,
+    pub device_id: &'a str,
     pub timestamp: &'a str,
 
     pub latitude: f64,

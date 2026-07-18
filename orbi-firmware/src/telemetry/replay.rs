@@ -92,3 +92,69 @@ where
 
     println!("Replay completed. {} record(s) processed.", replayed);
 }
+
+pub fn cleanup_acknowledged_records<S>(mut storage: Option<&mut S>)
+where
+    S: RecordStorage,
+{
+    println!("========================");
+    println!("ORBI QUEUE CLEANUP");
+    println!("========================");
+
+    let mut cleaned = 0;
+
+    loop {
+        let queued_record = match storage.as_deref_mut() {
+            Some(storage) => match storage.read_first_record() {
+                Some(record) => record,
+
+                None => {
+                    println!("Queue cleanup complete.");
+                    break;
+                }
+            },
+
+            None => {
+                println!("SD storage unavailable.");
+                break;
+            }
+        };
+
+        let (device_id, timestamp) = match payload::extract_replay_identity(queued_record.as_str())
+        {
+            Some(identity) => identity,
+
+            None => {
+                println!("Invalid queued record encountered during cleanup.");
+                break;
+            }
+        };
+
+        let acknowledged = match storage.as_deref_mut() {
+            Some(storage) => storage.is_acknowledged(device_id, timestamp),
+
+            None => false,
+        };
+
+        if !acknowledged {
+            println!("First queued record is still pending. Cleanup stopped.");
+            break;
+        }
+
+        println!("Acknowledged queued record found. Removing it.");
+
+        if let Some(storage) = storage.as_deref_mut() {
+            if !storage.remove_first_record() {
+                println!("Failed to remove acknowledged queued record.");
+                break;
+            }
+        }
+
+        cleaned += 1;
+    }
+
+    println!(
+        "Queue cleanup finished. {} acknowledged record(s) removed.",
+        cleaned
+    );
+}

@@ -1,8 +1,6 @@
 use heapless::String;
 
-use crate::device::DEVICE_IDENTITY;
-
-pub fn build_heartbeat_payload(timestamp: &str) -> String<256> {
+pub fn build_heartbeat_payload(device_code: &str, timestamp: &str) -> String<256> {
     let mut payload = String::<256>::new();
 
     let _ = core::fmt::write(
@@ -12,7 +10,7 @@ pub fn build_heartbeat_payload(timestamp: &str) -> String<256> {
                 \"device_id\":\"{}\",\
                 \"timestamp\":\"{}\"\
             }}",
-            DEVICE_IDENTITY.device_code, timestamp,
+            device_code, timestamp,
         ),
     );
 
