@@ -80,3 +80,13 @@ lerna-debug.log*
 # pnpm-lock.yaml
 orbi-firmware/src/telemetry/payload.rs:8:9
 *.rs:8:9
+
+# ORBI manufacturing secrets
+*.key
+*.secret
+manufacturing-keys/
+secrets/
+
+# Generated identity files
+identity.bin
+board-identity.bin
