@@ -5,7 +5,7 @@ use esp_println::println;
 
 use crate::telemetry::record::TelemetryRecord;
 
-use super::record::format_telemetry_record;
+use super::record::{format_gnss_diagnostic_record, format_telemetry_record, GnssDiagnosticRecord};
 
 pub trait RecordStorage {
     fn append_record(&mut self, record: &TelemetryRecord<'_>) -> bool;
@@ -17,6 +17,8 @@ pub trait RecordStorage {
     fn is_acknowledged(&mut self, device_id: &str, timestamp: &str) -> bool;
 
     fn remove_first_record(&mut self) -> bool;
+
+    fn append_gnss_diagnostic(&mut self, record: &GnssDiagnosticRecord<'_>) -> bool;
 }
 
 pub struct PersistentStorage<D, T>
@@ -434,6 +436,57 @@ where
         }
 
         println!("First queued record removed successfully.");
+
+        true
+    }
+
+    fn append_gnss_diagnostic(&mut self, record: &GnssDiagnosticRecord<'_>) -> bool {
+        let formatted_record = format_gnss_diagnostic_record(record);
+
+        let volume = match self.volume_manager.open_volume(VolumeIdx(0)) {
+            Ok(volume) => volume,
+
+            Err(error) => {
+                println!("Failed to open SD volume for GNSS diagnostics: {:?}", error);
+
+                return false;
+            }
+        };
+
+        let root_directory = match volume.open_root_dir() {
+            Ok(directory) => directory,
+
+            Err(error) => {
+                println!("Failed to open SD root for GNSS diagnostics: {:?}", error);
+
+                return false;
+            }
+        };
+
+        let diagnostic_file =
+            match root_directory.open_file_in_dir("ORBIGNSS.LOG", Mode::ReadWriteCreateOrAppend) {
+                Ok(file) => file,
+
+                Err(error) => {
+                    println!("Failed to open ORBIGNSS.LOG: {:?}", error);
+
+                    return false;
+                }
+            };
+
+        if let Err(error) = diagnostic_file.write(formatted_record.as_bytes()) {
+            println!("Failed to write GNSS diagnostic record: {:?}", error);
+
+            return false;
+        }
+
+        if let Err(error) = diagnostic_file.flush() {
+            println!("Failed to flush ORBIGNSS.LOG: {:?}", error);
+
+            return false;
+        }
+
+        println!("GNSS diagnostic appended to ORBIGNSS.LOG.");
 
         true
     }

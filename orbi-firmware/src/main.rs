@@ -18,6 +18,9 @@ use esp_hal::{delay::Delay, time::Instant};
 
 use device::{load_runtime_identity, FIRMWARE_IDENTITY};
 use esp_println::println;
+use scheduler::reporting::knots_to_kmh;
+use storage::record::GnssDiagnosticRecord;
+use storage::service::RecordStorage;
 use telemetry::record::TelemetryRecord;
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -198,7 +201,42 @@ fn main() -> ! {
                 last_network_diagnostics = Instant::now();
             }
 
-            next_reporting_interval_ms = reporting_policy.next_interval_from_speed(gps_info.speed);
+            let speed_kmh = knots_to_kmh(gps_info.speed);
+
+            let motion_state = reporting_policy.classify_speed_knots(gps_info.speed);
+
+            next_reporting_interval_ms = reporting_policy.interval_for(motion_state);
+
+            let diagnostic_record = GnssDiagnosticRecord {
+                timestamp: &gps_info.timestamp,
+
+                latitude: gps_info.latitude,
+                longitude: gps_info.longitude,
+
+                speed_knots: gps_info.speed,
+                speed_kmh,
+
+                heading_degrees: gps_info.heading,
+
+                motion_state,
+
+                reporting_interval_seconds: next_reporting_interval_ms / 1000,
+            };
+
+            if let Some(storage) = persistent_storage.as_mut() {
+                storage.append_gnss_diagnostic(&diagnostic_record);
+            }
+
+            println!("========================");
+            println!("GNSS DRIVE DIAGNOSTIC");
+            println!("========================");
+            println!("Speed: {} knots", gps_info.speed);
+            println!("Speed: {} km/h", speed_kmh);
+            println!("Motion State: {:?}", motion_state);
+            println!(
+                "Reporting Interval: {} seconds",
+                next_reporting_interval_ms / 1000
+            );
         } else {
             println!("Could not obtain or parse GPS response.");
 
