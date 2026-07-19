@@ -21,8 +21,8 @@ impl ReportingPolicy {
     pub const fn default() -> Self {
         Self {
             // Temporary GPS-only defaults.
-            moving_interval_ms: 10_000,
-            idle_interval_ms: 20_000,
+            moving_interval_ms: 2_000,
+            idle_interval_ms: 10_000,
             parked_interval_ms: 30_000,
 
             moving_threshold_kmh: 3.0,

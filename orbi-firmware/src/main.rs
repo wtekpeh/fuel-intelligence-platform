@@ -18,7 +18,7 @@ use esp_hal::{delay::Delay, time::Instant};
 
 use device::{load_runtime_identity, FIRMWARE_IDENTITY};
 use esp_println::println;
-use scheduler::reporting::knots_to_kmh;
+use scheduler::reporting::{knots_to_kmh, MotionState};
 use storage::record::GnssDiagnosticRecord;
 use storage::service::RecordStorage;
 use telemetry::record::TelemetryRecord;
@@ -132,12 +132,15 @@ fn main() -> ! {
 
         if state.is_ready() {
             network_ready = true;
+
             println!("Network ready for queued telemetry replay.");
+
             break;
         }
 
         println!("Network not ready yet. Waiting 5 seconds...");
-        delay.delay_millis(5000);
+
+        delay.delay_millis(5_000);
     }
 
     if network_ready {
@@ -146,18 +149,57 @@ fn main() -> ! {
         println!("Network did not become ready. Replay skipped for this boot.");
     }
 
-    let reporting_policy = scheduler::reporting::ReportingPolicy::default();
-
-    let mut next_reporting_interval_ms = reporting_policy.parked_interval_ms;
+    /*
+     * GNSS is sampled every 1 seconds.
+     *
+     * Cloud reporting remains adaptive:
+     *
+     * Moving -> 10 seconds
+     * Idle   -> 20 seconds
+     * Parked -> 30 seconds
+     *
+     * A motion-state change causes an immediate report.
+     */
+    const GNSS_SAMPLE_INTERVAL_MS: u32 = 1_000;
 
     const HEARTBEAT_INTERVAL_SECONDS: u64 = 300;
     const DIAGNOSTICS_INTERVAL_SECONDS: u64 = 600;
 
+    let reporting_policy = scheduler::reporting::ReportingPolicy::default();
+
+    /*
+     * Assume parked when the firmware starts.
+     *
+     * If the vehicle is already moving, the first valid GNSS reading
+     * will change Parked -> Moving and trigger an immediate upload.
+     */
+    let mut current_motion_state = MotionState::Parked;
+
+    /*
+     * This tracks the most recent cloud-report attempt.
+     *
+     * It is intentionally separate from the GNSS sampling timer.
+     */
+    let mut last_report_time = Instant::now();
+
+    /*
+     * This tracks the last successful communication with the backend.
+     */
     let mut last_successful_cloud_contact = Instant::now();
 
+    /*
+     * This tracks when network diagnostics were last performed.
+     */
     let mut last_network_diagnostics = Instant::now();
 
     loop {
+        println!("========================");
+        println!("GNSS SAMPLE CYCLE START");
+        println!("========================");
+
+        /*
+         * Run the broader modem/network diagnostics every 10 minutes.
+         */
         let diagnostics_due =
             last_network_diagnostics.elapsed().as_secs() >= DIAGNOSTICS_INTERVAL_SECONDS;
 
@@ -169,44 +211,62 @@ fn main() -> ! {
             network::diagnostics::run_network_diagnostics(&mut modem, &delay);
 
             last_network_diagnostics = Instant::now();
-        } else {
-            println!("Periodic network diagnostics not due.");
         }
 
+        /*
+         * GNSS is queried every 5 seconds regardless of whether the
+         * vehicle is moving, idle or parked.
+         */
         if let Some(gps_info) = drivers::gnss::get_live_fix(&mut modem, &delay) {
+            let speed_kmh = knots_to_kmh(gps_info.speed);
+
+            let new_motion_state = reporting_policy.classify_speed_knots(gps_info.speed);
+
+            let reporting_interval_ms = reporting_policy.interval_for(new_motion_state);
+
+            let reporting_interval_seconds = reporting_interval_ms / 1_000;
+
+            /*
+             * Detect Parked -> Moving, Moving -> Idle,
+             * Idle -> Parked and any other state transition.
+             */
+            let motion_state_changed = new_motion_state != current_motion_state;
+
+            /*
+             * Check whether the normal adaptive reporting interval
+             * has elapsed.
+             */
+            let reporting_due =
+                last_report_time.elapsed().as_secs() >= reporting_interval_seconds as u64;
+
+            /*
+             * Heartbeat traffic must still be sent even when the
+             * normal telemetry report is not due.
+             */
             let heartbeat_due =
                 last_successful_cloud_contact.elapsed().as_secs() >= HEARTBEAT_INTERVAL_SECONDS;
 
-            println!("Heartbeat due: {}", heartbeat_due);
-
-            let cloud_contact_succeeded = telemetry::publisher::publish_live_fix(
-                &mut modem,
-                &delay,
-                runtime_identity.device_code(),
-                &gps_info,
-                persistent_storage.as_mut(),
-                heartbeat_due,
+            println!("========================");
+            println!("GNSS MOTION DECISION");
+            println!("========================");
+            println!("Speed: {} knots", gps_info.speed);
+            println!("Speed: {} km/h", speed_kmh);
+            println!("Previous State: {:?}", current_motion_state);
+            println!("New State: {:?}", new_motion_state);
+            println!("State Changed: {}", motion_state_changed);
+            println!("Reporting Due: {}", reporting_due);
+            println!("Heartbeat Due: {}", heartbeat_due);
+            println!(
+                "Selected Reporting Interval: {} seconds",
+                reporting_interval_seconds
             );
 
-            if cloud_contact_succeeded {
-                last_successful_cloud_contact = Instant::now();
-            } else {
-                println!("========================");
-                println!("CLOUD CONTACT FAILED");
-                println!("Running immediate network diagnostics...");
-                println!("========================");
-
-                network::diagnostics::run_network_diagnostics(&mut modem, &delay);
-
-                last_network_diagnostics = Instant::now();
-            }
-
-            let speed_kmh = knots_to_kmh(gps_info.speed);
-
-            let motion_state = reporting_policy.classify_speed_knots(gps_info.speed);
-
-            next_reporting_interval_ms = reporting_policy.interval_for(motion_state);
-
+            /*
+             * Store every GNSS sample locally.
+             *
+             * This means ORBIGNSS.LOG should now contain samples
+             * approximately every 5 seconds, not only cloud reports.
+             */
             let diagnostic_record = GnssDiagnosticRecord {
                 timestamp: &gps_info.timestamp,
 
@@ -218,37 +278,100 @@ fn main() -> ! {
 
                 heading_degrees: gps_info.heading,
 
-                motion_state,
+                motion_state: new_motion_state,
 
-                reporting_interval_seconds: next_reporting_interval_ms / 1000,
+                reporting_interval_seconds,
             };
 
-            if let Some(storage) = persistent_storage.as_mut() {
-                storage.append_gnss_diagnostic(&diagnostic_record);
+            if persistent_storage.is_none() {
+                println!("ERROR: Persistent storage is NONE.");
+            } else {
+                println!("Persistent storage is AVAILABLE.");
+
+                let storage = persistent_storage.as_mut().unwrap();
+
+                let diagnostic_saved = storage.append_gnss_diagnostic(&diagnostic_record);
+
+                println!("append_gnss_diagnostic() returned: {}", diagnostic_saved);
             }
 
-            println!("========================");
-            println!("GNSS DRIVE DIAGNOSTIC");
-            println!("========================");
-            println!("Speed: {} knots", gps_info.speed);
-            println!("Speed: {} km/h", speed_kmh);
-            println!("Motion State: {:?}", motion_state);
-            println!(
-                "Reporting Interval: {} seconds",
-                next_reporting_interval_ms / 1000
-            );
+            /*
+             * Publish when:
+             *
+             * 1. The motion state changed.
+             * 2. The adaptive reporting interval elapsed.
+             * 3. A heartbeat is due.
+             */
+            let should_publish = motion_state_changed || reporting_due || heartbeat_due;
+
+            if should_publish {
+                if motion_state_changed {
+                    println!("Publishing immediately because motion state changed.");
+                } else if heartbeat_due {
+                    println!("Publishing because heartbeat is due.");
+                } else {
+                    println!("Publishing because reporting interval elapsed.");
+                }
+
+                let cloud_contact_succeeded = telemetry::publisher::publish_live_fix(
+                    &mut modem,
+                    &delay,
+                    runtime_identity.device_code(),
+                    &gps_info,
+                    persistent_storage.as_mut(),
+                    heartbeat_due,
+                );
+
+                /*
+                 * Record the attempt time whether the live upload
+                 * succeeds or is queued for replay.
+                 *
+                 * This prevents a failed network connection from
+                 * causing another long publish attempt every 5 seconds.
+                 */
+                last_report_time = Instant::now();
+
+                if cloud_contact_succeeded {
+                    last_successful_cloud_contact = Instant::now();
+
+                    println!("Cloud telemetry publish succeeded.");
+                } else {
+                    println!("========================");
+                    println!("CLOUD CONTACT FAILED");
+                    println!("Running immediate network diagnostics...");
+                    println!("========================");
+
+                    network::diagnostics::run_network_diagnostics(&mut modem, &delay);
+
+                    last_network_diagnostics = Instant::now();
+                }
+            } else {
+                println!("Cloud publish skipped for this GNSS sample.");
+            }
+
+            /*
+             * Update the state only after completing the decision.
+             *
+             * This allows the current sample to detect a transition
+             * from the previous state.
+             */
+            current_motion_state = new_motion_state;
         } else {
             println!("Could not obtain or parse GPS response.");
 
-            // Retry sooner when a GNSS fix temporarily fails.
-            next_reporting_interval_ms = 30_000;
+            println!("GNSS will be sampled again in 1 seconds.");
         }
 
+        /*
+         * This is now strictly the GNSS sampling interval.
+         *
+         * It no longer changes according to the reporting policy.
+         */
         println!(
-            "Waiting {} seconds before the next telemetry cycle.",
-            next_reporting_interval_ms / 1000
+            "Waiting {} seconds before the next GNSS sample.",
+            GNSS_SAMPLE_INTERVAL_MS / 1_000
         );
 
-        delay.delay_millis(next_reporting_interval_ms);
+        delay.delay_millis(GNSS_SAMPLE_INTERVAL_MS);
     }
 }
