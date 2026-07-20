@@ -4,7 +4,7 @@ use esp_println::println;
 
 pub fn print_scan_banner() {
     println!("========================");
-    println!("QMI8658 I2C SCAN TEST");
+    println!("ORBI I2C BUS SCAN");
     println!("========================");
 }
 

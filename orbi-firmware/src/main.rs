@@ -83,6 +83,13 @@ fn main() -> ! {
 
     drivers::i2c::scan_i2c_bus(&mut i2c);
 
+    let vibration_sensor_ready = drivers::vibration::initialize(&mut i2c);
+
+    println!("========================");
+    println!("ORBI VIBRATION SENSOR STATUS");
+    println!("========================");
+    println!("MPU6050 ready: {}", vibration_sensor_ready);
+
     let test_reading = TelemetryRecord {
         device_id: runtime_identity.device_code(),
         timestamp: "2026-06-16T14:37:02Z",
