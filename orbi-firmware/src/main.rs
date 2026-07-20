@@ -90,6 +90,10 @@ fn main() -> ! {
     println!("========================");
     println!("MPU6050 ready: {}", vibration_sensor_ready);
 
+    if vibration_sensor_ready {
+        drivers::vibration::print_imu_data(&mut i2c);
+    }
+
     let test_reading = TelemetryRecord {
         device_id: runtime_identity.device_code(),
         timestamp: "2026-06-16T14:37:02Z",
