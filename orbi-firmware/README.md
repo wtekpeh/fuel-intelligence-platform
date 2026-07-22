@@ -30,6 +30,71 @@ Current firmware capabilities include:
 
 The long-term objective is to provide a reusable embedded platform capable of supporting multiple ORBI hardware profiles while maintaining a consistent backend interface across all deployments.
 
+# ORBI Firmware Architecture
+
+## Core Design Principle
+
+ORBI Firmware follows a simple architectural principle:
+
+> **Firmware measures. Cloud understands.**
+
+The firmware is responsible only for interacting with physical hardware, collecting sensor measurements, timestamping telemetry, buffering data during communication failures, and reliably transmitting telemetry to the ORBI Platform.
+
+The firmware intentionally does **not** perform operational intelligence such as:
+
+- Fuel theft detection
+- Fuel refill detection
+- Fuel leak detection
+- Movement classification
+- Driver behaviour analysis
+- Operational alert generation
+
+Those responsibilities belong to the ORBI Sensor Intelligence Platform.
+
+---
+
+## Measurement-First Architecture
+
+The firmware produces measurements, not intelligence.
+
+Every telemetry cycle represents a snapshot of the physical sensors installed on the device.
+
+Telemetry may contain measurements from:
+
+- Position (GNSS)
+- Fuel
+- IMU
+- Power
+- Diagnostics
+
+The firmware never embeds business decisions into telemetry.
+
+Instead, the backend combines measurements from multiple sensor domains to generate operational intelligence.
+
+---
+
+## Firmware Processing Pipeline
+
+```text
+Physical Sensors
+        ↓
+Hardware Drivers
+        ↓
+Normalized Measurements
+        ↓
+Telemetry Builder
+        ↓
+Persistent SD Queue
+        ↓
+Replay Manager
+        ↓
+LTE Communication
+        ↓
+ORBI Sensor Intelligence Platform
+```
+
+This architecture allows new sensors to be integrated without redesigning storage, replay, networking, or scheduling.
+
 ## Project Goals
 
 The ORBI Firmware project is designed around a single long-term principle:
@@ -56,7 +121,11 @@ The firmware intentionally separates hardware interaction from telemetry generat
 
 Sensor drivers are responsible only for communicating with physical devices and producing normalized sensor readings.
 
-The telemetry layer combines those readings into a unified `TelemetryRecord`, allowing new sensors to be integrated without redesigning the networking, storage, replay, scheduling, or backend communication layers.
+The telemetry layer combines normalized sensor measurements into a unified telemetry packet shared with the ORBI backend.
+
+The telemetry contract represents measurements only.
+
+Operational intelligence—including movement classification, fuel event detection, driver behaviour analysis, and alert generation—is produced by backend sensor services and the Intelligence Engine.
 
 This modular architecture allows the same firmware foundation to support multiple ORBI product variants, including:
 
@@ -314,13 +383,14 @@ Builds the telemetry exchanged with the backend.
 
 Responsibilities include:
 
-- TelemetryRecord creation
+- Measurement normalization
+- Telemetry packet construction
 - Payload generation
-- Replay payload construction
 - Runtime publishing
-- Replay processing
+- Replay payload generation
+- Backend telemetry serialization
 
-This layer combines normalized sensor data into a consistent backend interface.
+The telemetry layer is intentionally measurement-oriented and remains independent of operational intelligence.
 
 ---
 
@@ -1405,7 +1475,7 @@ This phase provides the foundation for all future sensor integrations.
 
 ---
 
-# Phase 2 — Sensor Abstraction Layer
+# Phase 2 — Sensor Measurement Layer
 
 The next milestone introduces a unified sensor framework.
 

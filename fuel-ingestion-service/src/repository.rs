@@ -9,7 +9,7 @@ use crate::models::{
     AlertTrendsResponse, AssignDeviceAssetRequest, CreateAssetRequest, CreateGeofenceRequest,
     CreateOrganizationRequest, DeviceHealthEventResponse, DeviceHealthTrendDevice,
     DeviceHealthTrendResponse, DeviceModelResponse, DeviceSensorSummary, DeviceStateEventResponse,
-    DeviceSummary, FuelEventResponse, FuelReading, Geofence, GeofenceActivityTrendPoint,
+    DeviceSummary, FuelEventResponse, Geofence, GeofenceActivityTrendPoint,
     GeofenceActivityTrendResponse, GeofencePositionMatch, GeofenceTransitionEventResponse,
     GeofenceUtilizationResponse, GeofenceUtilizationZone, HardwareProfile, HardwareProfileSensor,
     OrganizationFleetOverviewResponse, OrganizationOverviewResponse,
@@ -17,9 +17,6 @@ use crate::models::{
     UpdateAssetRequest, UpdateDeviceRequest, UpdateOrganizationRequest,
 };
 use crate::services::device_health::classify_device_status;
-use crate::services::device_state::{
-    calculate_distance_meters, calculate_speed_kmh, classify_device_state,
-};
 
 pub struct NewSensorReading {
     pub sensor_id: Uuid,
@@ -68,12 +65,6 @@ pub struct StoredSensorReading {
 }
 
 #[derive(Debug)]
-pub struct RegisteredDeviceContext {
-    pub device_id: Uuid,
-    pub fuel_sensor_id: Uuid,
-}
-
-#[derive(Debug)]
 pub struct RegisteredTelemetryContext {
     pub device_id: Uuid,
     pub gps_sensor_id: Option<Uuid>,
@@ -96,18 +87,6 @@ pub async fn get_latest_device_state(db_pool: &PgPool, device_id: Uuid) -> Resul
     .await?;
 
     Ok(row.map(|row| row.state))
-}
-
-pub async fn get_or_create_demo_sensor(
-    db_pool: &PgPool,
-    device_code: &str,
-) -> Result<(Uuid, Uuid)> {
-    let organization_id = get_or_create_demo_organization(db_pool).await?;
-    let asset_id = get_or_create_demo_asset(db_pool, organization_id).await?;
-    let device_id = get_or_create_demo_device(db_pool, asset_id, device_code).await?;
-    let sensor_id = get_or_create_fuel_sensor(db_pool, device_id).await?;
-
-    Ok((device_id, sensor_id))
 }
 
 // -----------------------------------------------------------------------------
@@ -181,33 +160,6 @@ pub async fn find_registered_telemetry_context(
         gps_sensor_id: row.gps_sensor_id,
         fuel_sensor_id: row.fuel_sensor_id,
         vibration_sensor_id: row.vibration_sensor_id,
-    }))
-}
-
-pub async fn find_registered_device_context(
-    db_pool: &PgPool,
-    device_code: &str,
-) -> Result<Option<RegisteredDeviceContext>> {
-    let row = sqlx::query!(
-        r#"
-        SELECT
-            d.id AS device_id,
-            s.id AS fuel_sensor_id
-        FROM devices d
-        INNER JOIN sensors s
-            ON s.device_id = d.id
-        WHERE d.device_code = $1
-          AND s.sensor_type = 'FUEL'
-        LIMIT 1
-        "#,
-        device_code
-    )
-    .fetch_optional(db_pool)
-    .await?;
-
-    Ok(row.map(|row| RegisteredDeviceContext {
-        device_id: row.device_id,
-        fuel_sensor_id: row.fuel_sensor_id,
     }))
 }
 
@@ -456,107 +408,6 @@ pub async fn list_device_sensors(
     Ok(sensors)
 }
 
-// -----------------------------------------------------------------------------
-// Fuel Simulator Bootstrap
-// -----------------------------------------------------------------------------
-
-async fn get_or_create_demo_organization(db_pool: &PgPool) -> Result<Uuid> {
-    if let Some(row) = sqlx::query!(
-        r#"
-        SELECT id
-        FROM organizations
-        WHERE name = $1
-        "#,
-        "Demo Transport Company"
-    )
-    .fetch_optional(db_pool)
-    .await?
-    {
-        return Ok(row.id);
-    }
-
-    let row = sqlx::query!(
-        r#"
-        INSERT INTO organizations (name, industry)
-        VALUES ($1, $2)
-        RETURNING id
-        "#,
-        "Demo Transport Company",
-        "Transport"
-    )
-    .fetch_one(db_pool)
-    .await?;
-
-    Ok(row.id)
-}
-
-async fn get_or_create_demo_asset(db_pool: &PgPool, organization_id: Uuid) -> Result<Uuid> {
-    if let Some(row) = sqlx::query!(
-        r#"
-        SELECT id
-        FROM assets
-        WHERE organization_id = $1 AND name = $2
-        "#,
-        organization_id,
-        "Demo Fuel Truck"
-    )
-    .fetch_optional(db_pool)
-    .await?
-    {
-        return Ok(row.id);
-    }
-
-    let row = sqlx::query!(
-        r#"
-        INSERT INTO assets (organization_id, name, asset_type, capacity_litres)
-        VALUES ($1, $2, $3, $4)
-        RETURNING id
-        "#,
-        organization_id,
-        "Demo Fuel Truck",
-        "truck",
-        200.0_f64
-    )
-    .fetch_one(db_pool)
-    .await?;
-
-    Ok(row.id)
-}
-
-async fn get_or_create_demo_device(
-    db_pool: &PgPool,
-    asset_id: Uuid,
-    device_code: &str,
-) -> Result<Uuid> {
-    if let Some(row) = sqlx::query!(
-        r#"
-        SELECT id
-        FROM devices
-        WHERE device_code = $1
-        "#,
-        device_code
-    )
-    .fetch_optional(db_pool)
-    .await?
-    {
-        return Ok(row.id);
-    }
-
-    let row = sqlx::query!(
-        r#"
-        INSERT INTO devices (asset_id, device_code)
-        VALUES ($1, $2)
-        RETURNING id
-        "#,
-        asset_id,
-        device_code
-    )
-    .fetch_one(db_pool)
-    .await?;
-
-    Ok(row.id)
-}
-
 async fn get_or_create_sensor(
     db_pool: &PgPool,
     device_id: Uuid,
@@ -596,135 +447,10 @@ async fn get_or_create_sensor(
     Ok(row.id)
 }
 
-async fn get_or_create_fuel_sensor(db_pool: &PgPool, device_id: Uuid) -> Result<Uuid> {
-    get_or_create_sensor(db_pool, device_id, "fuel_level", "fuel_level", "litres").await
-}
-
-pub async fn save_fuel_reading_as_sensor_reading(
+pub(crate) async fn insert_sensor_reading(
     db_pool: &PgPool,
-    device_id: Uuid,
-    sensor_id: Uuid,
-    reading: &FuelReading,
-    previous_reading: Option<&FuelReading>,
+    new_reading: NewSensorReading,
 ) -> Result<()> {
-    let (previous_latitude, previous_longitude, distance_meters, speed_kmh) = match previous_reading
-    {
-        Some(prev) => {
-            let distance_meters = calculate_distance_meters(
-                prev.latitude,
-                prev.longitude,
-                reading.latitude,
-                reading.longitude,
-            );
-
-            let time_seconds = (reading.timestamp - prev.timestamp).num_seconds().max(0) as f64;
-
-            let speed_kmh = calculate_speed_kmh(distance_meters, time_seconds);
-
-            (
-                Some(prev.latitude),
-                Some(prev.longitude),
-                Some(distance_meters),
-                Some(speed_kmh),
-            )
-        }
-        None => (None, None, None, None),
-    };
-
-    let device_state = classify_device_state(
-        Some("ONLINE"),
-        Some(reading.vibration_level),
-        Some(reading.motion_detected),
-        previous_latitude,
-        previous_longitude,
-        Some(reading.latitude),
-        Some(reading.longitude),
-    );
-
-    create_device_state_event(
-        db_pool,
-        NewDeviceStateEvent {
-            device_id,
-            sensor_id: Some(sensor_id),
-
-            state: device_state.as_str().to_string(),
-
-            recorded_at: reading.timestamp,
-
-            vibration_level: Some(reading.vibration_level),
-            motion_detected: Some(reading.motion_detected),
-
-            distance_meters,
-            speed_kmh,
-
-            latitude: Some(reading.latitude),
-            longitude: Some(reading.longitude),
-
-            source: "telemetry".to_string(),
-
-            message: Some(format!(
-                "State classified from telemetry: {:?}",
-                device_state
-            )),
-        },
-    )
-    .await?;
-
-    let raw_payload: Value = serde_json::to_value(reading)?;
-
-    insert_sensor_reading(
-        db_pool,
-        NewSensorReading {
-            sensor_id,
-            device_id,
-            recorded_at: reading.timestamp,
-            value: reading.fuel_level_litres,
-            unit: "litres".to_string(),
-            latitude: Some(reading.latitude),
-            longitude: Some(reading.longitude),
-
-            vibration_level: Some(reading.vibration_level),
-            motion_detected: Some(reading.motion_detected),
-
-            raw_payload,
-        },
-    )
-    .await
-}
-
-pub async fn save_gps_reading_as_sensor_reading(
-    db_pool: &PgPool,
-    device_id: Uuid,
-    gps_sensor_id: Uuid,
-    reading: &FuelReading,
-) -> Result<()> {
-    let raw_payload: Value = serde_json::to_value(reading)?;
-
-    insert_sensor_reading(
-        db_pool,
-        NewSensorReading {
-            sensor_id: gps_sensor_id,
-            device_id,
-            recorded_at: reading.timestamp,
-
-            // The current sensor_readings schema requires a numeric value.
-            // GPS truth is stored in latitude/longitude, so value remains 0.0.
-            value: 0.0,
-            unit: "coordinates".to_string(),
-
-            latitude: Some(reading.latitude),
-            longitude: Some(reading.longitude),
-
-            vibration_level: None,
-            motion_detected: Some(reading.motion_detected),
-
-            raw_payload,
-        },
-    )
-    .await
-}
-
-async fn insert_sensor_reading(db_pool: &PgPool, new_reading: NewSensorReading) -> Result<()> {
     sqlx::query!(
         r#"
     INSERT INTO sensor_readings (

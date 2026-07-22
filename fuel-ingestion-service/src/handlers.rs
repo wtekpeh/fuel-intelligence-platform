@@ -1,12 +1,14 @@
-use crate::routes::AppState;
+use crate::{routes::AppState, services::telemetry::fuel_service::persist_fuel_reading};
 use axum::{
     extract::{Json, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
 };
 
+use crate::input_adapters::legacy_fuel_reading::map_legacy_readings;
 use crate::services::fuel_detection::{detect_fuel_event, detect_possible_leak};
 use crate::services::sensor_health::detect_frozen_fuel_sensor;
+use crate::services::telemetry::gps_service::persist_gps_reading;
 use crate::{
     models::{
         AlertResponse, AnalyticsDeviceHealthTrendQuery, AnalyticsGeofenceActivityQuery,
@@ -25,7 +27,6 @@ use crate::{
         get_recent_sensor_health_events, get_recent_telemetry_stream, get_telemetry_history,
         list_geofences, list_recent_geofence_transition_events, mark_device_heartbeat_seen,
         mark_device_payload_seen, refresh_device_statuses, resolve_alert,
-        save_fuel_reading_as_sensor_reading, save_gps_reading_as_sensor_reading,
     },
 };
 
@@ -34,6 +35,17 @@ pub async fn ingest_reading_batch(
     Json(payload): Json<ReadingBatch>,
 ) -> impl IntoResponse {
     let received_count = payload.readings.len();
+
+    // Build the canonical ORBI telemetry model.
+    //
+    // For now this runs alongside the existing ingestion pipeline.
+    // The operational services still consume FuelReading until
+    // they are migrated individually.
+    let telemetry_readings = map_legacy_readings(&payload.readings);
+
+    // Prevent an unused-variable warning while the migration
+    // is still in progress.
+    let _ = &telemetry_readings;
 
     println!("Received batch from device: {}", payload.device_id);
     println!("Synced at: {}", payload.synced_at);
@@ -61,8 +73,7 @@ pub async fn ingest_reading_batch(
         for reading in &payload.readings {
             // Store GPS observations when this device has a GPS sensor.
             if let Some(gps_sensor_id) = context.gps_sensor_id {
-                save_gps_reading_as_sensor_reading(db_pool, device_id, gps_sensor_id, reading)
-                    .await?;
+                persist_gps_reading(db_pool, device_id, gps_sensor_id, reading).await?;
             }
 
             // Preserve geofence intelligence for GPS-capable devices.
@@ -84,7 +95,7 @@ pub async fn ingest_reading_batch(
 
             // Run Fuel Intelligence only when the device has a fuel sensor.
             if let Some(fuel_sensor_id) = context.fuel_sensor_id {
-                save_fuel_reading_as_sensor_reading(
+                persist_fuel_reading(
                     db_pool,
                     device_id,
                     fuel_sensor_id,

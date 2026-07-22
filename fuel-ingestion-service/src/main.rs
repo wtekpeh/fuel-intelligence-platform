@@ -3,6 +3,7 @@ mod config;
 mod db;
 mod domain;
 mod handlers;
+mod input_adapters;
 mod models;
 mod orbi_inventory_repository;
 mod platform_handlers;

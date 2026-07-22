@@ -28,6 +28,138 @@ inventory through deployment, telemetry processing, and
 retirement, without coupling operational analytics to
 hardware administration.
 
+# ORBI Sensor Intelligence Architecture
+
+## Core Design Principle
+
+ORBI follows a simple architectural principle:
+
+> **Firmware measures. Cloud understands.**
+
+Firmware is responsible for collecting sensor measurements, timestamping them, buffering data when offline, and transmitting telemetry.
+
+The backend is responsible for validating telemetry, persisting measurements, correlating data across sensors, detecting operational events, generating alerts, producing analytics, and supporting investigation workflows.
+
+This separation allows intelligence to evolve continuously without requiring firmware updates.
+
+---
+
+## Telemetry Philosophy
+
+Telemetry represents measurements collected from physical sensors.
+
+Telemetry does not contain operational intelligence such as:
+
+- Fuel Theft
+- Fuel Refill
+- Fuel Leak
+- Device State
+- Movement Classification
+- Driver Behaviour
+- Operational Alerts
+
+These are produced by the Operational Intelligence layer after telemetry has been processed.
+
+---
+
+## Telemetry Processing Pipeline
+
+The platform processes telemetry using the following architecture:
+
+```text
+Telemetry Packet
+        ↓
+Telemetry Router
+        ↓
+────────────────────────────────────
+GPS Service
+Fuel Service
+Motion Service
+Power Service
+Health Service
+────────────────────────────────────
+        ↓
+Intelligence Engine
+        ↓
+Investigation Engine
+        ↓
+Analytics Intelligence
+        ↓
+Operational Dashboards
+```
+
+Each sensor service is responsible only for processing its own sensor domain.
+
+The Intelligence Engine combines observations from multiple sensor services to produce operational events and alerts.
+
+---
+
+## Sensor Service Responsibilities
+
+GPS Service
+
+- GPS persistence
+- Trip reconstruction
+- Geofence intelligence
+- Replay support
+
+Fuel Service
+
+- Fuel persistence
+- Fuel event detection
+- Leak detection
+- Refill detection
+
+Motion Service
+
+- IMU processing
+- Movement analysis
+- Driver behaviour analysis
+- Motion event generation
+
+Power Service
+
+- Battery monitoring
+- Ignition monitoring
+- Power diagnostics
+
+Health Service
+
+- Device health
+- Sensor health
+- Communication diagnostics
+- Firmware diagnostics
+
+---
+
+## Intelligence Engine
+
+The Intelligence Engine combines observations from multiple sensor services to produce operational intelligence.
+
+Example:
+
+```text
+Fuel Drop
++
+Vehicle Stationary
++
+Inside Depot
+=
+Fuel Theft
+```
+
+Another example:
+
+```text
+High Acceleration
++
+Rapid Steering Change
+=
+Harsh Cornering
+```
+
+This architecture allows new sensors and new intelligence capabilities to be added without redesigning the telemetry ingestion pipeline.
+
 ## Overview
 
 The Fuel Ingestion Service is the operational intelligence backend for the Sensor Intelligence Platform.

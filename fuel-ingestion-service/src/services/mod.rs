@@ -7,4 +7,5 @@ pub mod fuel_detection;
 pub mod fuel_event_correlation;
 pub mod inventory_lifecycle;
 pub mod sensor_health;
+pub mod telemetry;
 pub mod telemetry_filter;
