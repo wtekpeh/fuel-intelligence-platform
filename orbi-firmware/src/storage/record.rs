@@ -18,8 +18,8 @@ pub struct GnssDiagnosticRecord<'a> {
     pub reporting_interval_seconds: u32,
 }
 
-pub fn format_telemetry_record(record: &TelemetryRecord<'_>) -> String<512> {
-    let mut line = String::<512>::new();
+pub fn format_telemetry_record(record: &TelemetryRecord<'_>) -> String<768> {
+    let mut line = String::<768>::new();
 
     let _ = core::fmt::write(
         &mut line,
@@ -29,24 +29,34 @@ pub fn format_telemetry_record(record: &TelemetryRecord<'_>) -> String<512> {
                 \"timestamp\":\"{}\",\
                 \"latitude\":{},\
                 \"longitude\":{},\
-                \"fuel_level_litres\":{},\
-                \"fuel_level_percentage\":{},\
-                \"vibration_level\":{},\
-                \"motion_detected\":{},\
                 \"speed\":{},\
                 \"heading\":{},\
+                \"fuel_level_litres\":{},\
+                \"fuel_level_percentage\":{},\
+                \"accel_x_g\":{},\
+                \"accel_y_g\":{},\
+                \"accel_z_g\":{},\
+                \"gyro_x_dps\":{},\
+                \"gyro_y_dps\":{},\
+                \"gyro_z_dps\":{},\
+                \"imu_temperature_c\":{},\
                 \"simulation_mode\":\"{}\"\
             }}\r\n",
             record.device_id,
             record.timestamp,
             record.latitude,
             record.longitude,
-            record.fuel_level_litres,
-            record.fuel_level_percentage,
-            record.vibration_level,
-            record.motion_detected,
             record.speed,
             record.heading,
+            record.fuel_level_litres,
+            record.fuel_level_percentage,
+            record.accel_x_g,
+            record.accel_y_g,
+            record.accel_z_g,
+            record.gyro_x_dps,
+            record.gyro_y_dps,
+            record.gyro_z_dps,
+            record.imu_temperature_c,
             record.simulation_mode,
         ),
     );

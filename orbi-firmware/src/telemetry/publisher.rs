@@ -2,7 +2,7 @@ use esp_hal::delay::Delay;
 use esp_println::println;
 
 use crate::{
-    drivers::{gnss::GpsInfo, Modem},
+    drivers::{gnss::GpsInfo, vibration::ImuData, Modem},
     network::{heartbeat, http},
     storage::RecordStorage,
     telemetry::{payload, record::TelemetryRecord, replay},
@@ -13,6 +13,7 @@ pub fn publish_live_fix<S>(
     delay: &Delay,
     device_code: &str,
     gps_info: &GpsInfo,
+    imu_data: &ImuData,
     mut storage: Option<&mut S>,
     send_heartbeat: bool,
 ) -> bool
@@ -20,14 +21,32 @@ where
     S: RecordStorage,
 {
     println!("========================");
-    println!("LIVE GPS PARSED");
+    println!("LIVE SENSOR MEASUREMENTS");
     println!("========================");
+
     println!("Latitude: {}", gps_info.latitude);
     println!("Longitude: {}", gps_info.longitude);
     println!("Speed: {}", gps_info.speed);
     println!("Heading: {}", gps_info.heading);
     println!("Timestamp: {}", gps_info.timestamp);
 
+    println!("Accelerometer X: {} g", imu_data.accel_x_g);
+    println!("Accelerometer Y: {} g", imu_data.accel_y_g);
+    println!("Accelerometer Z: {} g", imu_data.accel_z_g);
+
+    println!("Gyroscope X: {} dps", imu_data.gyro_x_dps);
+    println!("Gyroscope Y: {} dps", imu_data.gyro_y_dps);
+    println!("Gyroscope Z: {} dps", imu_data.gyro_z_dps);
+
+    println!("IMU Temperature: {} C", imu_data.temperature_c);
+
+    /*
+     * Build one measurement-oriented telemetry record.
+     *
+     * No movement, impact, vibration-severity or alert decision is
+     * generated here. The backend receives the physical measurements
+     * and performs the intelligence.
+     */
     let live_reading = TelemetryRecord {
         device_id: device_code,
         timestamp: gps_info.timestamp.as_str(),
@@ -35,16 +54,27 @@ where
         latitude: gps_info.latitude,
         longitude: gps_info.longitude,
 
-        fuel_level_litres: 0.0,
-        fuel_level_percentage: 0.0,
-
-        vibration_level: 0.0,
-        motion_detected: false,
-
         speed: gps_info.speed,
         heading: gps_info.heading,
 
-        simulation_mode: "real_gps_only",
+        /*
+         * Fuel sensor integration will be completed in the later
+         * fuel-measurement phase.
+         */
+        fuel_level_litres: 0.0,
+        fuel_level_percentage: 0.0,
+
+        accel_x_g: imu_data.accel_x_g,
+        accel_y_g: imu_data.accel_y_g,
+        accel_z_g: imu_data.accel_z_g,
+
+        gyro_x_dps: imu_data.gyro_x_dps,
+        gyro_y_dps: imu_data.gyro_y_dps,
+        gyro_z_dps: imu_data.gyro_z_dps,
+
+        imu_temperature_c: imu_data.temperature_c,
+
+        simulation_mode: "physical_gps_imu",
     };
 
     println!("========================");
@@ -66,13 +96,14 @@ where
         http::send_heartbeat(modem, delay, &heartbeat_payload)
     } else {
         println!("Heartbeat not due. Telemetry upload will confirm device activity.");
+
         false
     };
 
-    let live_payload = payload::build_gps_only_payload(&live_reading);
+    let live_payload = payload::build_telemetry_payload(&live_reading);
 
     println!("========================");
-    println!("LIVE GPS PAYLOAD");
+    println!("LIVE TELEMETRY PAYLOAD");
     println!("========================");
     println!("{}", live_payload);
 

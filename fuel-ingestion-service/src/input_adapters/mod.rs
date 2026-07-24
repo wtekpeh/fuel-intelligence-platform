@@ -2,6 +2,3 @@
 
 pub mod registry;
 pub mod traits;
-
-// Existing adapter used by the legacy fuel ingestion endpoint.
-pub mod legacy_fuel_reading;

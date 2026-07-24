@@ -1,13 +1,14 @@
 use crate::domain::telemetry::models::{
-    DiagnosticTelemetry, FuelTelemetry, PositionTelemetry, TelemetryReading,
+    DiagnosticTelemetry, FuelTelemetry, ImuTelemetry, PositionTelemetry, TelemetryReading,
 };
 use crate::models::FuelReading;
 
-/// Converts the existing legacy ingestion model into the new
-/// measurement-oriented telemetry domain model.
+/// Converts the existing ingestion model into the canonical,
+/// measurement-oriented ORBI telemetry domain model.
 ///
-/// This allows the current simulator and ingestion API to continue
-/// operating while the backend gradually adopts Telemetry V2.
+/// This compatibility layer allows the current ingestion endpoint,
+/// simulator, and physical firmware to continue using FuelReading
+/// while backend services gradually migrate to Telemetry V2.
 impl From<&FuelReading> for TelemetryReading {
     fn from(reading: &FuelReading) -> Self {
         Self {
@@ -18,8 +19,8 @@ impl From<&FuelReading> for TelemetryReading {
                 latitude: reading.latitude,
                 longitude: reading.longitude,
                 altitude: None,
-                heading: None,
-                speed_kmh: None,
+                heading: Some(reading.heading),
+                speed_kmh: Some(reading.speed),
                 satellite_count: None,
                 hdop: None,
             }),
@@ -31,11 +32,17 @@ impl From<&FuelReading> for TelemetryReading {
                 temperature: None,
             }),
 
-            // The legacy FuelReading contains only a derived vibration level
-            // and motion flag. Telemetry V2 expects raw accelerometer and
-            // gyroscope measurements, so these values are not mapped into
-            // ImuTelemetry.
-            imu: None,
+            imu: Some(ImuTelemetry {
+                accel_x: reading.accel_x_g,
+                accel_y: reading.accel_y_g,
+                accel_z: reading.accel_z_g,
+
+                gyro_x: reading.gyro_x_dps,
+                gyro_y: reading.gyro_y_dps,
+                gyro_z: reading.gyro_z_dps,
+
+                temperature: Some(reading.imu_temperature_c),
+            }),
 
             power: None,
 
@@ -49,8 +56,8 @@ impl From<&FuelReading> for TelemetryReading {
     }
 }
 
-/// Converts a collection of legacy readings into Telemetry V2
-/// domain readings.
+/// Converts a collection of legacy ingestion readings into canonical
+/// Telemetry V2 domain readings.
 pub fn map_legacy_readings(readings: &[FuelReading]) -> Vec<TelemetryReading> {
     readings.iter().map(TelemetryReading::from).collect()
 }

@@ -19,6 +19,10 @@ The firmware is intentionally modular to support future hardware revisions witho
 Current firmware capabilities include:
 
 - GPS telemetry
+- Raw IMU telemetry
+  - Accelerometer (X, Y, Z)
+  - Gyroscope (X, Y, Z)
+  - IMU temperature
 - LTE backend communication
 - Persistent SD card queue
 - Upload acknowledgement tracking
@@ -49,6 +53,17 @@ The firmware intentionally does **not** perform operational intelligence such as
 - Driver behaviour analysis
 - Operational alert generation
 
+The firmware also does not derive IMU-based operational states such as:
+
+- vibration_score
+- motion_detected
+- movement_confidence
+- parked
+- idle
+- moving
+
+Instead, it transmits raw IMU measurements and allows the backend to interpret motion behaviour.
+
 Those responsibilities belong to the ORBI Sensor Intelligence Platform.
 
 ---
@@ -64,6 +79,9 @@ Telemetry may contain measurements from:
 - Position (GNSS)
 - Fuel
 - IMU
+  - Accelerometer (X, Y, Z)
+  - Gyroscope (X, Y, Z)
+  - Temperature
 - Power
 - Diagnostics
 
@@ -109,7 +127,7 @@ Current and planned sensor support includes:
 
 - GNSS positioning
 - Fuel level monitoring (RS485 / Modbus)
-- Vibration sensing (I²C)
+- MPU6050 IMU (Accelerometer, Gyroscope, Temperature)
 - Ignition monitoring
 - Digital inputs and outputs
 - Relay/Kill switch control
@@ -225,6 +243,18 @@ Responsibilities include:
 - Offline persistence
 - Queue replay
 - Queue cleanup
+
+Current telemetry includes:
+
+- GPS position
+- Speed
+- Heading
+- Raw IMU measurements
+  - Accelerometer (X, Y, Z)
+  - Gyroscope (X, Y, Z)
+  - IMU temperature
+
+The telemetry layer intentionally publishes measurements only and performs no operational interpretation.
 
 The storage layer guarantees that telemetry is never discarded simply because connectivity is temporarily unavailable.
 
@@ -470,14 +500,19 @@ Future GPIO assignments will support:
 
 ### I²C
 
-Reserved for sensor expansion.
+The I²C interface currently supports the MPU6050 IMU.
 
-Planned devices include:
+Current implementation:
 
-- Vibration sensor
-- Temperature sensor
+- MPU6050 Accelerometer
+- MPU6050 Gyroscope
+- MPU6050 Temperature
+
+Future I²C devices may include:
+
 - Environmental sensors
-- Future industrial sensors
+- Additional motion sensors
+- Industrial monitoring sensors
 
 ---
 
@@ -502,13 +537,12 @@ The hardware architecture is designed to support multiple ORBI product variants 
 
 Examples include:
 
-| Profile               | Sensors                           |
-| --------------------- | --------------------------------- |
-| GPS Tracker           | GNSS                              |
-| Fuel Intelligence     | GNSS + RS485 Fuel Sensor          |
-| Fleet Intelligence    | GNSS + Fuel + Vibration           |
-| Generator Monitoring  | Fuel + Vibration + Digital Inputs |
-| Industrial Monitoring | Custom sensor combinations        |
+| Product                    | Sensors                  |
+| -------------------------- | ------------------------ |
+| ORBI GPS Lite              | GPS + IMU                |
+| ORBI GPS Control Kit       | GPS + IMU + Relay        |
+| ORBI Fuel Intelligence Kit | Fuel + GPS + IMU         |
+| ORBI Full Intelligence Kit | Fuel + GPS + IMU + Relay |
 
 Each hardware profile shares the same telemetry pipeline while enabling only the drivers required for that deployment.
 
@@ -1236,7 +1270,8 @@ The telemetry subsystem currently supports:
 - Structured telemetry generation
 - Device identity inclusion
 - Timestamp generation
-- Motion state determination
+- GPS measurements
+- Raw IMU measurements
 - JSON serialization
 - Backend upload
 
@@ -1481,6 +1516,12 @@ The next milestone introduces a unified sensor framework.
 
 Rather than writing firmware for individual devices, ORBI Firmware will expose a common sensor interface that allows different sensor technologies to be integrated consistently.
 
+Current implementation:
+
+- GPS measurements
+- MPU6050 IMU measurements
+- Unified telemetry generation for GPS and IMU
+
 Planned capabilities include:
 
 - Sensor registration
@@ -1608,7 +1649,10 @@ ORBI Device
       │
       ├── GNSS
       ├── Fuel
-      ├── Vibration
+      ├── IMU
+│     ├── Accelerometer
+│     ├── Gyroscope
+│     └── Temperature
       ├── Ignition
       ├── Digital Inputs
       ├── CAN Bus

@@ -92,7 +92,11 @@ fn main() -> ! {
 
     if vibration_sensor_ready {
         drivers::vibration::print_imu_data(&mut i2c);
+    } else {
+        println!("WARNING: MPU6050 unavailable. Continuing without IMU measurements.");
     }
+
+    let imu_test = drivers::vibration::read_imu_data(&mut i2c);
 
     let test_reading = TelemetryRecord {
         device_id: runtime_identity.device_code(),
@@ -101,19 +105,26 @@ fn main() -> ! {
         latitude: 51.8776168,
         longitude: -0.4291513,
 
-        fuel_level_litres: 0.0,
-        fuel_level_percentage: 0.0,
-
-        vibration_level: 0.0,
-        motion_detected: false,
-
         speed: 0.0,
         heading: 335.36,
 
-        simulation_mode: "real_gps_only",
+        fuel_level_litres: 0.0,
+        fuel_level_percentage: 0.0,
+
+        accel_x_g: imu_test.as_ref().map_or(0.0, |v| v.accel_x_g),
+        accel_y_g: imu_test.as_ref().map_or(0.0, |v| v.accel_y_g),
+        accel_z_g: imu_test.as_ref().map_or(0.0, |v| v.accel_z_g),
+
+        gyro_x_dps: imu_test.as_ref().map_or(0.0, |v| v.gyro_x_dps),
+        gyro_y_dps: imu_test.as_ref().map_or(0.0, |v| v.gyro_y_dps),
+        gyro_z_dps: imu_test.as_ref().map_or(0.0, |v| v.gyro_z_dps),
+
+        imu_temperature_c: imu_test.as_ref().map_or(0.0, |v| v.temperature_c),
+
+        simulation_mode: "physical_gps_imu",
     };
 
-    let payload = telemetry::payload::build_gps_only_payload(&test_reading);
+    let payload = telemetry::payload::build_telemetry_payload(&test_reading);
 
     println!("========================");
     println!("GPS PAYLOAD TEST");
@@ -324,14 +335,23 @@ fn main() -> ! {
                     println!("Publishing because reporting interval elapsed.");
                 }
 
-                let cloud_contact_succeeded = telemetry::publisher::publish_live_fix(
-                    &mut modem,
-                    &delay,
-                    runtime_identity.device_code(),
-                    &gps_info,
-                    persistent_storage.as_mut(),
-                    heartbeat_due,
-                );
+                let imu_data = drivers::vibration::read_imu_data(&mut i2c);
+
+                let cloud_contact_succeeded = if let Some(imu_data) = imu_data {
+                    telemetry::publisher::publish_live_fix(
+                        &mut modem,
+                        &delay,
+                        runtime_identity.device_code(),
+                        &gps_info,
+                        &imu_data,
+                        persistent_storage.as_mut(),
+                        heartbeat_due,
+                    )
+                } else {
+                    println!("Skipping telemetry publish because MPU6050 measurement could not be obtained.");
+
+                    false
+                };
 
                 /*
                  * Record the attempt time whether the live upload

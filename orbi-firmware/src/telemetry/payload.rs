@@ -1,7 +1,13 @@
 use crate::telemetry::record::TelemetryRecord;
 use heapless::String;
 
-pub fn build_gps_only_payload(reading: &TelemetryRecord<'_>) -> String<1024> {
+/*
+ * Build the JSON payload sent to the ORBI backend.
+ *
+ * The payload contains physical measurements only.
+ * No operational intelligence is generated inside the firmware.
+ */
+pub fn build_telemetry_payload(reading: &TelemetryRecord<'_>) -> String<1024> {
     let mut payload = String::<1024>::new();
 
     let _ = core::fmt::write(
@@ -17,10 +23,15 @@ pub fn build_gps_only_payload(reading: &TelemetryRecord<'_>) -> String<1024> {
                     \"fuel_level_percentage\":{},\
                     \"latitude\":{},\
                     \"longitude\":{},\
-                    \"vibration_level\":{},\
-                    \"motion_detected\":{},\
                     \"speed\":{},\
                     \"heading\":{},\
+                    \"accel_x_g\":{},\
+                    \"accel_y_g\":{},\
+                    \"accel_z_g\":{},\
+                    \"gyro_x_dps\":{},\
+                    \"gyro_y_dps\":{},\
+                    \"gyro_z_dps\":{},\
+                    \"imu_temperature_c\":{},\
                     \"simulation_mode\":\"{}\"\
                 }}]\
             }}",
@@ -32,10 +43,15 @@ pub fn build_gps_only_payload(reading: &TelemetryRecord<'_>) -> String<1024> {
             reading.fuel_level_percentage,
             reading.latitude,
             reading.longitude,
-            reading.vibration_level,
-            reading.motion_detected,
             reading.speed,
             reading.heading,
+            reading.accel_x_g,
+            reading.accel_y_g,
+            reading.accel_z_g,
+            reading.gyro_x_dps,
+            reading.gyro_y_dps,
+            reading.gyro_z_dps,
+            reading.imu_temperature_c,
             reading.simulation_mode,
         ),
     );
@@ -58,7 +74,6 @@ fn extract_json_string<'a>(json: &'a str, field_name: &str) -> Option<&'a str> {
 
 pub fn extract_replay_identity<'a>(queued_record: &'a str) -> Option<(&'a str, &'a str)> {
     let device_id = extract_json_string(queued_record, "device_id")?;
-
     let timestamp = extract_json_string(queued_record, "timestamp")?;
 
     Some((device_id, timestamp))
@@ -66,7 +81,6 @@ pub fn extract_replay_identity<'a>(queued_record: &'a str) -> Option<(&'a str, &
 
 pub fn build_replay_batch_payload(queued_record: &str) -> Option<String<1024>> {
     let device_id = extract_json_string(queued_record, "device_id")?;
-
     let timestamp = extract_json_string(queued_record, "timestamp")?;
 
     let mut payload = String::<1024>::new();

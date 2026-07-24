@@ -5,7 +5,7 @@ use axum::{
     response::IntoResponse,
 };
 
-use crate::input_adapters::legacy_fuel_reading::map_legacy_readings;
+use crate::domain::telemetry::conversions::map_legacy_readings;
 use crate::services::fuel_detection::{detect_fuel_event, detect_possible_leak};
 use crate::services::sensor_health::detect_frozen_fuel_sensor;
 use crate::services::telemetry::gps_service::persist_gps_reading;
@@ -43,10 +43,6 @@ pub async fn ingest_reading_batch(
     // they are migrated individually.
     let telemetry_readings = map_legacy_readings(&payload.readings);
 
-    // Prevent an unused-variable warning while the migration
-    // is still in progress.
-    let _ = &telemetry_readings;
-
     println!("Received batch from device: {}", payload.device_id);
     println!("Synced at: {}", payload.synced_at);
     println!("Readings received: {}", received_count);
@@ -64,13 +60,33 @@ pub async fn ingest_reading_batch(
 
         let device_id = context.device_id;
 
+        // Process the canonical telemetry through the shared operational
+        // intelligence pipeline.
+        //
+        // The mutex is held only while updating the in-memory motion tracker.
+        // It is released before any database operations are performed.
+        let mut processed_telemetry = Vec::with_capacity(telemetry_readings.len());
+
+        {
+            let mut telemetry_pipeline = app_state.telemetry_pipeline.lock().await;
+
+            for telemetry in &telemetry_readings {
+                processed_telemetry.push(telemetry_pipeline.process(telemetry));
+            }
+        }
+
         mark_device_payload_seen(db_pool, device_id).await?;
 
         let mut previous_reading: Option<&crate::models::FuelReading> = None;
 
         let organization_id = get_organization_id_for_device(db_pool, device_id).await?;
 
-        for reading in &payload.readings {
+        for ((reading, telemetry), processed) in payload
+            .readings
+            .iter()
+            .zip(telemetry_readings.iter())
+            .zip(processed_telemetry.iter())
+        {
             // Store GPS observations when this device has a GPS sensor.
             if let Some(gps_sensor_id) = context.gps_sensor_id {
                 persist_gps_reading(db_pool, device_id, gps_sensor_id, reading).await?;
@@ -95,14 +111,17 @@ pub async fn ingest_reading_batch(
 
             // Run Fuel Intelligence only when the device has a fuel sensor.
             if let Some(fuel_sensor_id) = context.fuel_sensor_id {
-                persist_fuel_reading(
-                    db_pool,
-                    device_id,
-                    fuel_sensor_id,
-                    reading,
-                    previous_reading,
-                )
-                .await?;
+                if let Some(processed) = processed {
+                    persist_fuel_reading(
+                        db_pool,
+                        device_id,
+                        fuel_sensor_id,
+                        reading,
+                        previous_reading,
+                        &processed.imu_interpretation,
+                    )
+                    .await?;
+                }
 
                 detect_fuel_event(
                     db_pool,

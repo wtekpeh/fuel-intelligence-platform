@@ -35,6 +35,17 @@ hardware administration.
 ORBI follows a simple architectural principle:
 
 > **Firmware measures. Cloud understands.**
+> For IMU-equipped ORBI devices, the firmware transmits raw accelerometer, gyroscope, and temperature measurements rather than interpreted motion states.
+
+The backend is responsible for interpreting these measurements into:
+
+- vibration_score
+- motion_detected
+- movement_confidence
+
+These interpreted values are then used by the Device State Engine and future operational intelligence modules.
+
+This architecture allows motion intelligence to evolve without requiring firmware updates.
 
 Firmware is responsible for collecting sensor measurements, timestamping them, buffering data when offline, and transmitting telemetry.
 
@@ -57,6 +68,14 @@ Telemetry does not contain operational intelligence such as:
 - Movement Classification
 - Driver Behaviour
 - Operational Alerts
+
+Raw IMU measurements are treated as first-class telemetry and include:
+
+- Acceleration (X, Y, Z)
+- Angular Velocity (X, Y, Z)
+- IMU Temperature
+
+Like GPS and Fuel telemetry, these measurements contain no operational interpretation.
 
 These are produced by the Operational Intelligence layer after telemetry has been processed.
 
@@ -112,10 +131,19 @@ Fuel Service
 
 Motion Service
 
-- IMU processing
-- Movement analysis
+- Raw IMU telemetry processing
+- IMU interpretation
+- Vibration score derivation
+- Motion detection
+- Movement confidence estimation
+- Device-state support
+
+Future capabilities:
+
 - Driver behaviour analysis
 - Motion event generation
+- Crash detection
+- Harsh manoeuvre detection
 
 Power Service
 
@@ -197,8 +225,11 @@ The service currently supports:
 - PostgreSQL persistence
 - fuel telemetry persistence
 - GPS telemetry persistence
-- vibration telemetry persistence
-- motion detected telemetry persistence
+- raw IMU telemetry ingestion
+  - accelerometer (X, Y, Z)
+  - gyroscope (X, Y, Z)
+  - IMU temperature
+- backwards-compatible support for legacy vibration and motion fields
 
 ---
 
@@ -1063,13 +1094,18 @@ UNKNOWN
 
 The Device State Engine currently uses:
 
-- vibration telemetry
-- motion detection
+- backend IMU interpretation
 - device health status
 - previous GPS location
 - current GPS location
 
-to classify operational behavior.
+The IMU Interpretation layer derives:
+
+- vibration_score
+- motion_detected
+- movement_confidence
+
+These interpreted values are then combined with GPS movement to classify operational behaviour.
 
 The engine now supports GPS-aware movement classification by comparing previous and current coordinates during telemetry ingestion.
 
@@ -1528,12 +1564,12 @@ PostgreSQL
 ────────────────────────────────────
 
 Operational Intelligence Layer
+        ├── IMU Interpretation
+        ├── Device State Engine
         ├── Fuel Event Detection
         ├── Device Health Intelligence
         ├── Sensor Health Intelligence
-        ├── Device State Engine
         ├── Geofence Intelligence
-        ├── Replay Investigation
         └── Analytics Intelligence
 
 ────────────────────────────────────
@@ -1581,7 +1617,12 @@ Live Distribution Layer
 Implemented:
 
 - modular ingestion architecture
-- PostgreSQL persistence for fuel, GPS, vibration, and motion telemetry
+- PostgreSQL persistence for fuel telemetry
+- PostgreSQL persistence for GPS telemetry
+- raw IMU telemetry ingestion
+- backend IMU interpretation
+- canonical telemetry normalization
+- device-state integration using interpreted IMU measurements
 - operational event generation
 - leak/theft/refill detection
 - suppression logic

@@ -3,6 +3,7 @@ use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::domain::telemetry::imu_interpreter::ImuInterpretation;
 use crate::models::FuelReading;
 use crate::repository::{self, NewDeviceStateEvent, NewSensorReading};
 use crate::services::device_state::{
@@ -12,20 +13,25 @@ use crate::services::telemetry::persistence::persist_sensor_reading;
 
 /// Persists fuel telemetry and records the operational state derived
 /// from the current and previous telemetry readings.
+///
+/// Raw accelerometer and gyroscope measurements are interpreted by the
+/// backend. The physical firmware does not determine vibration level,
+/// motion state, or operational device state.
 pub async fn persist_fuel_reading(
     db_pool: &PgPool,
     device_id: Uuid,
     fuel_sensor_id: Uuid,
     reading: &FuelReading,
     previous_reading: Option<&FuelReading>,
+    imu_interpretation: &ImuInterpretation,
 ) -> Result<()> {
     let (previous_latitude, previous_longitude, distance_meters, speed_kmh) =
         calculate_movement(reading, previous_reading);
 
     let device_state = classify_device_state(
         Some("ONLINE"),
-        Some(reading.vibration_level),
-        Some(reading.motion_detected),
+        Some(imu_interpretation.vibration_score),
+        Some(imu_interpretation.motion_detected),
         previous_latitude,
         previous_longitude,
         Some(reading.latitude),
@@ -42,8 +48,8 @@ pub async fn persist_fuel_reading(
 
             recorded_at: reading.timestamp,
 
-            vibration_level: Some(reading.vibration_level),
-            motion_detected: Some(reading.motion_detected),
+            vibration_level: Some(imu_interpretation.vibration_score),
+            motion_detected: Some(imu_interpretation.motion_detected),
 
             distance_meters,
             speed_kmh,
@@ -54,8 +60,11 @@ pub async fn persist_fuel_reading(
             source: "telemetry".to_string(),
 
             message: Some(format!(
-                "State classified from telemetry: {:?}",
-                device_state
+                "State classified from telemetry. State: {:?}, vibration score: {:.2}, \
+                 movement confidence: {:.2}",
+                device_state,
+                imu_interpretation.vibration_score,
+                imu_interpretation.movement_confidence,
             )),
         },
     )
@@ -76,8 +85,8 @@ pub async fn persist_fuel_reading(
             latitude: Some(reading.latitude),
             longitude: Some(reading.longitude),
 
-            vibration_level: Some(reading.vibration_level),
-            motion_detected: Some(reading.motion_detected),
+            vibration_level: Some(imu_interpretation.vibration_score),
+            motion_detected: Some(imu_interpretation.motion_detected),
 
             raw_payload,
         },

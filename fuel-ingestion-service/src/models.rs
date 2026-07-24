@@ -6,12 +6,49 @@ use uuid::Uuid;
 pub struct FuelReading {
     pub device_id: String,
     pub timestamp: DateTime<Utc>,
+
     pub fuel_level_litres: f64,
     pub fuel_level_percentage: f64,
+
     pub latitude: f64,
     pub longitude: f64,
 
+    #[serde(default)]
+    pub speed: f64,
+
+    #[serde(default)]
+    pub heading: f64,
+
+    // Physical MPU6050 measurements.
+    #[serde(default)]
+    pub accel_x_g: f64,
+
+    #[serde(default)]
+    pub accel_y_g: f64,
+
+    #[serde(default)]
+    pub accel_z_g: f64,
+
+    #[serde(default)]
+    pub gyro_x_dps: f64,
+
+    #[serde(default)]
+    pub gyro_y_dps: f64,
+
+    #[serde(default)]
+    pub gyro_z_dps: f64,
+
+    #[serde(default)]
+    pub imu_temperature_c: f64,
+
+    // Temporary legacy compatibility fields.
+    //
+    // Older simulators and backend services may still reference these fields.
+    // New physical firmware payloads no longer send them.
+    #[serde(default)]
     pub vibration_level: f64,
+
+    #[serde(default)]
     pub motion_detected: bool,
 
     pub simulation_mode: String,

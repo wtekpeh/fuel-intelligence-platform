@@ -1,4 +1,8 @@
 use crate::config::AppConfig;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
+use crate::domain::telemetry::telemetry_pipeline::TelemetryPipeline;
 use crate::handlers::{
     acknowledge_alert_handler, check_position_against_geofences_handler, create_geofence_handler,
     get_alert_trends_handler, get_device_health_trends_handler,
@@ -25,6 +29,7 @@ pub struct AppState {
     pub db_pool: PgPool,
     pub config: AppConfig,
     pub alert_hub: AlertHub,
+    pub telemetry_pipeline: Arc<Mutex<TelemetryPipeline>>,
 }
 
 pub fn app_routes(db_pool: PgPool, config: AppConfig, alert_hub: AlertHub) -> Router {
@@ -32,6 +37,7 @@ pub fn app_routes(db_pool: PgPool, config: AppConfig, alert_hub: AlertHub) -> Ro
         db_pool,
         config,
         alert_hub,
+        telemetry_pipeline: Arc::new(Mutex::new(TelemetryPipeline::new())),
     };
 
     let cors = CorsLayer::new()
