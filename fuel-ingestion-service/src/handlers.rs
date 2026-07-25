@@ -1,4 +1,9 @@
-use crate::{routes::AppState, services::telemetry::fuel_service::persist_fuel_reading};
+use crate::{
+    routes::AppState,
+    services::telemetry::{
+        fuel_service::persist_fuel_reading, motion_service::process_motion_intelligence,
+    },
+};
 use axum::{
     extract::{Json, Path, Query, State},
     http::StatusCode,
@@ -18,14 +23,15 @@ use crate::{
         HeartbeatRequest, HeartbeatResponse, ReadingBatch,
     },
     repository::{
-        acknowledge_alert, check_position_against_geofences, create_geofence,
-        detect_and_store_geofence_transitions_from_previous_position,
+        StoredTelemetryPosition, acknowledge_alert, check_position_against_geofences,
+        create_geofence, detect_and_store_geofence_transitions_from_previous_position,
         find_registered_telemetry_context, get_alert_trends, get_device_health_trends,
-        get_geofence_activity_trends, get_geofence_utilization, get_organization_fleet_overview,
-        get_organization_id_for_device, get_organization_overview, get_recent_alerts,
-        get_recent_device_health_events, get_recent_device_state_events, get_recent_fuel_events,
-        get_recent_sensor_health_events, get_recent_telemetry_stream, get_telemetry_history,
-        list_geofences, list_recent_geofence_transition_events, mark_device_heartbeat_seen,
+        get_geofence_activity_trends, get_geofence_utilization, get_latest_sensor_position,
+        get_organization_fleet_overview, get_organization_id_for_device, get_organization_overview,
+        get_recent_alerts, get_recent_device_health_events, get_recent_device_state_events,
+        get_recent_fuel_events, get_recent_sensor_health_events, get_recent_telemetry_stream,
+        get_telemetry_history, list_geofences, list_operational_intelligence_events,
+        list_recent_geofence_transition_events, mark_device_heartbeat_seen,
         mark_device_payload_seen, refresh_device_statuses, resolve_alert,
     },
 };
@@ -38,9 +44,8 @@ pub async fn ingest_reading_batch(
 
     // Build the canonical ORBI telemetry model.
     //
-    // For now this runs alongside the existing ingestion pipeline.
-    // The operational services still consume FuelReading until
-    // they are migrated individually.
+    // For now this runs alongside the existing ingestion request model while
+    // individual operational services are migrated to the canonical pipeline.
     let telemetry_readings = map_legacy_readings(&payload.readings);
 
     println!("Received batch from device: {}", payload.device_id);
@@ -48,6 +53,7 @@ pub async fn ingest_reading_batch(
     println!("Readings received: {}", received_count);
 
     let db_pool = &app_state.db_pool;
+
     let result = async {
         let context = find_registered_telemetry_context(db_pool, &payload.device_id).await?;
 
@@ -60,11 +66,10 @@ pub async fn ingest_reading_batch(
 
         let device_id = context.device_id;
 
-        // Process the canonical telemetry through the shared operational
-        // intelligence pipeline.
+        // Process canonical telemetry through the shared motion pipeline.
         //
         // The mutex is held only while updating the in-memory motion tracker.
-        // It is released before any database operations are performed.
+        // It is released before database operations begin.
         let mut processed_telemetry = Vec::with_capacity(telemetry_readings.len());
 
         {
@@ -77,51 +82,66 @@ pub async fn ingest_reading_batch(
 
         mark_device_payload_seen(db_pool, device_id).await?;
 
-        let mut previous_reading: Option<&crate::models::FuelReading> = None;
+        // Load the last durable GPS position once for this incoming batch.
+        //
+        // This allows movement and geofence intelligence to continue across separate
+        // HTTP requests. Subsequent readings inside the same batch are chained in
+        // memory and do not cause additional database lookups.
+        let mut previous_position: Option<StoredTelemetryPosition> =
+            if let Some(gps_sensor_id) = context.gps_sensor_id {
+                get_latest_sensor_position(db_pool, gps_sensor_id).await?
+            } else {
+                None
+            };
 
         let organization_id = get_organization_id_for_device(db_pool, device_id).await?;
 
-        for ((reading, telemetry), processed) in payload
-            .readings
-            .iter()
-            .zip(telemetry_readings.iter())
-            .zip(processed_telemetry.iter())
-        {
-            // Store GPS observations when this device has a GPS sensor.
+        for (reading, processed) in payload.readings.iter().zip(processed_telemetry.iter()) {
+            // Run shared Motion Intelligence for every product that has the
+            // standard ORBI vibration capability.
+            if let (Some(vibration_sensor_id), Some(processed)) =
+                (context.vibration_sensor_id, processed)
+            {
+                process_motion_intelligence(
+                    db_pool,
+                    device_id,
+                    vibration_sensor_id,
+                    reading,
+                    previous_position.as_ref(),
+                    &processed.imu_interpretation,
+                    Some(&processed.motion_evidence),
+                )
+                .await?;
+            }
+
+            // Store GPS observations for GPS-capable products.
             if let Some(gps_sensor_id) = context.gps_sensor_id {
                 persist_gps_reading(db_pool, device_id, gps_sensor_id, reading).await?;
             }
 
-            // Preserve geofence intelligence for GPS-capable devices.
-            if context.gps_sensor_id.is_some() {
-                if let Some(previous_reading) = previous_reading {
-                    detect_and_store_geofence_transitions_from_previous_position(
-                        db_pool,
-                        organization_id,
-                        device_id,
-                        previous_reading.latitude,
-                        previous_reading.longitude,
-                        reading.latitude,
-                        reading.longitude,
-                        reading.timestamp,
-                    )
-                    .await?;
-                }
+            // Preserve geofence intelligence for GPS-capable products.
+            //
+            // The previous position may come either from PostgreSQL for the first reading
+            // in the request or from the immediately preceding reading in this batch.
+            if context.gps_sensor_id.is_some()
+                && let Some(previous_position) = previous_position.as_ref()
+            {
+                detect_and_store_geofence_transitions_from_previous_position(
+                    db_pool,
+                    organization_id,
+                    device_id,
+                    previous_position.latitude,
+                    previous_position.longitude,
+                    reading.latitude,
+                    reading.longitude,
+                    reading.timestamp,
+                )
+                .await?;
             }
 
-            // Run Fuel Intelligence only when the device has a fuel sensor.
+            // Run Fuel Intelligence only for products with a fuel sensor.
             if let Some(fuel_sensor_id) = context.fuel_sensor_id {
-                if let Some(processed) = processed {
-                    persist_fuel_reading(
-                        db_pool,
-                        device_id,
-                        fuel_sensor_id,
-                        reading,
-                        previous_reading,
-                        &processed.imu_interpretation,
-                    )
-                    .await?;
-                }
+                persist_fuel_reading(db_pool, device_id, fuel_sensor_id, reading).await?;
 
                 detect_fuel_event(
                     db_pool,
@@ -144,7 +164,16 @@ pub async fn ingest_reading_batch(
                 detect_frozen_fuel_sensor(db_pool, device_id, fuel_sensor_id).await?;
             }
 
-            previous_reading = Some(reading);
+            // Chain the current GPS position into the next reading in this batch.
+            //
+            // This remains in memory and therefore does not create another database read.
+            if context.gps_sensor_id.is_some() {
+                previous_position = Some(StoredTelemetryPosition {
+                    recorded_at: reading.timestamp,
+                    latitude: reading.latitude,
+                    longitude: reading.longitude,
+                });
+            }
         }
 
         anyhow::Ok(())
@@ -534,6 +563,29 @@ pub async fn list_geofence_transition_events_handler(
                 Json(serde_json::json!({
                     "success": false,
                     "message": "Failed to fetch geofence transition events"
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+pub async fn list_operational_intelligence_events_handler(
+    State(app_state): State<AppState>,
+) -> impl IntoResponse {
+    let db_pool = &app_state.db_pool;
+
+    match list_operational_intelligence_events(db_pool).await {
+        Ok(events) => (StatusCode::OK, Json(events)).into_response(),
+
+        Err(err) => {
+            eprintln!("Failed to fetch operational intelligence events: {}", err);
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "success": false,
+                    "message": "Failed to fetch operational intelligence events"
                 })),
             )
                 .into_response()

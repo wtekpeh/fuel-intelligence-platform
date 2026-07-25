@@ -8,10 +8,10 @@ use crate::handlers::{
     get_alert_trends_handler, get_device_health_trends_handler,
     get_geofence_activity_trends_handler, get_geofence_utilization_handler, ingest_reading_batch,
     list_alerts, list_device_state_events, list_geofence_transition_events_handler,
-    list_geofences_handler, list_organization_fleet_overview, list_organization_overview,
-    list_recent_device_health_events, list_recent_fuel_events, list_recent_sensor_health_events,
-    list_recent_telemetry_stream, list_telemetry_history, receive_heartbeat, refresh_device_health,
-    resolve_alert_handler,
+    list_geofences_handler, list_operational_intelligence_events_handler,
+    list_organization_fleet_overview, list_organization_overview, list_recent_device_health_events,
+    list_recent_fuel_events, list_recent_sensor_health_events, list_recent_telemetry_stream,
+    list_telemetry_history, receive_heartbeat, refresh_device_health, resolve_alert_handler,
 };
 use crate::platform_routes::platform_routes;
 use crate::services::alert_hub::AlertHub;
@@ -117,6 +117,10 @@ pub fn app_routes(db_pool: PgPool, config: AppConfig, alert_hub: AlertHub) -> Ro
         .route(
             "/api/geofence-transition-events",
             get(list_geofence_transition_events_handler),
+        )
+        .route(
+            "/api/operational-intelligence",
+            get(list_operational_intelligence_events_handler),
         )
         .route("/api/fuel-readings/history", get(list_telemetry_history))
         .route("/ws/alerts", get(alerts_ws_handler))

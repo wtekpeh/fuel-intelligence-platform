@@ -55,6 +55,59 @@ This separation allows intelligence to evolve continuously without requiring fir
 
 ---
 
+## Operational Intelligence Philosophy
+
+The platform distinguishes three different classes of information.
+
+Telemetry
+
+Raw measurements received from physical hardware.
+
+Examples:
+
+- GPS coordinates
+- Fuel level
+- Accelerometer
+- Gyroscope
+- Temperature
+
+Operational State
+
+The backend continuously evaluates telemetry to determine the current
+operational state of a device.
+
+Examples:
+
+- MOVING
+- IDLE
+- PARKED
+- OFFLINE
+
+Operational Events
+
+Operational events represent meaningful transitions or inferred
+intelligence derived from telemetry and operational state.
+
+Examples:
+
+- JOURNEY_STARTED
+- VEHICLE_IDLING
+- VEHICLE_PARKED
+- ENTERED_ZONE
+- EXITED_ZONE
+- FUEL_THEFT
+- REFILL
+- LEAK
+
+Telemetry is stored continuously.
+
+Operational state is evaluated continuously.
+
+Operational events are persisted only when meaningful changes occur.
+
+This separation keeps investigation timelines concise while preserving
+complete telemetry for replay, analytics, and forensic reconstruction.
+
 ## Telemetry Philosophy
 
 Telemetry represents measurements collected from physical sensors.
@@ -85,11 +138,17 @@ These are produced by the Operational Intelligence layer after telemetry has bee
 
 The platform processes telemetry using the following architecture:
 
-```text
 Telemetry Packet
-        ↓
+↓
 Telemetry Router
-        ↓
+↓
+Canonical Telemetry Mapping
+↓
+Telemetry Pipeline
+├── IMU Interpretation
+├── Rolling Motion Tracking
+└── Processed Telemetry
+↓
 ────────────────────────────────────
 GPS Service
 Fuel Service
@@ -97,15 +156,14 @@ Motion Service
 Power Service
 Health Service
 ────────────────────────────────────
-        ↓
-Intelligence Engine
-        ↓
+↓
+Operational Intelligence Engine
+↓
 Investigation Engine
-        ↓
+↓
 Analytics Intelligence
-        ↓
+↓
 Operational Dashboards
-```
 
 Each sensor service is responsible only for processing its own sensor domain.
 
@@ -131,12 +189,26 @@ Fuel Service
 
 Motion Service
 
+Current capabilities:
+
 - Raw IMU telemetry processing
-- IMU interpretation
+- Canonical telemetry normalization
+- Shared IMU interpretation
+- Rolling per-device motion tracking
+- MotionEvidence generation
 - Vibration score derivation
 - Motion detection
 - Movement confidence estimation
-- Device-state support
+- Motion ratio calculation
+- Average movement confidence calculation
+- Motion-aware device-state support
+- Cross-request GPS movement tracking
+- Previous-position retrieval from persisted telemetry
+- Distance calculation in meters
+- Estimated speed calculation (km/h)
+- Operational transition detection
+- Journey lifecycle detection
+- Transition-only device-state persistence
 
 Future capabilities:
 
@@ -454,11 +526,7 @@ Find:
 # Current Development Status
 
 Implemented:
-````
 
-Then find the spatial intelligence section:
-
-```md
 - PostGIS spatial intelligence layer
 - GeoJSON geofence APIs
 - backend geofence persistence
@@ -467,17 +535,19 @@ Then find the spatial intelligence section:
 - replay-aware geofence intelligence
 - device-aware geofence assignment foundation
 - telemetry position geofence checks
-```
-
-Append immediately after it:
-
-```md
 - geofence transition detection
 - geofence transition event persistence
 - enriched geofence transition APIs
 - device-filtered geofence transition queries
 - investigation-ready geofence transition intelligence
-```
+- persisted GPS movement recovery
+- cross-request movement continuity
+- GPS distance estimation
+- approximate speed estimation
+- operational transition detection
+- journey lifecycle intelligence
+- transition-only operational state persistence
+- investigation timeline optimization
 
 ---
 
@@ -490,6 +560,7 @@ Planned spatial intelligence capabilities:
 
 - depot entry/exit events
 ```
+````
 
 Remove:
 
@@ -1085,7 +1156,6 @@ The service now supports operational device state classification using incoming 
 
 Current implemented states:
 
-````text
 MOVING
 IDLE
 PARKED
@@ -1095,17 +1165,27 @@ UNKNOWN
 The Device State Engine currently uses:
 
 - backend IMU interpretation
+- rolling MotionEvidence
 - device health status
 - previous GPS location
 - current GPS location
 
-The IMU Interpretation layer derives:
+The Telemetry Pipeline derives:
 
 - vibration_score
 - motion_detected
 - movement_confidence
+- motion_ratio
+- average_movement_confidence
 
-These interpreted values are then combined with GPS movement to classify operational behaviour.
+These interpreted values are encapsulated within a shared MotionEvidence model before being combined with GPS movement to classify operational behaviour.
+
+The platform currently maintains two classification paths:
+
+- Legacy IMU-based classification
+- MotionEvidence-aware classification
+
+The MotionEvidence classifier is currently used for validation alongside the legacy classifier while the platform transitions to the new motion-aware architecture.
 
 The engine now supports GPS-aware movement classification by comparing previous and current coordinates during telemetry ingestion.
 
@@ -1114,15 +1194,54 @@ Movement detection now uses estimated GPS distance in meters instead of raw coor
 Example correlations:
 
 high vibration
-+ motion detected
-=================
-MOVING
-low vibration
-+ no motion
-=================
-PARKED
+
+- # motion detected
+  MOVING
+  low vibration
+- # no motion
+  PARKED
 
 Current capabilities:
+
+Current motion intelligence capabilities include:
+
+- rolling motion accumulation
+- motion evidence generation
+- movement confidence aggregation
+- motion ratio calculation
+- shared processed telemetry
+- dual-classifier validation
+- persisted previous-position recovery
+- cross-request movement continuity
+- batch-aware movement chaining
+- transition-aware operational state persistence
+
+Device operational states are evaluated for every telemetry reading.
+
+However, device_state_events are only persisted when the operational
+state changes.
+
+Example:
+
+MOVING
+↓
+
+IDLE
+↓
+
+PARKED
+
+Repeated classifications such as:
+
+MOVING
+MOVING
+MOVING
+
+are intentionally not stored because they do not represent operational
+events.
+
+Raw telemetry remains fully available through sensor_readings for
+historical replay and analytics.
 
 State history is stored in:
 
@@ -1168,7 +1287,7 @@ The correlation layer helps distinguish between:
 
 Current correlation statuses:
 
-```text
+````text
 Consistent
 Suspicious
 Conflicting
@@ -1298,7 +1417,7 @@ fuel event detected
 → alert rule evaluation
 → alert persistence
 → immediate WebSocket broadcast
-```
+````
 
 Current endpoint:
 
@@ -1493,7 +1612,7 @@ Instead, the platform supports persistence-aware anomaly reasoning to avoid supp
 
 Alerts now support a basic operational lifecycle:
 
-```text
+````text
 OPEN
 → ACKNOWLEDGED
 → RESOLVED
@@ -1620,8 +1739,13 @@ Implemented:
 - PostgreSQL persistence for fuel telemetry
 - PostgreSQL persistence for GPS telemetry
 - raw IMU telemetry ingestion
-- backend IMU interpretation
 - canonical telemetry normalization
+- shared telemetry processing pipeline
+- shared ProcessedTelemetry model
+- backend IMU interpretation
+- rolling MotionEvidence generation
+- per-device rolling motion tracking
+- motion-aware device-state validation
 - device-state integration using interpreted IMU measurements
 - operational event generation
 - leak/theft/refill detection
@@ -1662,6 +1786,9 @@ Implemented:
 - device reliability analytics
 - geofence utilization analytics
 - analytics aggregation endpoints
+- shared telemetry processing architecture
+- reusable motion intelligence foundation
+- rolling motion evidence pipeline
 
 # Device & Hardware Management
 
@@ -1999,13 +2126,25 @@ Additional hardware profiles without database redesign
 
 Platform Foundation ✅
 ↓
-Embedded Rust Firmware
+Motion Intelligence Validation ✅
+↓
+Cross-Request Movement Intelligence ✅
+↓
+Transition-Only Investigation Timeline ✅
+↓
+Firmware Telemetry Batching
+↓
+Batch Telemetry Validation
+↓
+KUM Fuel Sensor Integration
+↓
+Fuel Intelligence Validation
+↓
+Frontend Operational Intelligence Enhancements
 ↓
 Firmware Management
 ↓
 Sensor Adapter Layer
-↓
-Hardware Integration
 ↓
 Production ORBI Hardware
 ↓

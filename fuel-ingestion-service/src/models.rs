@@ -296,6 +296,27 @@ pub struct GeofenceTransitionEventResponse {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct OperationalIntelligenceEventResponse {
+    pub id: uuid::Uuid,
+
+    pub device_id: uuid::Uuid,
+
+    pub operational_transition_event_id: Option<uuid::Uuid>,
+
+    pub event_type: String,
+
+    pub previous_state: Option<String>,
+    pub current_state: Option<String>,
+
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+
+    pub recorded_at: chrono::DateTime<chrono::Utc>,
+
+    pub detected_at: chrono::DateTime<chrono::Utc>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct AnalyticsAlertTrendQuery {
     pub device_id: Option<uuid::Uuid>,

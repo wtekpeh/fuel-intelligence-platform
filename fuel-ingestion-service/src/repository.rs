@@ -4,6 +4,7 @@ use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::models::OperationalIntelligenceEventResponse;
 use crate::models::{
     AlertAcknowledgementResponse, AlertResponse, AlertTrendPoint, AlertTrendSummary,
     AlertTrendsResponse, AssignDeviceAssetRequest, CreateAssetRequest, CreateGeofenceRequest,
@@ -56,12 +57,50 @@ pub struct NewDeviceStateEvent {
 }
 
 #[derive(Debug)]
+pub struct NewOperationalTransitionEvent {
+    pub device_id: Uuid,
+    pub previous_state: String,
+    pub current_state: String,
+    pub transition: String,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+    pub recorded_at: DateTime<Utc>,
+    pub source: String,
+}
+
+#[derive(Debug)]
+pub struct NewOperationalIntelligenceEvent {
+    pub device_id: Uuid,
+
+    pub operational_transition_event_id: Option<Uuid>,
+
+    pub event_type: String,
+
+    pub previous_state: Option<String>,
+    pub current_state: Option<String>,
+
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+
+    pub recorded_at: DateTime<Utc>,
+
+    pub source: String,
+}
+
+#[derive(Debug)]
 pub struct StoredSensorReading {
     pub id: Uuid,
     pub recorded_at: DateTime<Utc>,
     pub value: f64,
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoredTelemetryPosition {
+    pub recorded_at: DateTime<Utc>,
+    pub latitude: f64,
+    pub longitude: f64,
 }
 
 #[derive(Debug)]
@@ -531,6 +570,41 @@ pub async fn get_previous_sensor_reading(
     };
 
     Ok(Some((previous, current)))
+}
+
+pub async fn get_latest_sensor_position(
+    db_pool: &PgPool,
+    sensor_id: Uuid,
+) -> Result<Option<StoredTelemetryPosition>> {
+    let row = sqlx::query!(
+        r#"
+        SELECT
+            recorded_at,
+            latitude,
+            longitude
+        FROM sensor_readings
+        WHERE sensor_id = $1
+          AND latitude IS NOT NULL
+          AND longitude IS NOT NULL
+        ORDER BY
+            recorded_at DESC,
+            received_at DESC
+        LIMIT 1
+        "#,
+        sensor_id
+    )
+    .fetch_optional(db_pool)
+    .await?;
+
+    Ok(row.map(|row| StoredTelemetryPosition {
+        recorded_at: row.recorded_at,
+        latitude: row
+            .latitude
+            .expect("latitude was filtered as non-null in the query"),
+        longitude: row
+            .longitude
+            .expect("longitude was filtered as non-null in the query"),
+    }))
 }
 
 pub async fn create_fuel_event(
@@ -1109,6 +1183,79 @@ pub async fn create_device_state_event(
         new_event.longitude,
         new_event.source,
         new_event.message
+    )
+    .execute(db_pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn create_operational_transition_event(
+    db_pool: &PgPool,
+    event: &NewOperationalTransitionEvent,
+) -> Result<Uuid> {
+    let transition_event_id = sqlx::query_scalar!(
+        r#"
+        INSERT INTO operational_transition_events (
+            device_id,
+            previous_state,
+            current_state,
+            transition,
+            latitude,
+            longitude,
+            recorded_at,
+            source
+        )
+        VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8
+        )
+        RETURNING id
+        "#,
+        event.device_id,
+        event.previous_state,
+        event.current_state,
+        event.transition,
+        event.latitude,
+        event.longitude,
+        event.recorded_at,
+        event.source,
+    )
+    .fetch_one(db_pool)
+    .await?;
+
+    Ok(transition_event_id)
+}
+
+pub async fn create_operational_intelligence_event(
+    db_pool: &PgPool,
+    event: &NewOperationalIntelligenceEvent,
+) -> Result<()> {
+    sqlx::query!(
+        r#"
+        INSERT INTO operational_intelligence_events (
+            device_id,
+            operational_transition_event_id,
+            event_type,
+            previous_state,
+            current_state,
+            latitude,
+            longitude,
+            recorded_at,
+            source
+        )
+        VALUES (
+            $1,$2,$3,$4,$5,$6,$7,$8,$9
+        )
+        "#,
+        event.device_id,
+        event.operational_transition_event_id,
+        event.event_type,
+        event.previous_state,
+        event.current_state,
+        event.latitude,
+        event.longitude,
+        event.recorded_at,
+        event.source,
     )
     .execute(db_pool)
     .await?;
@@ -2379,4 +2526,32 @@ pub async fn get_geofence_utilization(
         days: safe_days,
         zones,
     })
+}
+
+pub async fn list_operational_intelligence_events(
+    db_pool: &PgPool,
+) -> Result<Vec<OperationalIntelligenceEventResponse>> {
+    let events = sqlx::query_as!(
+        OperationalIntelligenceEventResponse,
+        r#"
+        SELECT
+            id,
+            device_id,
+            operational_transition_event_id,
+            event_type,
+            previous_state,
+            current_state,
+            latitude,
+            longitude,
+            recorded_at,
+            detected_at
+        FROM operational_intelligence_events
+        ORDER BY recorded_at DESC
+        LIMIT 200
+        "#
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    Ok(events)
 }

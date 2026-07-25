@@ -6,6 +6,8 @@ pub mod device_state;
 pub mod fuel_detection;
 pub mod fuel_event_correlation;
 pub mod inventory_lifecycle;
+pub mod operational_behaviour;
+pub mod operational_intelligence;
 pub mod sensor_health;
 pub mod telemetry;
 pub mod telemetry_filter;
