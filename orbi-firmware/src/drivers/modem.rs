@@ -4,6 +4,8 @@ use esp_hal::peripherals::{GPIO26, GPIO27, UART1};
 use esp_hal::uart::{Config, Uart};
 use esp_println::{print, println};
 
+const RESPONSE_BUFFER_SIZE: usize = 256;
+
 pub struct Modem<'d> {
     pub uart: Uart<'d, esp_hal::Blocking>,
 }
@@ -43,35 +45,78 @@ impl<'d> Modem<'d> {
         delay.delay_millis(10000);
     }
 
-    pub fn send_command_and_print_response(&mut self, command: &[u8], label: &str, delay: &Delay) {
-        let _ = self.uart.write(command);
-        println!("Sent: {}", label);
+    pub fn send_command(&mut self, command: &[u8], label: &str) -> bool {
+        match self.uart.write(command) {
+            Ok(_) => {
+                println!("Sent: {}", label);
+                true
+            }
+
+            Err(_) => {
+                println!("Failed to send: {}", label);
+                false
+            }
+        }
+    }
+
+    pub fn read_response(&mut self) -> Option<([u8; RESPONSE_BUFFER_SIZE], usize)> {
+        if !self.uart.read_ready() {
+            return None;
+        }
+
+        let mut buffer = [0u8; RESPONSE_BUFFER_SIZE];
+
+        match self.uart.read(&mut buffer) {
+            Ok(bytes_read) if bytes_read > 0 => Some((buffer, bytes_read)),
+
+            Ok(_) => None,
+
+            Err(_) => {
+                println!("Failed to read modem UART response.");
+                None
+            }
+        }
+    }
+
+    fn collect_response(
+        &mut self,
+        command: &[u8],
+        label: &str,
+        delay: &Delay,
+    ) -> Option<([u8; RESPONSE_BUFFER_SIZE], usize)> {
+        if !self.send_command(command, label) {
+            return None;
+        }
 
         delay.delay_millis(1000);
 
-        let mut buffer = [0u8; 256];
+        self.read_response()
+    }
 
-        match self.uart.read(&mut buffer) {
-            Ok(bytes_read) => {
-                println!("Read {} byte(s):", bytes_read);
-
-                for index in 0..bytes_read {
-                    let byte = buffer[index];
-
-                    if byte >= 32 && byte <= 126 {
-                        print!("{}", byte as char);
-                    } else if byte == b'\r' {
-                        print!("\\r");
-                    } else if byte == b'\n' {
-                        println!("\\n");
-                    } else {
-                        print!("[{}]", byte);
-                    }
-                }
-
-                println!();
+    fn print_response(buffer: &[u8], bytes_read: usize) {
+        for byte in buffer.iter().take(bytes_read) {
+            if *byte >= 32 && *byte <= 126 {
+                print!("{}", *byte as char);
+            } else if *byte == b'\r' {
+                print!("\\r");
+            } else if *byte == b'\n' {
+                println!("\\n");
+            } else {
+                print!("[{}]", *byte);
             }
-            Err(_) => {
+        }
+
+        println!();
+    }
+
+    pub fn send_command_and_print_response(&mut self, command: &[u8], label: &str, delay: &Delay) {
+        match self.collect_response(command, label, delay) {
+            Some((buffer, bytes_read)) => {
+                println!("Read {} byte(s):", bytes_read);
+                Self::print_response(&buffer, bytes_read);
+            }
+
+            None => {
                 println!("No response yet.");
             }
         }
@@ -82,24 +127,15 @@ impl<'d> Modem<'d> {
         command: &[u8],
         label: &str,
         delay: &Delay,
-    ) -> Option<([u8; 256], usize)> {
-        let _ = self.uart.write(command);
-
-        println!("Sent: {}", label);
-
-        delay.delay_millis(1000);
-
-        let mut buffer = [0u8; 256];
-
-        match self.uart.read(&mut buffer) {
-            Ok(bytes_read) => {
+    ) -> Option<([u8; RESPONSE_BUFFER_SIZE], usize)> {
+        match self.collect_response(command, label, delay) {
+            Some((buffer, bytes_read)) => {
                 println!("Collected {} byte(s)", bytes_read);
-
                 Some((buffer, bytes_read))
             }
-            Err(_) => {
-                println!("No response received.");
 
+            None => {
+                println!("No response received.");
                 None
             }
         }

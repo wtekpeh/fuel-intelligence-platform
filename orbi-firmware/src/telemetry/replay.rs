@@ -1,9 +1,9 @@
 use esp_hal::delay::Delay;
 use esp_println::println;
 
-use crate::{drivers::Modem, network::http, storage::RecordStorage, telemetry::payload};
+use crate::{drivers::Modem, storage::RecordStorage, telemetry::publisher};
 
-pub fn replay_pending_records<S>(modem: &mut Modem, delay: &Delay, mut storage: Option<&mut S>)
+pub fn replay_pending_records<S>(modem: &mut Modem, delay: &Delay, storage: Option<&mut S>)
 where
     S: RecordStorage,
 {
@@ -11,150 +11,11 @@ where
     println!("ORBI QUEUE REPLAY");
     println!("========================");
 
-    const MAX_REPLAY_PER_BOOT: usize = 100;
+    println!("Starting persistent queue replay...");
 
-    let mut replayed = 0;
-
-    loop {
-        if replayed >= MAX_REPLAY_PER_BOOT {
-            println!("Reached replay limit for this boot.");
-            break;
-        }
-
-        let queued_record = match storage.as_deref_mut() {
-            Some(storage) => match storage.read_first_record() {
-                Some(record) => record,
-
-                None => {
-                    println!("Queue empty.");
-                    break;
-                }
-            },
-
-            None => {
-                println!("SD storage unavailable.");
-                break;
-            }
-        };
-
-        let (device_id, timestamp) = match payload::extract_replay_identity(queued_record.as_str())
-        {
-            Some(identity) => identity,
-
-            None => {
-                println!("Invalid queued record.");
-                break;
-            }
-        };
-
-        if let Some(storage) = storage.as_deref_mut() {
-            if storage.is_acknowledged(device_id, timestamp) {
-                println!("Already acknowledged.");
-
-                storage.remove_first_record();
-
-                continue;
-            }
-        }
-
-        let replay_payload = match payload::build_replay_batch_payload(queued_record.as_str()) {
-            Some(payload) => payload,
-
-            None => {
-                println!("Replay payload failed.");
-                break;
-            }
-        };
-
-        println!("Replay record {}", replayed + 1);
-
-        let upload_success = http::send_payload(modem, delay, &replay_payload);
-
-        if !upload_success {
-            println!("Replay stopped because upload failed.");
-            break;
-        }
-
-        if let Some(storage) = storage.as_deref_mut() {
-            if !storage.append_ack(device_id, timestamp) {
-                println!("ACK failed.");
-                break;
-            }
-
-            if !storage.remove_first_record() {
-                println!("Queue cleanup failed.");
-                break;
-            }
-        }
-
-        replayed += 1;
+    if publisher::flush_queue(modem, delay, storage) {
+        println!("Replay completed successfully.");
+    } else {
+        println!("Replay finished. Queue may still contain pending records.");
     }
-
-    println!("Replay completed. {} record(s) processed.", replayed);
-}
-
-pub fn cleanup_acknowledged_records<S>(mut storage: Option<&mut S>)
-where
-    S: RecordStorage,
-{
-    println!("========================");
-    println!("ORBI QUEUE CLEANUP");
-    println!("========================");
-
-    let mut cleaned = 0;
-
-    loop {
-        let queued_record = match storage.as_deref_mut() {
-            Some(storage) => match storage.read_first_record() {
-                Some(record) => record,
-
-                None => {
-                    println!("Queue cleanup complete.");
-                    break;
-                }
-            },
-
-            None => {
-                println!("SD storage unavailable.");
-                break;
-            }
-        };
-
-        let (device_id, timestamp) = match payload::extract_replay_identity(queued_record.as_str())
-        {
-            Some(identity) => identity,
-
-            None => {
-                println!("Invalid queued record encountered during cleanup.");
-                break;
-            }
-        };
-
-        let acknowledged = match storage.as_deref_mut() {
-            Some(storage) => storage.is_acknowledged(device_id, timestamp),
-
-            None => false,
-        };
-
-        if !acknowledged {
-            println!("First queued record is still pending. Cleanup stopped.");
-            break;
-        }
-
-        println!("Acknowledged queued record found. Removing it.");
-
-        if let Some(storage) = storage.as_deref_mut() {
-            if !storage.remove_first_record() {
-                println!("Failed to remove acknowledged queued record.");
-                break;
-            }
-        }
-
-        cleaned += 1;
-    }
-
-    println!(
-        "Queue cleanup finished. {} acknowledged record(s) removed.",
-        cleaned
-    );
 }

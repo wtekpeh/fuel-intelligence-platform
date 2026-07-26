@@ -3,6 +3,20 @@ use esp_println::println;
 
 use crate::drivers::Modem;
 
+const HTTP_ACTION_POLL_INTERVAL_MS: u32 = 250;
+const HTTP_ACTION_MAX_POLLS: usize = 60;
+const HTTP_ACTION_BUFFER_SIZE: usize = 512;
+
+fn contains_bytes(buffer: &[u8], pattern: &[u8]) -> bool {
+    if pattern.is_empty() || pattern.len() > buffer.len() {
+        return false;
+    }
+
+    buffer
+        .windows(pattern.len())
+        .any(|window| window == pattern)
+}
+
 fn extract_http_status(response: &[u8]) -> Option<u16> {
     const PREFIX: &[u8] = b"+HTTPACTION: 1,";
 
@@ -22,6 +36,62 @@ fn extract_http_status(response: &[u8]) -> Option<u16> {
         + (status_bytes[2] - b'0') as u16;
 
     Some(status)
+}
+
+fn collect_http_action_response(
+    modem: &mut Modem,
+    delay: &Delay,
+    action_label: &str,
+) -> Option<([u8; HTTP_ACTION_BUFFER_SIZE], usize)> {
+    if !modem.send_command(b"AT+HTTPACTION=1\r\n", action_label) {
+        println!("Failed to send HTTPACTION command.");
+        return None;
+    }
+
+    let mut combined_response = [0u8; HTTP_ACTION_BUFFER_SIZE];
+    let mut total_bytes_read = 0;
+
+    for _ in 0..HTTP_ACTION_MAX_POLLS {
+        delay.delay_millis(HTTP_ACTION_POLL_INTERVAL_MS);
+
+        let Some((response_buffer, bytes_read)) = modem.read_response() else {
+            continue;
+        };
+
+        if bytes_read == 0 {
+            continue;
+        }
+
+        let remaining_capacity = HTTP_ACTION_BUFFER_SIZE - total_bytes_read;
+
+        if remaining_capacity == 0 {
+            println!("HTTPACTION response buffer is full.");
+            break;
+        }
+
+        let bytes_to_copy = core::cmp::min(bytes_read, remaining_capacity);
+
+        combined_response[total_bytes_read..total_bytes_read + bytes_to_copy]
+            .copy_from_slice(&response_buffer[..bytes_to_copy]);
+
+        total_bytes_read += bytes_to_copy;
+
+        if contains_bytes(&combined_response[..total_bytes_read], b"+HTTPACTION:") {
+            return Some((combined_response, total_bytes_read));
+        }
+    }
+
+    if total_bytes_read > 0 {
+        println!(
+            "HTTPACTION timed out after receiving {} byte(s).",
+            total_bytes_read
+        );
+
+        Some((combined_response, total_bytes_read))
+    } else {
+        println!("HTTPACTION timed out without receiving a response.");
+        None
+    }
 }
 
 fn post_json<const N: usize>(
@@ -71,8 +141,7 @@ fn post_json<const N: usize>(
     println!("{}", sent_message);
     delay.delay_millis(final_httpterm_delay);
 
-    let action_response =
-        modem.send_command_and_collect_response(b"AT+HTTPACTION=1\r\n", action_label, delay);
+    let action_response = collect_http_action_response(modem, delay, action_label);
 
     let upload_succeeded = if let Some((response_buffer, bytes_read)) = action_response {
         let response = &response_buffer[..bytes_read];
@@ -113,7 +182,11 @@ fn post_json<const N: usize>(
     upload_succeeded
 }
 
-pub fn send_payload(modem: &mut Modem, delay: &Delay, payload: &heapless::String<1024>) -> bool {
+pub fn send_payload<const N: usize>(
+    modem: &mut Modem,
+    delay: &Delay,
+    payload: &heapless::String<N>,
+) -> bool {
     post_json(
         modem,
         delay,

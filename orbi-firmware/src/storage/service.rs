@@ -12,7 +12,27 @@ pub trait RecordStorage {
 
     fn append_ack(&mut self, device_id: &str, timestamp: &str) -> bool;
 
+    /*
+     * Read the first queued telemetry record.
+     *
+     * Retained for the existing single-record replay and cleanup paths.
+     */
     fn read_first_record(&mut self) -> Option<heapless::String<512>>;
+
+    /*
+     * Read up to `max_records` complete telemetry records from the beginning
+     * of ORBIQ.LOG.
+     *
+     * This operation is non-destructive. Records remain in the persistent
+     * queue until a later acknowledged cleanup operation removes them.
+     *
+     * `N` is the maximum number of records that can be held in memory.
+     * `max_records` allows the publishing policy to request fewer than `N`.
+     */
+    fn read_first_records<const N: usize>(
+        &mut self,
+        max_records: usize,
+    ) -> heapless::Vec<heapless::String<768>, N>;
 
     fn is_acknowledged(&mut self, device_id: &str, timestamp: &str) -> bool;
 
@@ -20,7 +40,6 @@ pub trait RecordStorage {
 
     fn append_gnss_diagnostic(&mut self, record: &GnssDiagnosticRecord<'_>) -> bool;
 }
-
 pub struct PersistentStorage<D, T>
 where
     D: BlockDevice,
@@ -198,6 +217,143 @@ where
         println!("{}", record);
 
         Some(record)
+    }
+
+    fn read_first_records<const N: usize>(
+        &mut self,
+        max_records: usize,
+    ) -> heapless::Vec<heapless::String<768>, N> {
+        let mut records = heapless::Vec::<heapless::String<768>, N>::new();
+
+        /*
+         * The compile-time capacity N protects memory usage, while max_records
+         * lets the caller choose the batch size.
+         */
+        let target_records = core::cmp::min(max_records, N);
+
+        if target_records == 0 {
+            println!("Batch queue read requested zero records.");
+            return records;
+        }
+
+        let volume = match self.volume_manager.open_volume(VolumeIdx(0)) {
+            Ok(volume) => volume,
+
+            Err(error) => {
+                println!("Failed to open SD volume for batch queue read: {:?}", error);
+                return records;
+            }
+        };
+
+        let root_directory = match volume.open_root_dir() {
+            Ok(directory) => directory,
+
+            Err(error) => {
+                println!("Failed to open SD root for batch queue read: {:?}", error);
+                return records;
+            }
+        };
+
+        let queue_file = match root_directory.open_file_in_dir("ORBIQ.LOG", Mode::ReadOnly) {
+            Ok(file) => file,
+
+            Err(error) => {
+                println!("Failed to open ORBIQ.LOG for batch queue read: {:?}", error);
+                return records;
+            }
+        };
+
+        /*
+         * SD data is read in bounded chunks. A telemetry record may cross a
+         * chunk boundary, so `current_record` remains alive between reads.
+         */
+        let mut buffer = [0u8; 512];
+        let mut current_record = heapless::String::<768>::new();
+
+        loop {
+            let bytes_read = match queue_file.read(&mut buffer) {
+                Ok(count) => count,
+
+                Err(error) => {
+                    println!("Failed while reading queued telemetry batch: {:?}", error);
+                    return records;
+                }
+            };
+
+            if bytes_read == 0 {
+                break;
+            }
+
+            for byte in &buffer[..bytes_read] {
+                /*
+                 * Each ORBIQ.LOG entry is terminated by CRLF. The newline marks
+                 * the end of one complete JSON record.
+                 */
+                if *byte == b'\n' {
+                    if current_record.is_empty() {
+                        continue;
+                    }
+
+                    let completed_record =
+                        core::mem::replace(&mut current_record, heapless::String::<768>::new());
+
+                    if records.push(completed_record).is_err() {
+                        println!("In-memory telemetry batch capacity reached.");
+                        return records;
+                    }
+
+                    if records.len() >= target_records {
+                        println!(
+                            "Read {} queued telemetry record(s) for batching.",
+                            records.len()
+                        );
+
+                        return records;
+                    }
+
+                    continue;
+                }
+
+                /*
+                 * Ignore the carriage-return component of CRLF.
+                 */
+                if *byte == b'\r' {
+                    continue;
+                }
+
+                if current_record.push(*byte as char).is_err() {
+                    println!("Queued telemetry record exceeded the 768-byte in-memory capacity.");
+
+                    /*
+                     * Never return an incomplete record. Any earlier complete
+                     * records remain safe to use.
+                     */
+                    return records;
+                }
+            }
+        }
+
+        /*
+         * Normally every stored record ends with CRLF. This also safely handles
+         * a final complete-looking record if the file has no trailing newline.
+         */
+        if !current_record.is_empty()
+            && records.len() < target_records
+            && records.push(current_record).is_err()
+        {
+            println!("Unable to append final queued record to telemetry batch.");
+        }
+
+        if records.is_empty() {
+            println!("Queue is empty.");
+        } else {
+            println!(
+                "Read {} queued telemetry record(s) for batching.",
+                records.len()
+            );
+        }
+
+        records
     }
 
     fn is_acknowledged(&mut self, device_id: &str, timestamp: &str) -> bool {

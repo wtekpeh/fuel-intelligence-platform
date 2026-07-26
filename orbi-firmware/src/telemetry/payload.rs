@@ -79,11 +79,40 @@ pub fn extract_replay_identity<'a>(queued_record: &'a str) -> Option<(&'a str, &
     Some((device_id, timestamp))
 }
 
-pub fn build_replay_batch_payload(queued_record: &str) -> Option<String<1024>> {
-    let device_id = extract_json_string(queued_record, "device_id")?;
-    let timestamp = extract_json_string(queued_record, "timestamp")?;
+/*
+ * Build one upload payload from telemetry records already persisted in
+ * ORBIQ.LOG.
+ *
+ * The queued records are complete JSON objects, so they are inserted
+ * directly into the `readings` array without being deserialized and rebuilt.
+ *
+ * This preserves ORBI's offline-first flow:
+ *
+ * measurement
+ *     -> persistent queue
+ *     -> queue batch
+ *     -> backend
+ */
+pub fn build_queue_batch_payload<const N: usize>(
+    queued_records: &heapless::Vec<heapless::String<768>, N>,
+) -> Option<String<4096>> {
+    let first_record = queued_records.first()?;
 
-    let mut payload = String::<1024>::new();
+    let (device_id, synced_at) = extract_replay_identity(first_record.as_str())?;
+
+    /*
+     * All records in one firmware queue should belong to the same device.
+     * Validate that assumption before constructing the batch.
+     */
+    for queued_record in queued_records {
+        let (record_device_id, _) = extract_replay_identity(queued_record.as_str())?;
+
+        if record_device_id != device_id {
+            return None;
+        }
+    }
+
+    let mut payload = String::<4096>::new();
 
     core::fmt::write(
         &mut payload,
@@ -91,12 +120,21 @@ pub fn build_replay_batch_payload(queued_record: &str) -> Option<String<1024>> {
             "{{\
                 \"device_id\":\"{}\",\
                 \"synced_at\":\"{}\",\
-                \"readings\":[{}]\
-            }}",
-            device_id, timestamp, queued_record,
+                \"readings\":[",
+            device_id, synced_at,
         ),
     )
     .ok()?;
+
+    for (index, queued_record) in queued_records.iter().enumerate() {
+        if index > 0 {
+            payload.push(',').ok()?;
+        }
+
+        payload.push_str(queued_record.as_str()).ok()?;
+    }
+
+    payload.push_str("]}").ok()?;
 
     Some(payload)
 }

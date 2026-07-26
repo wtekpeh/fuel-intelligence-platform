@@ -18,21 +18,23 @@ The firmware is intentionally modular to support future hardware revisions witho
 
 Current firmware capabilities include:
 
-- GPS telemetry
-- Raw IMU telemetry
+- GNSS telemetry
+- Raw MPU6050 IMU telemetry
   - Accelerometer (X, Y, Z)
   - Gyroscope (X, Y, Z)
   - IMU temperature
 - LTE backend communication
+- HTTP batch telemetry uploads
 - Persistent SD card queue
-- Upload acknowledgement tracking
+- FIFO offline telemetry buffering
 - Automatic replay of offline telemetry
 - Runtime queue cleanup
+- Upload acknowledgement tracking
+- Multi-record batch recovery after connectivity restoration
 - Motion-aware reporting scheduler
-- Production device identity
-- Backend provisioning compatibility
-
-The long-term objective is to provide a reusable embedded platform capable of supporting multiple ORBI hardware profiles while maintaining a consistent backend interface across all deployments.
+- Persistent device identity stored in internal flash
+- Backend inventory and provisioning compatibility
+  The long-term objective is to provide a reusable embedded platform capable of supporting multiple ORBI hardware profiles while maintaining a consistent backend interface across all deployments.
 
 # ORBI Firmware Architecture
 
@@ -271,8 +273,39 @@ Responsibilities include:
 - Heartbeats
 - Backend uploads
 - Network diagnostics
+- Offline queue replay
+- Batch telemetry uploads
 
 The networking layer is intentionally isolated from sensor drivers so communication protocols can evolve independently.
+
+The communication architecture is intentionally divided into two independent layers.
+
+HTTP / GNSS Protocol Layer
+│
+▼
+Generic Modem Transport
+│
+▼
+UART Driver
+
+The modem transport layer is responsible only for reliable UART communication with the modem.
+
+Its responsibilities are intentionally limited to:
+
+- Sending AT commands
+- Detecting when modem response data is available
+- Reading available UART data
+
+The transport layer does **not** understand HTTP or GNSS behaviour.
+
+Protocol-specific logic remains within the higher-level modules.
+
+For example:
+
+- The HTTP module is responsible for waiting for asynchronous `+HTTPACTION` responses, validating HTTP status codes, and determining upload success.
+- The GNSS module is responsible for parsing `+CGNSSINFO` responses into normalized position measurements.
+
+This separation keeps the modem driver reusable while allowing individual protocols to evolve independently.
 
 ---
 
@@ -852,43 +885,47 @@ Once initialization has completed, the firmware enters a continuous telemetry lo
 
 Each iteration performs the following sequence.
 
-```text
 Read GNSS Position
-        │
-        ▼
+│
+▼
 Build TelemetryRecord
-        │
-        ▼
+│
+▼
 Append to ORBIQ.LOG
-        │
-        ▼
+│
+▼
 Flush SD Card
-        │
-        ▼
+│
+▼
+Read Pending Queue
+│
+▼
+Build Telemetry Batch
+│
+▼
 Heartbeat (only when due)
-        │
-        ▼
+│
+▼
 HTTP Upload
-        │
-        ▼
-Upload Successful?
-        │
-      ┌─┴──────────────┐
-      │                │
-     NO               YES
-      │                │
-      ▼                ▼
-Remain in Queue    Append ACK
-                        │
-                        ▼
-             Runtime Queue Cleanup
-                        │
-                        ▼
-            Reporting Scheduler
-                        │
-                        ▼
-         Wait Until Next Reporting Cycle
-```
+│
+┌───────────────┴───────────────┐
+│ │
+HTTP Failed HTTP 2xx
+│ │
+▼ ▼
+Queue Remains Append ACK(s)
+│ │
+▼ ▼
+Retry Later Remove Acknowledged Records
+│
+▼
+Continue Until Queue Empty
+│
+▼
+Reporting Scheduler
+│
+▼
+Wait Until Next Reporting Cycle
 
 ---
 
@@ -992,43 +1029,46 @@ Writing to the SD card always occurs before any network activity.
 
 ## Successful Upload
 
-When the backend successfully accepts telemetry, the firmware performs the following operations.
+When the backend successfully accepts a telemetry batch, the firmware performs the following operations.
 
-```text
-HTTP 200
-        │
-        ▼
-Append ACK to ORBIACK.LOG
-        │
-        ▼
-Remove acknowledged record from ORBIQ.LOG
-        │
-        ▼
-Queue ready for next telemetry cycle
-```
+HTTP 2xx
+│
+▼
+Append one ACK per accepted telemetry record
+│
+▼
+Remove the same number of oldest queued records
+│
+▼
+Repeat until the queue is empty or an upload fails
 
-This guarantees that telemetry is only removed after the backend has confirmed successful receipt.
+Telemetry is never removed from persistent storage until the backend has confirmed successful receipt.
+
+This acknowledgement-based cleanup guarantees that queue contents always remain synchronized with the backend.
 
 ---
 
 ## Failed Upload
 
-If communication fails for any reason, no data is discarded.
+If communication fails for any reason, no telemetry is discarded.
 
-```text
 TelemetryRecord
-        │
-        ▼
+│
+▼
 Stored in ORBIQ.LOG
-        │
-        ▼
-HTTP Upload Fails
-        │
-        ▼
-Record remains queued
-```
+│
+▼
+Batch Upload Attempt
+│
+▼
+Upload Fails
+│
+▼
+Entire Queue Remains Intact
 
-The queued telemetry will be replayed automatically once connectivity is restored.
+No acknowledgements are written and no queued records are removed.
+
+The complete queue is retried automatically once connectivity has been restored.
 
 ---
 
@@ -1038,24 +1078,32 @@ During startup, the firmware checks whether queued telemetry exists.
 
 If queued records are found, they are processed before live telemetry begins.
 
-```text
 Boot
-    │
-    ▼
-Replay Queue
-    │
-    ▼
-Backend Upload
-    │
-    ▼
-ACK Received
-    │
-    ▼
-Remove Queue Record
-    │
-    ▼
-Repeat Until Queue Empty
-```
+│
+▼
+Read Pending Queue
+│
+▼
+Build Telemetry Batch
+│
+▼
+Upload Batch
+│
+▼
+HTTP 2xx?
+│
+┌──┴─────────────┐
+│ │
+NO YES
+│ │
+▼ ▼
+Stop Replay ACK Accepted Records
+│
+▼
+Remove Acknowledged Records
+│
+▼
+Continue Until Queue Empty
 
 This prevents telemetry generated during previous offline periods from being lost.
 
@@ -1070,6 +1118,46 @@ If so, it is removed without waiting for the next reboot.
 This keeps the queue small during normal operation and significantly reduces startup replay time.
 
 ---
+
+## Verified Offline Recovery
+
+The offline-first telemetry architecture has been validated on physical ORBI hardware.
+
+The verified recovery sequence is:
+
+LTE Connectivity Lost
+│
+▼
+Telemetry Continues
+│
+▼
+Records Persisted to ORBIQ.LOG
+│
+▼
+Multiple Records Accumulate
+│
+▼
+Connectivity Restored
+│
+▼
+Queued Records Uploaded in a Single HTTP Batch
+│
+▼
+Backend Confirms Batch Reception
+│
+▼
+One ACK Written Per Record
+│
+▼
+Acknowledged Records Removed
+│
+▼
+Queue Empty
+│
+▼
+Normal Live Publishing Resumes
+
+This behaviour has been successfully verified during hardware testing and confirms the firmware's persistent-first, at-least-once delivery model.
 
 ## Delivery Guarantee
 
@@ -1297,9 +1385,12 @@ The firmware currently guarantees:
 
 - Persistent-first telemetry storage
 - FIFO queue ordering
-- Automatic replay
-- ACK verification
-- Runtime acknowledgement processing
+- Automatic offline replay
+- Multi-record batch recovery
+- Per-record acknowledgement tracking
+- Runtime queue cleanup
+- Boot-time queue replay
+- Queue deletion only after successful backend acknowledgement
 - At-least-once telemetry delivery
 
 ---
@@ -1336,13 +1427,17 @@ These logs have been extensively used to validate firmware behaviour during deve
 
 The firmware has been successfully integrated with the ORBI backend, including:
 
-- Device registration
-- Telemetry ingestion
-- Persistent storage
-- ACK responses
+- Device provisioning
+- Persistent device identity
+- Batch telemetry ingestion
+- Backend acknowledgement processing
 - Queue replay validation
+- Offline recovery validation
+- End-to-end telemetry persistence
 
-This confirms end-to-end communication between the embedded device and the ORBI Platform.
+Physical hardware testing has confirmed that queued telemetry survives communication outages, is replayed in FIFO order after connectivity is restored, and is removed from persistent storage only after successful backend acknowledgement.
+
+This validates the complete telemetry path between the embedded firmware and the ORBI Sensor Intelligence Platform.
 
 # Firmware v0.2.0 Milestone
 
@@ -1370,7 +1465,10 @@ Successfully implemented:
 - SIM management
 - Network registration
 - Packet data attachment
-- HTTP telemetry transmission
+- HTTP batch telemetry transmission
+- Separation of modem transport from HTTP protocol handling
+- Asynchronous `+HTTPACTION` polling
+- HTTP status validation before acknowledgement
 - Backend acknowledgement handling
 
 ---
@@ -1389,38 +1487,57 @@ Successfully integrated:
 
 ### Persistent Telemetry
 
-Implemented a complete persistent telemetry pipeline:
+Implemented a complete persistent-first telemetry pipeline:
 
-```text
 Telemetry Generated
-        │
-        ▼
-Persist to SD Card
-        │
-        ▼
-Attempt Upload
-        │
-        ▼
-Backend ACK
-        │
-        ▼
-Runtime Queue Cleanup
-```
+│
+▼
+Persist to ORBIQ.LOG
+│
+▼
+Build Recovery Batch
+│
+▼
+HTTP Upload
+│
+▼
+HTTP 2xx Received
+│
+▼
+Append ACK(s)
+│
+▼
+Remove Acknowledged Queue Records
 
-This ensures telemetry is never discarded before successful backend acknowledgement.
+This guarantees that telemetry is written to persistent storage before network transmission and removed only after successful backend acknowledgement.
 
 ---
 
-### Offline Recovery
+### Persistent Telemetry
 
-The firmware now survives:
+Implemented a complete persistent-first telemetry pipeline:
 
-- LTE outages
-- Backend downtime
-- Device resets
-- Unexpected power loss
+Telemetry Generated
+│
+▼
+Persist to ORBIQ.LOG
+│
+▼
+Build Recovery Batch
+│
+▼
+HTTP Upload
+│
+▼
+HTTP 2xx Received
+│
+▼
+Append ACK(s)
+│
+▼
+Remove Acknowledged Queue Records
 
-Pending telemetry is replayed automatically when connectivity returns.
+This guarantees that telemetry is written to persistent storage before network transmission and removed only after successful backend acknowledgement.
 
 ---
 
@@ -1450,15 +1567,19 @@ The firmware now operates as an integrated component of the wider ORBI Platform 
 
 ## Development Status
 
-At the completion of Version **0.2.0**, the following foundation has been established:
+At the completion of Version **0.2.0**, the firmware has established a production-ready telemetry foundation comprising:
 
-- Reliable communication
-- Reliable storage
-- Reliable replay
-- Reliable scheduling
-- Reliable backend integration
+- Reliable modem communication
+- Modular transport/protocol architecture
+- Persistent-first telemetry storage
+- FIFO replay and queue management
+- Batch telemetry recovery
+- Runtime acknowledgement processing
+- Motion-aware scheduling
+- Persistent device identity
+- End-to-end backend integration
 
-With these core capabilities complete, subsequent development can focus on expanding hardware support without redesigning the communication architecture.
+These capabilities have been validated through physical hardware testing and now provide a stable platform for expanding hardware support without redesigning the communication architecture.
 
 ---
 
@@ -1510,64 +1631,87 @@ This phase provides the foundation for all future sensor integrations.
 
 ---
 
-# Phase 2 — Sensor Measurement Layer
+# Phase 2 — Sensor Abstraction Layer
 
-The next milestone introduces a unified sensor framework.
+With the communication and reliability foundation complete, the next milestone is the introduction of the Sensor Abstraction Layer.
 
-Rather than writing firmware for individual devices, ORBI Firmware will expose a common sensor interface that allows different sensor technologies to be integrated consistently.
+The objective is to standardize how physical sensors integrate with the firmware while keeping the telemetry pipeline unchanged.
 
-Current implementation:
+Current measurements already supported include:
 
-- GPS measurements
-- MPU6050 IMU measurements
-- Unified telemetry generation for GPS and IMU
+- GNSS
+- MPU6050 Accelerometer
+- MPU6050 Gyroscope
+- MPU6050 Temperature
+
+The Sensor Abstraction Layer will introduce common interfaces for:
+
+- Sensor registration
+- Sensor initialization
+- Sensor polling
+- Sensor health monitoring
+- Sensor diagnostics
+- Measurement normalization
+- Unified telemetry generation
+
+Each sensor driver will become responsible only for acquiring measurements from its hardware.
+
+The telemetry subsystem will remain responsible for building a single normalized telemetry payload regardless of which sensors are installed on a device.
+
+This architecture will allow future hardware profiles to be created by combining sensor drivers rather than maintaining separate firmware projects.
+
+---
+
+# Phase 3 — RS485 / Modbus Integration
+
+Following the Sensor Abstraction Layer, the first production sensor integration will be the KUM ultrasonic fuel sensor.
 
 Planned capabilities include:
 
-- Sensor registration
-- Sensor discovery
-- Sensor polling
-- Sensor health monitoring
-- Sensor configuration
-- Standardized telemetry generation
-
-The objective is to ensure that new sensors can be added with minimal impact on the existing firmware architecture.
-
----
-
-# Phase 3 — Fuel Intelligence
-
-The first production sensor integration will focus on fuel monitoring.
-
-Planned functionality includes:
-
-- RS485 / Modbus communication
-- Ultrasonic fuel sensors
+- Generic RS485 transport
+- Modbus RTU communication
+- Configurable device profiles
+- Register-based measurement acquisition
 - Fuel level normalization
-- Sensor calibration
-- Tank profile support
-- Diagnostic monitoring
-- Multi-vendor device profiles
+- Tank calibration support
+- Sensor diagnostics
+- Multi-vendor register mapping
 
-This phase enables reliable fuel telemetry while supporting different sensor manufacturers through configurable register mappings.
+The implementation will follow the established firmware architecture:
+
+RS485 Driver
+│
+▼
+Modbus Client
+│
+▼
+KUM Device Profile
+│
+▼
+Normalized Fuel Measurement
+│
+▼
+Telemetry Builder
+
+The objective is to support additional Modbus-based sensors in the future without changing the telemetry pipeline.
 
 ---
 
-# Phase 4 — Vehicle Intelligence
+# Phase 4 — Vehicle Interface Expansion
 
-Following fuel integration, the firmware will expand to additional vehicle telemetry.
+Once RS485 sensor support has been established, the firmware will expand to additional vehicle interfaces.
 
 Planned integrations include:
 
-- Ignition detection
+- Ignition sensing
 - Digital inputs
-- Relay outputs
-- Engine status
+- Digital outputs
+- Relay / Kill Switch control
 - Battery voltage monitoring
 - CAN bus interfaces
 - Driver identification
 
-These capabilities will extend ORBI Firmware into a comprehensive fleet telemetry platform.
+These capabilities will extend the firmware beyond telemetry collection while maintaining the same modular architecture.
 
 ---
 
