@@ -3,7 +3,7 @@ use esp_println::println;
 
 use crate::{
     drivers::{gnss::GpsInfo, vibration::ImuData, Modem},
-    network::{heartbeat, http},
+    network::http,
     storage::RecordStorage,
     telemetry::{payload, record::TelemetryRecord},
 };
@@ -258,7 +258,6 @@ pub fn publish_live_fix<S>(
     gps_info: &GpsInfo,
     imu_data: &ImuData,
     mut storage: Option<&mut S>,
-    send_heartbeat: bool,
 ) -> bool
 where
     S: RecordStorage,
@@ -350,24 +349,19 @@ where
         }
     };
 
-    let heartbeat_success = if send_heartbeat {
-        let heartbeat_payload =
-            heartbeat::build_heartbeat_payload(device_code, gps_info.timestamp.as_str());
-
-        http::send_heartbeat(modem, delay, &heartbeat_payload)
-    } else {
-        println!("Heartbeat not due. Telemetry publishing may confirm device activity.");
-
-        false
-    };
-
     let telemetry_upload_success = if telemetry_persisted {
         flush_queue(modem, delay, storage.as_deref_mut())
     } else {
-        println!("Queue publishing skipped because the live record was not persisted.");
+        println!("========================");
+        println!("DIRECT LIVE TELEMETRY FALLBACK");
+        println!("========================");
+        println!("SD persistence unavailable.");
+        println!("Attempting direct telemetry upload.");
 
-        false
+        let live_payload = payload::build_telemetry_payload(&live_reading);
+
+        http::send_payload(modem, delay, &live_payload)
     };
 
-    telemetry_upload_success || heartbeat_success
+    telemetry_upload_success
 }

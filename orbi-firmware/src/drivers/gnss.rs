@@ -127,8 +127,11 @@ pub fn parse_cgnssinfo_response(buffer: &[u8]) -> Option<GpsInfo> {
     let response = core::str::from_utf8(buffer).ok()?;
 
     /*
-     * Find the actual result line while ignoring command echo, OK and
-     * other modem output.
+     * Find the actual GNSS result line while ignoring:
+     *
+     * - command echo
+     * - OK
+     * - unrelated modem output
      */
     let gnss_line = response
         .lines()
@@ -137,12 +140,13 @@ pub fn parse_cgnssinfo_response(buffer: &[u8]) -> Option<GpsInfo> {
     let data = gnss_line.split_once(':')?.1.trim();
 
     /*
-     * A response containing no fix may look like:
+     * A response without a GNSS fix may look like:
      *
      * +CGNSSINFO:,,,,,,,,,,,,,,,
      */
     if data.is_empty() {
         println!("GNSS response contains no navigation data.");
+
         return None;
     }
 
@@ -152,44 +156,32 @@ pub fn parse_cgnssinfo_response(buffer: &[u8]) -> Option<GpsInfo> {
         fields.push(field.trim()).ok()?;
     }
 
-    /*
-     * The navigation portion always occupies the final twelve fields:
-     *
-     * latitude
-     * hemisphere
-     * longitude
-     * hemisphere
-     * date
-     * time
-     * altitude
-     * speed
-     * course
-     * PDOP
-     * HDOP
-     * VDOP
-     *
-     * The number of constellation/satellite fields before this section
-     * can differ between A76XX firmware variants.
-     */
-    const NAVIGATION_FIELD_COUNT: usize = 12;
-
-    if fields.len() < NAVIGATION_FIELD_COUNT + 1 {
-        println!(
-            "GNSS response contains {} fields, which is too few.",
-            fields.len()
-        );
+    if fields.is_empty() {
+        println!("GNSS response contains no fields.");
 
         return None;
     }
 
+    /*
+     * The first field remains the GNSS fix mode.
+     */
     let fix_mode_text = fields[0];
 
     if fix_mode_text.is_empty() {
         println!("GNSS fix mode is missing.");
+
         return None;
     }
 
-    let fix_mode = fix_mode_text.parse::<u8>().ok()?;
+    let fix_mode = match fix_mode_text.parse::<u8>() {
+        Ok(value) => value,
+
+        Err(_) => {
+            println!("Could not parse GNSS fix mode. Value: '{}'", fix_mode_text);
+
+            return None;
+        }
+    };
 
     /*
      * According to the modem format:
@@ -204,7 +196,88 @@ pub fn parse_cgnssinfo_response(buffer: &[u8]) -> Option<GpsInfo> {
         return None;
     }
 
-    let navigation_start = fields.len() - NAVIGATION_FIELD_COUNT;
+    /*
+     * Do not calculate the navigation start from the end of the response.
+     *
+     * A76XX modem firmware variants may append extra satellite fields or
+     * leave optional fields empty.
+     *
+     * Instead, locate the navigation block structurally:
+     *
+     * latitude
+     * N/S
+     * longitude
+     * E/W
+     * date
+     * time
+     */
+    let mut navigation_start: Option<usize> = None;
+
+    if fields.len() >= 6 {
+        for index in 1..=(fields.len() - 6) {
+            let latitude_value = fields[index];
+            let latitude_hemisphere = fields[index + 1];
+
+            let longitude_value = fields[index + 2];
+            let longitude_hemisphere = fields[index + 3];
+
+            let date = fields[index + 4];
+            let time = fields[index + 5];
+
+            let latitude_is_numeric = latitude_value.parse::<f64>().is_ok();
+
+            let longitude_is_numeric = longitude_value.parse::<f64>().is_ok();
+
+            let latitude_hemisphere_is_valid =
+                latitude_hemisphere == "N" || latitude_hemisphere == "S";
+
+            let longitude_hemisphere_is_valid =
+                longitude_hemisphere == "E" || longitude_hemisphere == "W";
+
+            let date_looks_valid =
+                date.len() == 6 && date.as_bytes().iter().all(|byte| byte.is_ascii_digit());
+
+            let time_looks_valid = time.len() >= 6;
+
+            if latitude_is_numeric
+                && longitude_is_numeric
+                && latitude_hemisphere_is_valid
+                && longitude_hemisphere_is_valid
+                && date_looks_valid
+                && time_looks_valid
+            {
+                navigation_start = Some(index);
+
+                break;
+            }
+        }
+    }
+
+    let navigation_start = match navigation_start {
+        Some(index) => index,
+
+        None => {
+            println!("Could not locate the GNSS navigation field sequence.");
+
+            return None;
+        }
+    };
+
+    /*
+     * The navigation block requires twelve fields beginning at the
+     * detected latitude position.
+     *
+     * Extra fields after VDOP are ignored.
+     */
+    if navigation_start + 11 >= fields.len() {
+        println!(
+            "GNSS navigation block is incomplete. Start index: {}, total fields: {}",
+            navigation_start,
+            fields.len()
+        );
+
+        return None;
+    }
 
     let latitude_value = fields[navigation_start];
 
@@ -231,39 +304,38 @@ pub fn parse_cgnssinfo_response(buffer: &[u8]) -> Option<GpsInfo> {
     let vdop_text = fields[navigation_start + 11];
 
     /*
-     * Do not silently convert malformed navigation values to zero.
-     *
-     * Previously, `unwrap_or(0.0)` could turn a parsing problem into a
-     * false PARKED state and therefore select the 30-second cadence.
-     */
-    /*
-     * AT+CGNSSINFO returns latitude and longitude as decimal degrees.
-     *
-     * Example:
-     *
-     * 51.8776665,N
-     * 0.4293312,W
-     *
-     * These values must not be passed through the NMEA degrees/minutes
-     * conversion used by AT+CGPSINFO.
+     * Latitude, longitude and timestamp are required because they define
+     * the actual position and recording time.
      */
     let latitude = parse_decimal_latitude(latitude_value, latitude_hemisphere)?;
 
     let longitude = parse_decimal_longitude(longitude_value, longitude_hemisphere)?;
 
-    let altitude_metres = parse_required_f64("altitude", altitude_text)?;
-
-    let speed = parse_required_f64("speed", speed_text)?;
-
-    let heading = parse_required_f64("heading", heading_text)?;
-
-    let pdop = parse_required_f64("PDOP", pdop_text)?;
-
-    let hdop = parse_required_f64("HDOP", hdop_text)?;
-
-    let vdop = parse_required_f64("VDOP", vdop_text)?;
-
     let timestamp = build_iso_timestamp(date, time)?;
+
+    /*
+     * The modem may legitimately leave these fields empty.
+     *
+     * Examples:
+     *
+     * - speed may be empty while stationary
+     * - heading may be empty before a course has been established
+     * - altitude may be unavailable during a 2D fix
+     *
+     * Empty optional fields therefore use zero, while malformed non-empty
+     * fields are still rejected.
+     */
+    let altitude_metres = parse_optional_f64("altitude", altitude_text, 0.0)?;
+
+    let speed = parse_optional_f64("speed", speed_text, 0.0)?;
+
+    let heading = parse_optional_f64("heading", heading_text, 0.0)?;
+
+    let pdop = parse_optional_f64("PDOP", pdop_text, 0.0)?;
+
+    let hdop = parse_optional_f64("HDOP", hdop_text, 0.0)?;
+
+    let vdop = parse_optional_f64("VDOP", vdop_text, 0.0)?;
 
     Some(GpsInfo {
         fix_mode,
@@ -284,6 +356,30 @@ fn parse_required_f64(field_name: &str, field_value: &str) -> Option<f64> {
         println!("GNSS field '{}' is empty.", field_name);
 
         return None;
+    }
+
+    match field_value.parse::<f64>() {
+        Ok(value) => Some(value),
+
+        Err(_) => {
+            println!(
+                "Could not parse GNSS field '{}'. Value: '{}'",
+                field_name, field_value
+            );
+
+            None
+        }
+    }
+}
+
+fn parse_optional_f64(field_name: &str, field_value: &str, default_value: f64) -> Option<f64> {
+    if field_value.is_empty() {
+        println!(
+            "GNSS optional field '{}' is empty. Using default value: {}",
+            field_name, default_value
+        );
+
+        return Some(default_value);
     }
 
     match field_value.parse::<f64>() {

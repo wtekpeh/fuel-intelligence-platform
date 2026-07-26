@@ -92,7 +92,6 @@ pub struct FuelEventResponse {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct HeartbeatRequest {
     pub device_id: String,
-    pub timestamp: DateTime<Utc>,
 }
 
 #[derive(Debug, Serialize)]

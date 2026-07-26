@@ -205,9 +205,13 @@ fn main() -> ! {
     let mut last_report_time = Instant::now();
 
     /*
-     * This tracks the last successful communication with the backend.
+     * Heartbeat scheduling is independent of GNSS, IMU measurements,
+     * telemetry reporting and persistent storage.
+     *
+     * The boolean causes one heartbeat attempt immediately after startup.
      */
-    let mut last_successful_cloud_contact = Instant::now();
+    let mut heartbeat_attempted_once = false;
+    let mut last_heartbeat_attempt = Instant::now();
 
     /*
      * This tracks when network diagnostics were last performed.
@@ -215,6 +219,50 @@ fn main() -> ! {
     let mut last_network_diagnostics = Instant::now();
 
     loop {
+        /*
+         * Heartbeat is evaluated before GNSS acquisition.
+         *
+         * It therefore remains available when:
+         *
+         * - no GNSS fix is available;
+         * - the MPU6050 cannot be read;
+         * - SD storage is unavailable;
+         * - no telemetry report is due.
+         */
+        let heartbeat_due = !heartbeat_attempted_once
+            || last_heartbeat_attempt.elapsed().as_secs() >= HEARTBEAT_INTERVAL_SECONDS;
+
+        if heartbeat_due {
+            println!("========================");
+            println!("ORBI INDEPENDENT HEARTBEAT");
+            println!("========================");
+
+            let heartbeat_payload =
+                network::heartbeat::build_heartbeat_payload(runtime_identity.device_code());
+
+            let heartbeat_succeeded =
+                network::http::send_heartbeat(&mut modem, &delay, &heartbeat_payload);
+
+            /*
+             * Record the attempt regardless of success.
+             *
+             * This prevents a network failure from causing another blocking
+             * heartbeat request every one-second loop cycle.
+             */
+            heartbeat_attempted_once = true;
+            last_heartbeat_attempt = Instant::now();
+
+            if heartbeat_succeeded {
+                println!("Independent heartbeat succeeded.");
+            } else {
+                println!("Independent heartbeat failed.");
+                println!(
+                    "The next heartbeat attempt will occur in {} seconds.",
+                    HEARTBEAT_INTERVAL_SECONDS
+                );
+            }
+        }
+
         println!("========================");
         println!("GNSS SAMPLE CYCLE START");
         println!("========================");
@@ -261,13 +309,6 @@ fn main() -> ! {
             let reporting_due =
                 last_report_time.elapsed().as_secs() >= reporting_interval_seconds as u64;
 
-            /*
-             * Heartbeat traffic must still be sent even when the
-             * normal telemetry report is not due.
-             */
-            let heartbeat_due =
-                last_successful_cloud_contact.elapsed().as_secs() >= HEARTBEAT_INTERVAL_SECONDS;
-
             println!("========================");
             println!("GNSS MOTION DECISION");
             println!("========================");
@@ -277,7 +318,6 @@ fn main() -> ! {
             println!("New State: {:?}", new_motion_state);
             println!("State Changed: {}", motion_state_changed);
             println!("Reporting Due: {}", reporting_due);
-            println!("Heartbeat Due: {}", heartbeat_due);
             println!(
                 "Selected Reporting Interval: {} seconds",
                 reporting_interval_seconds
@@ -324,34 +364,50 @@ fn main() -> ! {
              * 2. The adaptive reporting interval elapsed.
              * 3. A heartbeat is due.
              */
-            let should_publish = motion_state_changed || reporting_due || heartbeat_due;
+            let should_publish = motion_state_changed || reporting_due;
 
             if should_publish {
                 if motion_state_changed {
                     println!("Publishing immediately because motion state changed.");
-                } else if heartbeat_due {
-                    println!("Publishing because heartbeat is due.");
                 } else {
                     println!("Publishing because reporting interval elapsed.");
                 }
 
                 let imu_data = drivers::vibration::read_imu_data(&mut i2c);
 
-                let cloud_contact_succeeded = if let Some(imu_data) = imu_data {
-                    telemetry::publisher::publish_live_fix(
-                        &mut modem,
-                        &delay,
-                        runtime_identity.device_code(),
-                        &gps_info,
-                        &imu_data,
-                        persistent_storage.as_mut(),
-                        heartbeat_due,
-                    )
-                } else {
-                    println!("Skipping telemetry publish because MPU6050 measurement could not be obtained.");
+                let imu_data = match imu_data {
+                    Some(data) => {
+                        println!("MPU6050 measurement obtained.");
 
-                    false
+                        data
+                    }
+
+                    None => {
+                        println!("WARNING: MPU6050 measurement unavailable.");
+                        println!("Publishing GPS telemetry using default IMU values.");
+
+                        drivers::vibration::ImuData {
+                            accel_x_g: 0.0,
+                            accel_y_g: 0.0,
+                            accel_z_g: 0.0,
+
+                            gyro_x_dps: 0.0,
+                            gyro_y_dps: 0.0,
+                            gyro_z_dps: 0.0,
+
+                            temperature_c: 0.0,
+                        }
+                    }
                 };
+
+                let cloud_contact_succeeded = telemetry::publisher::publish_live_fix(
+                    &mut modem,
+                    &delay,
+                    runtime_identity.device_code(),
+                    &gps_info,
+                    &imu_data,
+                    persistent_storage.as_mut(),
+                );
 
                 /*
                  * Record the attempt time whether the live upload
@@ -363,8 +419,6 @@ fn main() -> ! {
                 last_report_time = Instant::now();
 
                 if cloud_contact_succeeded {
-                    last_successful_cloud_contact = Instant::now();
-
                     println!("Cloud telemetry publish succeeded.");
                 } else {
                     println!("========================");

@@ -1,18 +1,11 @@
+use core::fmt::Write;
 use heapless::String;
 
-pub fn build_heartbeat_payload(device_code: &str, timestamp: &str) -> String<256> {
+pub fn build_heartbeat_payload(device_id: &str) -> String<256> {
     let mut payload = String::<256>::new();
 
-    let _ = core::fmt::write(
-        &mut payload,
-        format_args!(
-            "{{\
-                \"device_id\":\"{}\",\
-                \"timestamp\":\"{}\"\
-            }}",
-            device_code, timestamp,
-        ),
-    );
+    write!(payload, "{{\"device_id\":\"{}\"}}", device_id)
+        .expect("Heartbeat payload buffer is too small");
 
     payload
 }
