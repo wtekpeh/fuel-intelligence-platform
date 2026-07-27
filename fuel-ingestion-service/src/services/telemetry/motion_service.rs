@@ -15,6 +15,7 @@ use crate::services::device_state::{
 };
 use crate::services::operational_behaviour::determine_operational_transition;
 use crate::services::operational_intelligence::interpret_operational_transition;
+use crate::services::operational_state_engine::confirm_operational_state;
 
 /// Processes shared ORBI motion and operational intelligence.
 ///
@@ -96,17 +97,33 @@ pub async fn process_motion_intelligence(
         .await?
         .map(|state| DeviceOperationalState::from_str(&state));
 
+    let state_decision = confirm_operational_state(
+        db_pool,
+        device_id,
+        previous_state.clone(),
+        motion_device_state.clone(),
+        reading.timestamp,
+    )
+    .await?;
+
+    let confirmed_device_state = state_decision.confirmed_state;
+    let state_changed = state_decision.transition_confirmed;
+
+    println!(
+        "[STATE ENGINE] device_id={}, previous_state={}, classified_state={}, \
+        confirmed_state={}, transition_confirmed={}",
+        device_id,
+        previous_state
+            .as_ref()
+            .map(DeviceOperationalState::as_str)
+            .unwrap_or("NONE"),
+        motion_device_state.as_str(),
+        confirmed_device_state.as_str(),
+        state_changed,
+    );
+
     let operational_transition =
-        determine_operational_transition(previous_state.as_ref(), &motion_device_state);
-
-    let previous_state = get_latest_device_state(db_pool, device_id)
-        .await?
-        .map(|state| DeviceOperationalState::from_str(&state));
-
-    let state_changed = previous_state.as_ref() != Some(&motion_device_state);
-
-    let operational_transition =
-        determine_operational_transition(previous_state.as_ref(), &motion_device_state);
+        determine_operational_transition(previous_state.as_ref(), &confirmed_device_state);
 
     if operational_transition.occurred()
         && let Some(previous_state) = previous_state.as_ref()
@@ -115,7 +132,7 @@ pub async fn process_motion_intelligence(
             device_id,
 
             previous_state: previous_state.as_str().to_string(),
-            current_state: motion_device_state.as_str().to_string(),
+            current_state: confirmed_device_state.as_str().to_string(),
             transition: operational_transition.as_str().to_string(),
 
             latitude: Some(reading.latitude),
@@ -142,7 +159,7 @@ pub async fn process_motion_intelligence(
                     event_type: intelligence_event.as_str().to_string(),
 
                     previous_state: Some(previous_state.as_str().to_string()),
-                    current_state: Some(motion_device_state.as_str().to_string()),
+                    current_state: Some(confirmed_device_state.as_str().to_string()),
 
                     latitude: Some(reading.latitude),
                     longitude: Some(reading.longitude),
@@ -172,10 +189,11 @@ pub async fn process_motion_intelligence(
         );
     }
 
-    // Persist only meaningful state changes.
+    // Persist only confirmed state changes.
     //
-    // Every telemetry reading is still classified, but repeated classifications
-    // such as MOVING → MOVING are not written as additional device-state events.
+    // Every telemetry reading is classified, but a different classified state
+    // must be observed consecutively before the state engine confirms it.
+    //
     // Raw telemetry remains available through sensor_readings and telemetry replay.
     if state_changed {
         repository::create_device_state_event(
@@ -187,7 +205,7 @@ pub async fn process_motion_intelligence(
                 // capability, not from the optional fuel sensor.
                 sensor_id: Some(vibration_sensor_id),
 
-                state: motion_device_state.as_str().to_string(),
+                state: confirmed_device_state.as_str().to_string(),
 
                 recorded_at: reading.timestamp,
 
@@ -203,8 +221,9 @@ pub async fn process_motion_intelligence(
                 source: "telemetry".to_string(),
 
                 message: Some(format!(
-                    "Device state changed to {:?}. Vibration score: {:.2}, \
-                movement confidence: {:.2}",
+                    "Device state confirmed as {:?}. Classified state: {:?}. \
+                    Vibration score: {:.2}, movement confidence: {:.2}",
+                    confirmed_device_state,
                     motion_device_state,
                     imu_interpretation.vibration_score,
                     imu_interpretation.movement_confidence,
@@ -214,19 +233,29 @@ pub async fn process_motion_intelligence(
         .await?;
 
         println!(
-            "[DEVICE STATE EVENT] device_id={}, previous_state={}, current_state={}",
+            "[DEVICE STATE EVENT] device_id={}, previous_state={}, \
+            classified_state={}, confirmed_state={}",
             device_id,
             previous_state
                 .as_ref()
                 .map(DeviceOperationalState::as_str)
                 .unwrap_or("NONE"),
             motion_device_state.as_str(),
+            confirmed_device_state.as_str(),
+        );
+    } else if motion_device_state != confirmed_device_state {
+        println!(
+            "[DEVICE STATE PENDING] device_id={}, classified_state={}, \
+            confirmed_state={}, event_not_persisted=true",
+            device_id,
+            motion_device_state.as_str(),
+            confirmed_device_state.as_str(),
         );
     } else {
         println!(
             "[DEVICE STATE UNCHANGED] device_id={}, state={}, event_not_persisted=true",
             device_id,
-            motion_device_state.as_str(),
+            confirmed_device_state.as_str(),
         );
     }
 

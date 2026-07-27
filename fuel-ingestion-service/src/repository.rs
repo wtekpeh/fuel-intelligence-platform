@@ -103,6 +103,15 @@ pub struct StoredTelemetryPosition {
     pub longitude: f64,
 }
 
+#[derive(Debug, Clone)]
+pub struct StoredOperationalStateCandidate {
+    pub device_id: Uuid,
+    pub candidate_state: String,
+    pub observation_count: i32,
+    pub first_observed_at: DateTime<Utc>,
+    pub last_observed_at: DateTime<Utc>,
+}
+
 #[derive(Debug)]
 pub struct RegisteredTelemetryContext {
     pub device_id: Uuid,
@@ -126,6 +135,90 @@ pub async fn get_latest_device_state(db_pool: &PgPool, device_id: Uuid) -> Resul
     .await?;
 
     Ok(row.map(|row| row.state))
+}
+
+pub async fn get_operational_state_candidate(
+    db_pool: &PgPool,
+    device_id: Uuid,
+) -> Result<Option<StoredOperationalStateCandidate>> {
+    let row = sqlx::query!(
+        r#"
+        SELECT
+            device_id,
+            candidate_state,
+            observation_count,
+            first_observed_at,
+            last_observed_at
+        FROM device_operational_state_candidates
+        WHERE device_id = $1
+        "#,
+        device_id
+    )
+    .fetch_optional(db_pool)
+    .await?;
+
+    Ok(row.map(|row| StoredOperationalStateCandidate {
+        device_id: row.device_id,
+        candidate_state: row.candidate_state,
+        observation_count: row.observation_count,
+        first_observed_at: row.first_observed_at,
+        last_observed_at: row.last_observed_at,
+    }))
+}
+
+pub async fn upsert_operational_state_candidate(
+    db_pool: &PgPool,
+    device_id: Uuid,
+    candidate_state: &str,
+    observation_count: i32,
+    first_observed_at: DateTime<Utc>,
+    last_observed_at: DateTime<Utc>,
+) -> Result<()> {
+    sqlx::query!(
+        r#"
+        INSERT INTO device_operational_state_candidates (
+            device_id,
+            candidate_state,
+            observation_count,
+            first_observed_at,
+            last_observed_at
+        )
+        VALUES (
+            $1, $2, $3, $4, $5
+        )
+        ON CONFLICT (device_id)
+        DO UPDATE
+        SET
+            candidate_state = EXCLUDED.candidate_state,
+            observation_count = EXCLUDED.observation_count,
+            first_observed_at = EXCLUDED.first_observed_at,
+            last_observed_at = EXCLUDED.last_observed_at,
+            updated_at = NOW()
+        "#,
+        device_id,
+        candidate_state,
+        observation_count,
+        first_observed_at,
+        last_observed_at,
+    )
+    .execute(db_pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn delete_operational_state_candidate(db_pool: &PgPool, device_id: Uuid) -> Result<()> {
+    sqlx::query!(
+        r#"
+        DELETE FROM device_operational_state_candidates
+        WHERE device_id = $1
+        "#,
+        device_id
+    )
+    .execute(db_pool)
+    .await?;
+
+    Ok(())
 }
 
 // -----------------------------------------------------------------------------
