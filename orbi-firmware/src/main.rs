@@ -53,6 +53,17 @@ fn main() -> ! {
         FIRMWARE_IDENTITY.capabilities.kill_switch,
     );
 
+    let mut board_pins = BoardPins::new(peripherals.GPIO12, peripherals.GPIO5, peripherals.GPIO4);
+
+    /*
+     * Enable the shared LilyGO peripheral power rail before any
+     * peripherals that depend on it are initialized.
+     *
+     * GPIO12 powers both the onboard microSD circuit and the
+     * A7670 modem.
+     */
+    board_pins.enable_peripheral_power(&delay);
+
     let mut persistent_storage = storage::sdcard::initialize(
         peripherals.SPI2,
         peripherals.GPIO2,
@@ -60,8 +71,6 @@ fn main() -> ! {
         peripherals.GPIO14,
         peripherals.GPIO13,
     );
-
-    let mut board_pins = BoardPins::new(peripherals.GPIO12, peripherals.GPIO5, peripherals.GPIO4);
 
     Modem::power_on(
         &mut board_pins.modem_power_on,

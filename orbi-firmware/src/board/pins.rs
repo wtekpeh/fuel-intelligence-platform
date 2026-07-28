@@ -1,5 +1,7 @@
+use esp_hal::delay::Delay;
 use esp_hal::gpio::{Level, Output, OutputConfig};
 use esp_hal::peripherals::{GPIO12, GPIO4, GPIO5};
+use esp_println::println;
 
 pub struct BoardPins<'d> {
     pub modem_power_on: Output<'d>,
@@ -18,5 +20,28 @@ impl<'d> BoardPins<'d> {
             modem_reset,
             modem_pwrkey,
         }
+    }
+
+    /// Enables the shared LilyGO peripheral power rail.
+    ///
+    /// On the T-A7670, GPIO12 supplies power to both:
+    ///
+    /// - the A7670 modem;
+    /// - the onboard microSD card circuit.
+    ///
+    /// This must therefore happen before either the modem or SD card
+    /// is initialized, especially when the board is powered by battery.
+    pub fn enable_peripheral_power(&mut self, delay: &Delay) {
+        println!("GPIO12 HIGH: enabling shared modem and SD power rail...");
+
+        self.modem_power_on.set_high();
+
+        /*
+         * Allow the shared power rail and SD card supply to stabilise
+         * before SPI communication begins.
+         */
+        delay.delay_millis(1_000);
+
+        println!("Shared peripheral power rail is ready.");
     }
 }

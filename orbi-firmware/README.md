@@ -34,7 +34,12 @@ Current firmware capabilities include:
 - Motion-aware reporting scheduler
 - Persistent device identity stored in internal flash
 - Backend inventory and provisioning compatibility
-  The long-term objective is to provide a reusable embedded platform capable of supporting multiple ORBI hardware profiles while maintaining a consistent backend interface across all deployments.
+- Shared board-level peripheral power management
+- Verified SD card initialization during both USB-powered and LiPo-only operation
+- Deterministic hardware initialization sequence
+- Modular board abstraction separating hardware bring-up from device drivers
+
+The long-term objective is to provide a reusable embedded platform capable of supporting multiple ORBI hardware profiles while maintaining a consistent backend interface across all deployments.
 
 # ORBI Firmware Architecture
 
@@ -340,7 +345,7 @@ src/
 
 ### `board/`
 
-Contains board-specific hardware initialization.
+Contains board-specific hardware initialization and platform bring-up.
 
 Responsibilities include:
 
@@ -349,8 +354,24 @@ Responsibilities include:
 - Board configuration
 - Clock setup
 - Hardware abstraction for the target board
+- Shared peripheral power sequencing
+- Runtime board initialization order
+- Board-level GPIO ownership
 
-This layer isolates hardware-specific details from the rest of the firmware.
+The board layer is responsible for preparing the hardware platform before any peripheral drivers are initialized.
+
+This includes enabling shared power rails, configuring board-level GPIO states, and ensuring that hardware dependencies are satisfied before storage, networking, or sensor drivers begin operation.
+
+For the current ORBI reference hardware (LilyGO T-A7670), the board layer owns the shared peripheral power rail controlled by GPIO12.
+
+The shared power rail supplies both:
+
+- MicroSD storage
+- SIMCom A7670E modem
+
+During startup, the board enables this shared rail before SD card initialization to guarantee reliable storage operation during both USB-powered and LiPo-only deployments.
+
+This separation keeps board-specific startup behaviour isolated from individual hardware drivers and provides a clean foundation for supporting future ORBI hardware revisions.
 
 ---
 
@@ -685,37 +706,38 @@ espflash monitor --port COM5
 
 A successful firmware startup should include messages similar to:
 
-```text
 ESP32 Boot
-
-↓
-
+│
+▼
 Board Initialization
+│
+▼
+Enable Shared Peripheral Power (GPIO12)
+│
+▼
+Load Persistent Device Identity
+│
+▼
+Initialize SD Card
+│
+▼
+Initialize LTE Modem
+│
+▼
+Initialize GNSS
+│
+▼
+Register on LTE Network
+│
+▼
+Replay Pending Queue
+│
+▼
+Enter Live Telemetry Loop
 
-↓
+This startup order has been validated on the ORBI reference hardware during both USB-powered and LiPo-only operation.
 
-Modem Initialization
-
-↓
-
-Network Registration
-
-↓
-
-GNSS Initialization
-
-↓
-
-SD Card Mounted
-
-↓
-
-Replay Queue
-
-↓
-
-Live Telemetry Loop
-```
+In particular, enabling the shared peripheral power rail before SD card initialization is required for reliable MicroSD operation on the LilyGO T-A7670 reference platform.
 
 Successful completion of this sequence indicates that the firmware is ready for normal telemetry operation.
 
@@ -729,27 +751,25 @@ The firmware is designed to operate as part of the wider ORBI provisioning platf
 
 Every physical device progresses through the following stages:
 
-```text
 Manufactured
-      │
-      ▼
+│
+▼
 Firmware Programmed
-      │
-      ▼
+│
+▼
 Hardware Tested
-      │
-      ▼
+│
+▼
 Registered in Inventory
-      │
-      ▼
+│
+▼
 Provisioned to Customer
-      │
-      ▼
+│
+▼
 Activated
-      │
-      ▼
+│
+▼
 Operational
-```
 
 Each stage ensures that the device is correctly identified, tested, and associated with the appropriate customer assets before live telemetry is accepted by the backend.
 
@@ -832,50 +852,51 @@ The runtime is divided into two phases:
 
 ---
 
-## Boot Phase
-
-Every power cycle follows the same initialization sequence.
-
-```text
 Power On
-    │
-    ▼
+│
+▼
 Board Initialization
-    │
-    ▼
-Load Device Identity
-    │
-    ▼
+│
+▼
+Enable Shared Peripheral Power Rail (GPIO12)
+│
+▼
+Load Persistent Device Identity
+│
+▼
+Initialize SD Card
+│
+▼
 Initialize LTE Modem
-    │
-    ▼
+│
+▼
 Verify SIM Card
-    │
-    ▼
+│
+▼
 Register on LTE Network
-    │
-    ▼
+│
+▼
 Attach Packet Data
-    │
-    ▼
+│
+▼
 Acquire IP Address
-    │
-    ▼
+│
+▼
 Initialize GNSS
-    │
-    ▼
-Mount SD Card
-    │
-    ▼
+│
+▼
 Replay Pending Queue
-    │
-    ▼
+│
+▼
 Enter Live Operation
-```
 
-The firmware does not begin normal telemetry collection until the replay stage has completed.
+The initialization order is intentional.
 
-This guarantees that previously stored telemetry is transmitted before new telemetry is generated.
+Board-level resources are initialized before any hardware drivers begin operation. This guarantees that shared peripherals receive stable power before driver initialization begins and provides deterministic startup behaviour across both USB-powered and battery-powered deployments.
+
+The firmware mounts persistent storage before modem initialization so that offline telemetry can be safely recovered as early as possible during startup.
+
+Normal telemetry collection does not begin until the replay stage has completed. This guarantees that previously stored telemetry is transmitted before new telemetry is generated, preserving chronological ordering and maintaining the firmware's at-least-once delivery guarantees.
 
 ---
 
@@ -990,6 +1011,52 @@ The SD card provides persistent storage for telemetry, acknowledgements, and que
 Rather than transmitting telemetry directly after acquisition, ORBI Firmware first writes every telemetry record to persistent storage before attempting any network communication.
 
 This design ensures that telemetry is preserved even if connectivity is unavailable or the device unexpectedly resets.
+
+---
+
+## Board-Level Power Dependency
+
+On the current ORBI reference hardware (LilyGO T-A7670), the MicroSD card shares a board-level peripheral power rail with the SIMCom A7670E modem.
+
+This shared power rail is controlled by GPIO12 and is managed exclusively by the board abstraction layer.
+
+The firmware startup sequence therefore performs the following operations before attempting to initialize the SD card:
+
+Board Initialization
+│
+▼
+Enable GPIO12 Shared Peripheral Power
+│
+▼
+Initialize SD Card
+│
+▼
+Initialize LTE Modem
+
+Separating power management from the storage driver keeps the SD subsystem independent of board-specific implementation details.
+
+The SD driver assumes that required hardware resources are already available when initialization begins.
+
+This architecture also allows future ORBI hardware revisions to implement different power-management strategies without requiring changes to the SD card driver itself.
+
+---
+
+## Verified Hardware Behaviour
+
+The storage subsystem has been validated on physical ORBI hardware under multiple operating conditions.
+
+Successful verification includes:
+
+- SD card initialization during USB-powered operation
+- SD card initialization during LiPo-only operation
+- Persistent queue creation
+- Runtime telemetry persistence
+- Boot-time queue replay
+- Queue cleanup after successful backend acknowledgement
+- Offline telemetry buffering
+- Recovery after network restoration
+
+These tests confirm that the persistent storage subsystem behaves consistently regardless of the device power source and forms the reliability foundation of the ORBI firmware.
 
 ---
 
@@ -1513,34 +1580,6 @@ This guarantees that telemetry is written to persistent storage before network t
 
 ---
 
-### Persistent Telemetry
-
-Implemented a complete persistent-first telemetry pipeline:
-
-Telemetry Generated
-│
-▼
-Persist to ORBIQ.LOG
-│
-▼
-Build Recovery Batch
-│
-▼
-HTTP Upload
-│
-▼
-HTTP 2xx Received
-│
-▼
-Append ACK(s)
-│
-▼
-Remove Acknowledged Queue Records
-
-This guarantees that telemetry is written to persistent storage before network transmission and removed only after successful backend acknowledgement.
-
----
-
 ### Scheduler
 
 Completed:
@@ -1608,15 +1647,17 @@ Each phase builds upon the previous one while preserving a stable and production
 
 ---
 
-# Phase 1 — Communication Foundation ✅
+# Phase 1 — Embedded Platform Foundation ✅
 
 Completed in Version 0.2.0.
 
-This phase established the embedded communication platform.
+This phase established the production-ready embedded foundation for ORBI Firmware, including board bring-up, persistent storage, reliable communications, runtime scheduling, provisioning support, and backend integration.
 
 Completed features include:
 
-- ESP32 board support
+- ESP32 board abstraction
+- Shared peripheral power sequencing
+- Persistent runtime device identity
 - LTE communication
 - GNSS integration
 - HTTP telemetry uploads
@@ -1625,6 +1666,7 @@ Completed features include:
 - ACK processing
 - Runtime queue cleanup
 - Motion-aware scheduler
+- Backend provisioning compatibility
 - Backend integration
 
 This phase provides the foundation for all future sensor integrations.
@@ -1748,6 +1790,25 @@ Future work includes:
 
 This phase marks the transition from prototype hardware to dedicated ORBI devices.
 
+# Future Device Management Capabilities
+
+As ORBI devices are deployed into production, the firmware will gradually introduce secure remote management capabilities.
+
+Planned capabilities include:
+
+- Remote modem restart
+- Remote firmware restart
+- Watchdog reset reporting
+- Reset reason reporting
+- Remote diagnostics
+- Device health reporting
+- Command acknowledgement
+- Secure command validation
+- Remote configuration
+- OTA firmware updates (future production hardware)
+
+These capabilities will be introduced incrementally alongside the corresponding firmware subsystems rather than as a single development milestone.
+
 ---
 
 # Guiding Principles
@@ -1770,6 +1831,31 @@ ORBI Firmware is being developed as the embedded foundation of the wider **ORBI 
 The long-term vision extends beyond GPS tracking or fuel monitoring.
 
 The objective is to create a reusable embedded platform capable of connecting physical assets, vehicles, infrastructure, and industrial equipment to a common intelligence platform.
+
+# Version Summary
+
+## Version 0.2.0
+
+The ORBI Firmware project has successfully completed its embedded platform foundation.
+
+Major milestones achieved include:
+
+- Production `no_std` firmware architecture
+- Board abstraction layer
+- Shared peripheral power management
+- Persistent runtime device identity
+- Reliable LTE communication
+- GNSS integration
+- Persistent SD-card telemetry queue
+- Automatic offline replay
+- Backend provisioning compatibility
+- Motion-aware reporting scheduler
+- End-to-end backend integration
+- Physical hardware validation on the ORBI reference platform
+
+With this foundation complete, future development can focus on expanding hardware capability through the Sensor Abstraction Layer rather than redesigning the embedded runtime.
+
+The next major milestone is the integration of RS485/Modbus sensors, beginning with the KUM ultrasonic fuel sensor, while preserving the same telemetry pipeline and backend contract established in Version 0.2.0.
 
 ---
 
@@ -2222,12 +2308,25 @@ The objective is to flash one standard firmware image onto every board and provi
 
 ## Next Development Objective
 
-```text
 Persistent Identity Storage ✅
-        ↓
+│
+▼
 External Provisioning Utility
-        ↓
+│
+▼
 Repeatable Device Manufacturing
-        ↓
+│
+▼
 Sensor Abstraction Layer
-```
+│
+▼
+RS485 / Modbus Integration
+│
+▼
+Vehicle Interface Expansion
+│
+▼
+Industrial Intelligence
+│
+▼
+Production ORBI Hardware
