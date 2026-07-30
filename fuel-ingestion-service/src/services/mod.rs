@@ -1,5 +1,8 @@
 pub mod alert_hub;
 pub mod alert_rules;
+pub mod calibration_cache;
+pub mod calibration_loader;
+pub mod calibration_type;
 pub mod confidence_scoring;
 pub mod device_health;
 pub mod device_state;
@@ -9,6 +12,7 @@ pub mod inventory_lifecycle;
 pub mod operational_behaviour;
 pub mod operational_intelligence;
 pub mod operational_state_engine;
+pub mod platform;
 pub mod sensor_health;
 pub mod telemetry;
 pub mod telemetry_filter;

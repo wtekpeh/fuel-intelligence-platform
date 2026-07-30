@@ -526,6 +526,30 @@ pub struct DeviceSensorSummary {
     pub created_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct SensorCalibration {
+    pub id: Uuid,
+    pub sensor_id: Uuid,
+    pub calibration_type: String,
+    pub calibration_values: serde_json::Value,
+    pub is_active: bool,
+    pub calibrated_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateSensorCalibrationRequest {
+    pub calibration_type: String,
+    pub calibration_values: serde_json::Value,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SensorCalibrationMutationResponse {
+    pub calibration_id: Uuid,
+    pub message: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CreateOrganizationRequest {
     pub organization_name: String,

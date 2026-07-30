@@ -34,7 +34,7 @@ hardware administration.
 
 ORBI follows a simple architectural principle:
 
-> **Firmware measures. Cloud understands.**
+> Firmware acquires reality. The ORBI Platform interprets reality.
 > For IMU-equipped ORBI devices, the firmware transmits raw accelerometer, gyroscope, and temperature measurements rather than interpreted motion states.
 
 The backend is responsible for interpreting these measurements into:
@@ -47,9 +47,22 @@ These interpreted values are then used by the Device State Engine and future ope
 
 This architecture allows motion intelligence to evolve without requiring firmware updates.
 
-Firmware is responsible for collecting sensor measurements, timestamping them, buffering data when offline, and transmitting telemetry.
+Firmware is responsible for acquiring sensor measurements, timestamping telemetry, buffering data during communication failures, and reliably transmitting telemetry to the ORBI Platform.
 
-The backend is responsible for validating telemetry, persisting measurements, correlating data across sensors, detecting operational events, generating alerts, producing analytics, and supporting investigation workflows.
+The backend is responsible for:
+
+- validating telemetry
+- persisting raw telemetry
+- resolving provisioned sensors
+- loading applicable calibration
+- applying calibration
+- filtering measurements
+- correlating data across sensors
+- deriving operational behaviour
+- detecting operational events
+- generating alerts
+- supporting investigation workflows
+- producing analytics
 
 This separation allows intelligence to evolve continuously without requiring firmware updates.
 
@@ -144,7 +157,16 @@ Telemetry Router
 ↓
 Canonical Telemetry Mapping
 ↓
-Telemetry Pipeline
+Persist Raw Telemetry
+↓
+Resolve Provisioned Sensor
+↓
+Load Active Calibration
+↓
+Apply Calibration
+↓
+Telemetry Processing Pipeline
+├── Filtering
 ├── IMU Interpretation
 ├── Rolling Motion Tracking
 └── Processed Telemetry
@@ -162,10 +184,10 @@ Operational Intelligence Engine
 Investigation Engine
 ↓
 Analytics Intelligence
-↓
-Operational Dashboards
 
-Each sensor service is responsible only for processing its own sensor domain.
+Each sensor service is responsible only for processing its own calibrated sensor domain.
+
+Sensor services never resolve calibration directly. They receive measurements that have already passed through the telemetry processing pipeline.
 
 The Intelligence Engine combines observations from multiple sensor services to produce operational events and alerts.
 
@@ -2063,19 +2085,17 @@ registered Platform Management inventory.
 
 Current flow:
 
-```text
 Telemetry
-        ↓
+↓
 Lookup Registered Device
-        ↓
+↓
 Found
-        ↓
+↓
 Accept
 
 Unknown
-        ↓
+↓
 Reject
-```
 
 Heartbeat processing follows the same validation workflow.
 
@@ -2122,6 +2142,792 @@ Custom PCB hardware
 
 Additional hardware profiles without database redesign
 
+# Modular Sensor Management Architecture
+
+## Architectural Decision
+
+ORBI devices are modular.
+
+A provisioned ORBI device may contain different combinations of:
+
+- GPS modules
+- IMU or vibration modules
+- Fuel-level sensors
+- Kill-switch modules
+- Power and ignition sensors
+- Temperature sensors
+- Payload sensors
+- Future industrial sensors
+
+Sensors of the same functional type may also come from different
+manufacturers, use different protocols, expose different registers,
+and require different installation-specific calibration.
+
+For this reason, ORBI does not treat a sensor type such as `FUEL`,
+`GPS`, or `VIBRATION` as a complete physical sensor definition.
+
+The platform distinguishes between:
+
+- Hardware Profile Sensor Capability
+- Sensor Profile
+- Provisioned Sensor Instance
+- Installation-Specific Sensor Calibration
+
+---
+
+## Core Platform Hierarchy
+
+The long-term Platform Management hierarchy is:
+
+Organization
+↓
+Asset
+↓
+Provisioned Device
+↓
+Hardware Profile
+↓
+Sensor Capability / Sensor Slot
+↓
+Provisioned Sensor Instance
+↓
+Sensor Profile
+↓
+Installation-Specific Calibration
+↓
+Operational Intelligence
+
+Each level has a separate responsibility.
+
+Hardware Profile
+
+A Hardware Profile defines the capabilities expected from a device
+configuration.
+
+Examples:
+
+GPS_ONLY
+→ GPS
+
+GPS_CONTROL
+→ GPS
+→ Kill Switch
+
+FUEL_INTELLIGENCE
+→ Fuel
+→ GPS
+→ Vibration
+
+FULL_INTELLIGENCE
+→ Fuel
+→ GPS
+→ Vibration
+→ Kill Switch
+
+A Hardware Profile defines what sensor capabilities should exist.
+
+It does not permanently identify the exact physical sensor model
+installed on a particular asset.
+
+Sensor Capability / Sensor Slot
+
+A sensor capability represents a functional position supported by a
+Hardware Profile.
+
+Examples:
+
+GPS
+VIBRATION
+FUEL
+KILL_SWITCH
+TEMPERATURE
+PAYLOAD
+POWER
+
+A sensor slot may later contain different supported physical sensors.
+
+Example:
+
+Fuel Sensor Slot
+├── KUM Ultrasonic Fuel Sensor
+├── Escort Fuel Sensor
+├── Omnicomm Fuel Sensor
+├── Technoton Fuel Sensor
+└── Future ORBI Fuel Sensor
+
+This allows ORBI hardware to remain modular without changing the
+Operational Intelligence layer whenever a different sensor brand or
+protocol is introduced.
+
+Sensor Profile
+
+A Sensor Profile describes a supported physical sensor model.
+
+A Sensor Profile may define:
+
+sensor type
+manufacturer
+model
+protocol
+communication interface
+unit
+register mappings
+scaling rules
+supported measurements
+default interpretation settings
+default calibration values
+compatible sensor adapters
+
+Examples:
+
+MPU6050 IMU Profile
+KUM Ultrasonic Fuel Sensor Profile
+ORBI GNSS Profile
+Future CAN/J1939 Payload Sensor Profile
+
+Sensor Profile values provide reusable defaults.
+
+They do not replace calibration for a specific installation.
+
+Provisioned Sensor Instance
+
+A Provisioned Sensor Instance represents an actual sensor module
+attached to a particular provisioned ORBI device.
+
+It may contain:
+
+device ID
+sensor profile ID
+sensor capability or slot
+sensor code
+sensor serial number
+interface or port
+mounting position
+installation date
+operational status
+calibration status
+
+This entity allows sensors to be independently:
+
+installed
+configured
+calibrated
+replaced
+deactivated
+diagnosed
+
+A physical sensor may therefore be replaced without replacing the
+asset or the main ORBI device.
+
+Installation-Specific Sensor Calibration
+
+Calibration belongs to the provisioned sensor instance because sensor
+behaviour depends on the exact installation.
+
+Examples of factors that can affect calibration include:
+
+vehicle model
+engine condition
+engine size
+sensor mounting position
+sensor orientation
+mounting tightness
+vehicle age
+tank shape
+tank dimensions
+environmental conditions
+physical sensor variation
+
+Two vehicles of the same model may therefore use the same Sensor
+Profile while requiring different calibration values.
+
+Example IMU calibration:
+
+{
+"engine_off_average": 0.34,
+"engine_idle_average": 0.72,
+"idle_vibration_threshold": 0.53,
+"moving_vibration_threshold": 2.0
+}
+
+Example ultrasonic fuel-sensor calibration:
+
+{
+"empty_distance_cm": 145.0,
+"full_distance_cm": 12.0,
+"tank_capacity_litres": 600.0,
+"mounting_offset_cm": 2.5
+}
+
+Different sensor types may therefore use different calibration
+structures.
+
+Calibration Resolution Order
+
+Operational Intelligence resolves configuration in the following order:
+
+Active installation-specific sensor calibration
+↓
+Sensor Profile default
+↓
+Platform fallback
+
+The platform fallback exists only to keep processing safe when no
+profile or installation-specific value has been configured.
+
+Installation-specific calibration has the highest priority.
+
+Domain Ownership
+ORBI Provision Utility
+
+The independent orbi-provision utility owns factory identity
+programming.
+
+Its responsibilities are:
+
+generate immutable device identities
+program identities into ESP32 flash
+verify identity integrity
+protect existing identities from accidental overwrite
+
+It does not manage:
+
+organizations
+assets
+installed sensors
+sensor profiles
+sensor calibration
+operational telemetry
+Platform Management
+
+Platform Management owns:
+
+organizations
+assets
+device models
+hardware profiles
+sensor capabilities
+sensor profiles
+device inventory
+device provisioning
+provisioned sensor instances
+installation records
+calibration values
+calibration history
+sensor replacement
+deployment activation
+
+Platform Management is the only layer that creates or changes
+installation and calibration configuration.
+
+Operational Intelligence
+
+Operational Intelligence owns:
+
+telemetry ingestion
+canonical telemetry mapping
+sensor interpretation
+motion classification
+fuel-event detection
+operational-state classification
+multi-sensor correlation
+alerts
+investigation
+replay
+analytics
+
+Operational Intelligence reads active sensor configuration and
+calibration but does not own the calibration workflow.
+
+Database access must remain outside pure classification functions.
+
+A classifier should receive resolved configuration values as
+arguments rather than loading them directly from PostgreSQL.
+
+Shared Database Strategy
+
+The current ORBI backend uses one PostgreSQL/PostGIS database.
+
+Platform Management and Operational Intelligence remain separate
+logical domains within the same Rust application and database.
+
+Table ownership rules are:
+
+Platform Management
+→ creates and updates device, sensor, profile, installation and
+calibration records
+
+Operational Intelligence
+→ reads configuration records and creates telemetry, state, event,
+alert and analytics records
+
+This approach avoids unnecessary distributed-system complexity while
+preserving clear boundaries.
+
+The architecture may later evolve toward service-owned read models and
+configuration-change events when scale requires it.
+
+Sensor Adapter Relationship
+
+The Sensor Adapter Layer translates vendor-specific sensor communication
+into ORBI's normalized telemetry model.
+
+The complete future flow is:
+
+Physical Sensor
+↓
+Provisioned Sensor Instance
+↓
+Sensor Profile
+↓
+Sensor Adapter
+↓
+Raw Vendor Measurement
+↓
+Canonical ORBI Telemetry
+↓
+Installation-Specific Calibration
+↓
+Operational Intelligence
+
+Examples of supported communication technologies may include:
+
+Modbus RTU
+RS485
+CAN/J1939
+UART
+I2C
+SPI
+MQTT
+LoRaWAN
+vendor-specific protocols
+
+Operational Intelligence must consume normalized telemetry rather than
+vendor-specific register structures.
+
+Installation and Activation Lifecycle
+
+The target deployment lifecycle is:
+
+Manufacture Device
+↓
+Program Immutable Identity
+↓
+Create Inventory Record
+↓
+Progress Inventory Lifecycle
+↓
+Provision Device to Asset
+↓
+Automatically Create Expected Sensor Instances
+↓
+Confirm Physical Sensor Installation
+↓
+Apply Sensor Profiles
+↓
+Calibrate Required Sensors
+↓
+Validate Sensor Health
+↓
+Activate Deployment
+↓
+Accept Operational Telemetry
+
+Initial provisioning may create expected sensor instances from the
+selected Hardware Profile.
+
+Installation and calibration then confirm the physical modules and
+installation-specific values.
+
+Incremental Implementation Strategy
+
+This architecture will be implemented incrementally.
+
+The platform will not build every future sensor-management feature
+before current hardware integration continues.
+
+Initial implementation:
+
+Provisioned Vibration Sensor
+↓
+Active IMU Calibration
+↓
+Resolved Idle Vibration Threshold
+↓
+Motion Classification
+
+The next validation will extend the same architecture to:
+
+Provisioned KUM Fuel Sensor
+↓
+KUM Sensor Profile
+↓
+Tank and Distance Calibration
+↓
+Normalized Fuel Telemetry
+↓
+Fuel Intelligence
+
+Future capabilities such as guided calibration sessions, sensor
+replacement workflows, deployment profiles and adapter-management
+interfaces will be introduced when required.
+
+Locked Architectural Principles
+
+The following decisions are now locked:
+
+ORBI devices are modular.
+Hardware Profiles define expected sensor capabilities.
+Sensor Profiles define reusable physical sensor behaviour and defaults.
+Provisioned Sensor Instances represent actual installed modules.
+Calibration belongs to the provisioned sensor instance.
+Installation calibration overrides Sensor Profile defaults.
+Sensor Profile defaults override platform fallback values.
+Platform Management owns calibration writes.
+Operational Intelligence consumes resolved calibration.
+Pure classification functions do not access the database directly.
+Vendor-specific sensor protocols are isolated behind Sensor Adapters.
+The platform will use one PostgreSQL/PostGIS database for the current stage.
+The architecture will be implemented incrementally rather than through a large upfront rewrite.
+KUM fuel-sensor integration will follow the initial IMU calibration foundation.
+
+# Platform Lifecycle Architecture
+
+The ORBI platform manages several independent business lifecycles.
+
+Although they interact with one another, each lifecycle has a different
+purpose, owner, and progression.
+
+Keeping these lifecycles independent allows the platform to evolve
+without coupling manufacturing, deployment, operational intelligence,
+or maintenance into a single workflow.
+
+---
+
+# Manufacturing Lifecycle
+
+The Manufacturing Lifecycle represents the creation of a physical ORBI
+device before it is assigned to a customer.
+
+Current lifecycle:
+
+```text
+ASSEMBLED
+        ↓
+PROGRAMMED
+        ↓
+TESTED
+        ↓
+READY_FOR_DEPLOYMENT
+        ↓
+INVENTORY
+        ↓
+PROVISIONED
+        ↓
+RETIRED
+```
+
+Manufacturing owns:
+
+- PCB assembly
+- immutable device identity
+- firmware programming
+- production testing
+- quality assurance
+- inventory registration
+
+Manufacturing ends once a device is provisioned to an asset.
+
+Operational Intelligence is not involved in this lifecycle.
+
+---
+
+# Device Lifecycle
+
+The Device Lifecycle represents the administrative state of a provisioned
+ORBI device.
+
+```text
+PROVISIONED
+        ↓
+ASSIGNED
+        ↓
+ACTIVE
+        ↓
+SUSPENDED
+        ↓
+DEACTIVATED
+        ↓
+RETIRED
+```
+
+Platform Management owns this lifecycle.
+
+Examples include:
+
+- assigning a device to an asset
+- moving a device to another asset
+- suspending a deployment
+- retiring obsolete hardware
+
+A device may remain ACTIVE while individual sensors are replaced or
+recalibrated.
+
+---
+
+# Sensor Lifecycle
+
+Each physical sensor attached to an ORBI device has its own independent
+lifecycle.
+
+```text
+SUPPORTED
+        ↓
+EXPECTED
+        ↓
+INSTALLED
+        ↓
+DETECTED
+        ↓
+CONFIGURED
+        ↓
+CALIBRATED
+        ↓
+VALIDATED
+        ↓
+ACTIVE
+        ↓
+MAINTENANCE
+        ↓
+RECALIBRATED
+        ↓
+REPLACED
+        ↓
+RETIRED
+```
+
+Definitions:
+
+SUPPORTED
+
+The platform contains a Sensor Profile describing a supported sensor
+model.
+
+EXPECTED
+
+The selected Hardware Profile expects this sensor capability to exist.
+
+INSTALLED
+
+A physical sensor has been connected to the provisioned device.
+
+DETECTED
+
+Communication with the sensor has been verified.
+
+Examples:
+
+- Modbus responding
+- GPS producing fixes
+- IMU transmitting data
+
+CONFIGURED
+
+Communication settings have been confirmed.
+
+Examples:
+
+- Modbus address
+- baud rate
+- communication protocol
+- CAN identifiers
+
+CALIBRATED
+
+Installation-specific calibration values have been recorded.
+
+Examples:
+
+- tank dimensions
+- IMU vibration thresholds
+- antenna offsets
+
+VALIDATED
+
+The calibration has been verified using real operational testing.
+
+Examples:
+
+- parked classification verified
+- idle classification verified
+- moving classification verified
+- fuel readings verified
+
+ACTIVE
+
+The sensor is fully trusted for Operational Intelligence.
+
+MAINTENANCE
+
+Maintenance is in progress.
+
+Telemetry may still arrive but calibration or configuration may require
+review.
+
+RECALIBRATED
+
+A newer calibration supersedes the previous active calibration while
+retaining calibration history.
+
+REPLACED
+
+A different physical sensor replaces the previous sensor instance.
+
+Historical telemetry remains associated with the original sensor.
+
+RETIRED
+
+The sensor is permanently removed from service.
+
+---
+
+# Deployment Lifecycle
+
+The Deployment Lifecycle represents the readiness of an entire ORBI
+installation.
+
+Unlike Device or Sensor Lifecycles, it evaluates the deployment as a
+complete operational system.
+
+```text
+DEVICE PROVISIONED
+        ↓
+SENSORS INSTALLED
+        ↓
+SENSORS CONFIGURED
+        ↓
+SENSORS CALIBRATED
+        ↓
+DEPLOYMENT VALIDATED
+        ↓
+ACTIVATED
+        ↓
+LIVE OPERATION
+        ↓
+MAINTENANCE
+        ↓
+SUSPENDED
+        ↓
+DEACTIVATED
+```
+
+Deployment validation confirms that all required hardware is operating
+correctly before operational telemetry is trusted.
+
+Examples of deployment validation:
+
+- GPS fix acquired
+- IMU operational
+- Fuel sensor responding
+- Communication verified
+- Calibration completed
+
+Only validated deployments should transition to Active Operation.
+
+---
+
+# Operational Lifecycle
+
+Operational Intelligence evaluates telemetry independently of Platform
+Management.
+
+Operational states are inferred continuously from telemetry rather than
+being manually assigned.
+
+Example operational states include:
+
+```text
+UNKNOWN
+ONLINE
+OFFLINE
+
+PARKED
+IDLE
+MOVING
+
+NORMAL
+WARNING
+CRITICAL
+```
+
+Operational Intelligence owns:
+
+- telemetry interpretation
+- state classification
+- alert generation
+- operational events
+- analytics
+- investigation
+
+Operational state changes do not modify Platform Management lifecycles.
+
+---
+
+# Lifecycle Independence
+
+Each lifecycle answers a different question.
+
+Manufacturing Lifecycle
+
+"Has this hardware been built?"
+
+Device Lifecycle
+
+"Is this device administratively deployed?"
+
+Sensor Lifecycle
+
+"Is this physical sensor ready for operational use?"
+
+Deployment Lifecycle
+
+"Is this installation ready for production?"
+
+Operational Lifecycle
+
+"What is happening right now?"
+
+Because these questions are independent, changes in one lifecycle do not
+necessarily affect another.
+
+Examples:
+
+Replacing a fuel sensor changes the Sensor Lifecycle without replacing
+the device.
+
+Suspending a deployment does not erase historical operational events.
+
+A parked vehicle may still be an Active deployment.
+
+A device may be Offline while remaining administratively Active.
+
+---
+
+# Architectural Principle
+
+Platform Management owns configuration.
+
+Operational Intelligence owns interpretation.
+
+Manufacturing owns identity.
+
+Deployment confirms readiness.
+
+Sensors remain modular.
+
+Operational Intelligence consumes resolved configuration but never owns
+installation or calibration workflows.
+
 # Next Platform Milestones
 
 Platform Foundation ✅
@@ -2132,19 +2938,25 @@ Cross-Request Movement Intelligence ✅
 ↓
 Transition-Only Investigation Timeline ✅
 ↓
-Firmware Telemetry Batching
+Modular Sensor Architecture ✅
 ↓
-Batch Telemetry Validation
+Calibration Storage Foundation ✅
+↓
+Telemetry Calibration Pipeline ← Current
 ↓
 KUM Fuel Sensor Integration
 ↓
 Fuel Intelligence Validation
 ↓
-Frontend Operational Intelligence Enhancements
+Sensor Adapter Layer
+↓
+Fuel Intelligence Validation
+↓
+Sensor Adapter Layer
 ↓
 Firmware Management
 ↓
-Sensor Adapter Layer
+Frontend Operational Intelligence Enhancements
 ↓
 Production ORBI Hardware
 ↓

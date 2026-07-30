@@ -8,14 +8,15 @@ use crate::models::OperationalIntelligenceEventResponse;
 use crate::models::{
     AlertAcknowledgementResponse, AlertResponse, AlertTrendPoint, AlertTrendSummary,
     AlertTrendsResponse, AssignDeviceAssetRequest, CreateAssetRequest, CreateGeofenceRequest,
-    CreateOrganizationRequest, DeviceHealthEventResponse, DeviceHealthTrendDevice,
-    DeviceHealthTrendResponse, DeviceModelResponse, DeviceSensorSummary, DeviceStateEventResponse,
-    DeviceSummary, FuelEventResponse, Geofence, GeofenceActivityTrendPoint,
-    GeofenceActivityTrendResponse, GeofencePositionMatch, GeofenceTransitionEventResponse,
-    GeofenceUtilizationResponse, GeofenceUtilizationZone, HardwareProfile, HardwareProfileSensor,
-    OrganizationFleetOverviewResponse, OrganizationOverviewResponse,
-    ProvisionInventoryDeviceRequest, SensorHealthEventResponse, TelemetryStreamResponse,
-    UpdateAssetRequest, UpdateDeviceRequest, UpdateOrganizationRequest,
+    CreateOrganizationRequest, CreateSensorCalibrationRequest, DeviceHealthEventResponse,
+    DeviceHealthTrendDevice, DeviceHealthTrendResponse, DeviceModelResponse, DeviceSensorSummary,
+    DeviceStateEventResponse, DeviceSummary, FuelEventResponse, Geofence,
+    GeofenceActivityTrendPoint, GeofenceActivityTrendResponse, GeofencePositionMatch,
+    GeofenceTransitionEventResponse, GeofenceUtilizationResponse, GeofenceUtilizationZone,
+    HardwareProfile, HardwareProfileSensor, OrganizationFleetOverviewResponse,
+    OrganizationOverviewResponse, ProvisionInventoryDeviceRequest, SensorCalibration,
+    SensorHealthEventResponse, TelemetryStreamResponse, UpdateAssetRequest, UpdateDeviceRequest,
+    UpdateOrganizationRequest,
 };
 use crate::services::device_health::classify_device_status;
 
@@ -538,6 +539,130 @@ pub async fn list_device_sensors(
     .await?;
 
     Ok(sensors)
+}
+
+pub async fn sensor_exists(db_pool: &PgPool, sensor_id: Uuid) -> Result<bool> {
+    let exists = sqlx::query_scalar!(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM sensors
+            WHERE id = $1
+        ) AS "exists!"
+        "#,
+        sensor_id
+    )
+    .fetch_one(db_pool)
+    .await?;
+
+    Ok(exists)
+}
+
+pub async fn create_sensor_calibration(
+    db_pool: &PgPool,
+    sensor_id: Uuid,
+    request: &CreateSensorCalibrationRequest,
+) -> Result<Uuid> {
+    let mut transaction = db_pool.begin().await?;
+
+    sqlx::query!(
+        r#"
+        UPDATE sensor_calibrations
+        SET
+            is_active = FALSE,
+            updated_at = NOW()
+        WHERE sensor_id = $1
+          AND calibration_type = $2
+          AND is_active = TRUE
+        "#,
+        sensor_id,
+        request.calibration_type,
+    )
+    .execute(&mut *transaction)
+    .await?;
+
+    let calibration_id = sqlx::query_scalar!(
+        r#"
+        INSERT INTO sensor_calibrations (
+            sensor_id,
+            calibration_type,
+            calibration_values
+        )
+        VALUES ($1, $2, $3)
+        RETURNING id
+        "#,
+        sensor_id,
+        request.calibration_type,
+        request.calibration_values,
+    )
+    .fetch_one(&mut *transaction)
+    .await?;
+
+    transaction.commit().await?;
+
+    Ok(calibration_id)
+}
+
+pub async fn get_active_sensor_calibration(
+    db_pool: &PgPool,
+    sensor_id: Uuid,
+    calibration_type: &str,
+) -> Result<Option<SensorCalibration>> {
+    let calibration = sqlx::query_as!(
+        SensorCalibration,
+        r#"
+        SELECT
+            id,
+            sensor_id,
+            calibration_type,
+            calibration_values,
+            is_active,
+            calibrated_at,
+            created_at,
+            updated_at
+        FROM sensor_calibrations
+        WHERE sensor_id = $1
+          AND calibration_type = $2
+          AND is_active = TRUE
+        LIMIT 1
+        "#,
+        sensor_id,
+        calibration_type,
+    )
+    .fetch_optional(db_pool)
+    .await?;
+
+    Ok(calibration)
+}
+
+pub async fn list_sensor_calibrations(
+    db_pool: &PgPool,
+    sensor_id: Uuid,
+) -> Result<Vec<SensorCalibration>> {
+    let calibrations = sqlx::query_as!(
+        SensorCalibration,
+        r#"
+        SELECT
+            id,
+            sensor_id,
+            calibration_type,
+            calibration_values,
+            is_active,
+            calibrated_at,
+            created_at,
+            updated_at
+        FROM sensor_calibrations
+        WHERE sensor_id = $1
+        ORDER BY
+            calibration_type ASC,
+            calibrated_at DESC
+        "#,
+        sensor_id,
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    Ok(calibrations)
 }
 
 async fn get_or_create_sensor(

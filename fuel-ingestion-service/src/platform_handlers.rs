@@ -489,3 +489,132 @@ pub async fn provision_inventory_device_handler(
         }
     }
 }
+
+//--------Sensor Calibration Management
+
+pub async fn create_sensor_calibration_handler(
+    State(app_state): State<AppState>,
+    Path(sensor_id): Path<Uuid>,
+    Json(payload): Json<crate::models::CreateSensorCalibrationRequest>,
+) -> impl IntoResponse {
+    match crate::services::platform::calibration::create_calibration(
+        &app_state.db_pool,
+        sensor_id,
+        payload,
+    )
+    .await
+    {
+        Ok(calibration_id) => (
+            StatusCode::CREATED,
+            Json(crate::models::SensorCalibrationMutationResponse {
+                calibration_id,
+                message: "Sensor calibration created successfully.".to_string(),
+            }),
+        )
+            .into_response(),
+
+        Err(error) => {
+            let message = error.to_string();
+
+            if message.contains("Sensor not found") {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(crate::models::ApiErrorResponse { message }),
+                )
+                    .into_response();
+            }
+
+            if message.contains("Calibration type") || message.contains("Calibration values") {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(crate::models::ApiErrorResponse { message }),
+                )
+                    .into_response();
+            }
+
+            eprintln!("Failed to create sensor calibration: {}", message);
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to create sensor calibration.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
+pub async fn list_sensor_calibrations_handler(
+    State(app_state): State<AppState>,
+    Path(sensor_id): Path<Uuid>,
+) -> impl IntoResponse {
+    match crate::services::platform::calibration::list_calibration_history(
+        &app_state.db_pool,
+        sensor_id,
+    )
+    .await
+    {
+        Ok(calibrations) => (StatusCode::OK, Json(calibrations)).into_response(),
+
+        Err(error) => {
+            eprintln!("Failed to list sensor calibrations: {}", error);
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to list sensor calibrations.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
+pub async fn get_active_sensor_calibration_handler(
+    State(app_state): State<AppState>,
+    Path((sensor_id, calibration_type)): Path<(Uuid, String)>,
+) -> impl IntoResponse {
+    match crate::services::platform::calibration::get_active_calibration(
+        &app_state.db_pool,
+        sensor_id,
+        &calibration_type,
+    )
+    .await
+    {
+        Ok(Some(calibration)) => (StatusCode::OK, Json(calibration)).into_response(),
+
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(crate::models::ApiErrorResponse {
+                message: format!(
+                    "No active {} calibration was found for this sensor.",
+                    calibration_type.trim().to_uppercase()
+                ),
+            }),
+        )
+            .into_response(),
+
+        Err(error) => {
+            let message = error.to_string();
+
+            if message.contains("Calibration type") {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(crate::models::ApiErrorResponse { message }),
+                )
+                    .into_response();
+            }
+
+            eprintln!("Failed to fetch active sensor calibration: {}", message);
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to fetch active sensor calibration.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}

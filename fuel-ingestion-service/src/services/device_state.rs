@@ -11,7 +11,7 @@ const GPS_MOVEMENT_THRESHOLD_METERS: f64 = 10.0;
 ///
 /// For a vehicle, this can represent engine vibration while the vehicle
 /// itself is not travelling.
-const IDLE_VIBRATION_THRESHOLD: f64 = 1.0;
+const IDLE_VIBRATION_THRESHOLD: f64 = 0.7;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeviceOperationalState {

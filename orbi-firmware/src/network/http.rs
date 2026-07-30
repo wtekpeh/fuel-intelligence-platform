@@ -3,9 +3,26 @@ use esp_println::println;
 
 use crate::drivers::Modem;
 
+/*
+ * HTTPACTION is asynchronous.
+ *
+ * Poll every 250 ms and stop as soon as the modem returns
+ * the +HTTPACTION result.
+ */
 const HTTP_ACTION_POLL_INTERVAL_MS: u32 = 250;
 const HTTP_ACTION_MAX_POLLS: usize = 60;
 const HTTP_ACTION_BUFFER_SIZE: usize = 512;
+
+/*
+ * Small settling delays remain for modem reliability.
+ *
+ * The previous implementation waited one second after almost every
+ * command and five seconds before checking HTTPACTION. Those fixed
+ * delays made each telemetry upload unnecessarily slow.
+ */
+const COMMAND_SETTLE_DELAY_MS: u32 = 200;
+const PAYLOAD_SETTLE_DELAY_MS: u32 = 250;
+const CLEANUP_SETTLE_DELAY_MS: u32 = 200;
 
 fn contains_bytes(buffer: &[u8], pattern: &[u8]) -> bool {
     if pattern.is_empty() || pattern.len() > buffer.len() {
@@ -45,13 +62,14 @@ fn collect_http_action_response(
 ) -> Option<([u8; HTTP_ACTION_BUFFER_SIZE], usize)> {
     if !modem.send_command(b"AT+HTTPACTION=1\r\n", action_label) {
         println!("Failed to send HTTPACTION command.");
+
         return None;
     }
 
     let mut combined_response = [0u8; HTTP_ACTION_BUFFER_SIZE];
-    let mut total_bytes_read = 0;
+    let mut total_bytes_read = 0usize;
 
-    for _ in 0..HTTP_ACTION_MAX_POLLS {
+    for poll_number in 1..=HTTP_ACTION_MAX_POLLS {
         delay.delay_millis(HTTP_ACTION_POLL_INTERVAL_MS);
 
         let Some((response_buffer, bytes_read)) = modem.read_response() else {
@@ -66,6 +84,7 @@ fn collect_http_action_response(
 
         if remaining_capacity == 0 {
             println!("HTTPACTION response buffer is full.");
+
             break;
         }
 
@@ -77,6 +96,12 @@ fn collect_http_action_response(
         total_bytes_read += bytes_to_copy;
 
         if contains_bytes(&combined_response[..total_bytes_read], b"+HTTPACTION:") {
+            println!(
+                "HTTPACTION completed after {} poll(s), approximately {} ms.",
+                poll_number,
+                poll_number * HTTP_ACTION_POLL_INTERVAL_MS as usize
+            );
+
             return Some((combined_response, total_bytes_read));
         }
     }
@@ -90,6 +115,7 @@ fn collect_http_action_response(
         Some((combined_response, total_bytes_read))
     } else {
         println!("HTTPACTION timed out without receiving a response.");
+
         None
     }
 }
@@ -104,42 +130,79 @@ fn post_json<const N: usize>(
     action_label: &str,
     read_label: &str,
     sent_message: &str,
-    final_httpterm_delay: u32,
 ) -> bool {
+    /*
+     * Ensure a stale HTTP session does not interfere with the
+     * new transaction.
+     */
     modem.send_command_and_print_response(b"AT+HTTPTERM\r\n", "AT+HTTPTERM", delay);
-    delay.delay_millis(1000);
+
+    delay.delay_millis(COMMAND_SETTLE_DELAY_MS);
 
     modem.send_command_and_print_response(b"AT+HTTPINIT\r\n", "AT+HTTPINIT", delay);
-    delay.delay_millis(1000);
+
+    delay.delay_millis(COMMAND_SETTLE_DELAY_MS);
 
     modem.send_command_and_print_response(url_command, url_label, delay);
-    delay.delay_millis(1000);
+
+    delay.delay_millis(COMMAND_SETTLE_DELAY_MS);
 
     modem.send_command_and_print_response(
         b"AT+HTTPPARA=\"CONTENT\",\"application/json\"\r\n",
         "AT+HTTPPARA CONTENT",
         delay,
     );
-    delay.delay_millis(1000);
+
+    delay.delay_millis(COMMAND_SETTLE_DELAY_MS);
 
     let mut data_command = heapless::String::<64>::new();
 
-    let _ = core::fmt::write(
+    if core::fmt::write(
         &mut data_command,
         format_args!("AT+HTTPDATA={},10000\r\n", payload.len()),
-    );
+    )
+    .is_err()
+    {
+        println!("Failed to build AT+HTTPDATA command.");
+
+        modem.send_command_and_print_response(b"AT+HTTPTERM\r\n", "AT+HTTPTERM", delay);
+
+        return false;
+    }
 
     modem.send_command_and_print_response(data_command.as_bytes(), data_label, delay);
 
-    delay.delay_millis(1000);
+    delay.delay_millis(COMMAND_SETTLE_DELAY_MS);
 
+    /*
+     * Keep the existing paced UART payload transmission for now.
+     *
+     * Removing this delay as well could overrun the UART depending on
+     * how Modem::uart.write() is implemented. It adds only about one
+     * millisecond per payload byte and can be optimized separately
+     * after the HTTP timing has been verified.
+     */
     for byte in payload.as_bytes() {
-        let _ = modem.uart.write(&[*byte]);
+        if modem.uart.write(&[*byte]).is_err() {
+            println!("Failed while writing HTTP payload to modem.");
+
+            modem.send_command_and_print_response(b"AT+HTTPTERM\r\n", "AT+HTTPTERM", delay);
+
+            return false;
+        }
+
         delay.delay_millis(1);
     }
 
     println!("{}", sent_message);
-    delay.delay_millis(final_httpterm_delay);
+
+    /*
+     * The previous implementation waited three or five seconds here.
+     *
+     * HTTPACTION already has a response-driven polling loop, so only
+     * a short settling delay is required before polling begins.
+     */
+    delay.delay_millis(PAYLOAD_SETTLE_DELAY_MS);
 
     let action_response = collect_http_action_response(modem, delay, action_label);
 
@@ -152,32 +215,36 @@ fn post_json<const N: usize>(
 
                 if (200..300).contains(&status) {
                     println!("HTTP upload succeeded.");
+
                     true
                 } else {
                     println!("HTTP upload failed.");
+
                     false
                 }
             }
 
             None => {
                 println!("Could not parse HTTPACTION status.");
+
                 false
             }
         }
     } else {
         println!("No HTTPACTION response received.");
+
         false
     };
 
-    delay.delay_millis(1000);
+    delay.delay_millis(CLEANUP_SETTLE_DELAY_MS);
 
     modem.send_command_and_print_response(b"AT+HTTPREAD\r\n", read_label, delay);
 
-    delay.delay_millis(1000);
+    delay.delay_millis(CLEANUP_SETTLE_DELAY_MS);
 
     modem.send_command_and_print_response(b"AT+HTTPTERM\r\n", "AT+HTTPTERM", delay);
 
-    delay.delay_millis(1000);
+    delay.delay_millis(CLEANUP_SETTLE_DELAY_MS);
 
     upload_succeeded
 }
@@ -197,7 +264,6 @@ pub fn send_payload<const N: usize>(
         "AT+HTTPACTION POST",
         "AT+HTTPREAD",
         "Sent HTTP JSON PAYLOAD",
-        5000,
     )
 }
 
@@ -217,6 +283,5 @@ pub fn send_heartbeat(modem: &mut Modem, delay: &Delay, payload: &heapless::Stri
         "AT+HTTPACTION HEARTBEAT POST",
         "AT+HTTPREAD HEARTBEAT",
         "Heartbeat JSON sent to modem.",
-        3000,
     )
 }

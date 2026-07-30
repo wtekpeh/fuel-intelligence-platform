@@ -66,16 +66,29 @@ pub async fn ingest_reading_batch(
 
         let device_id = context.device_id;
 
-        // Process canonical telemetry through the shared motion pipeline.
+        // Enrich canonical telemetry before it enters the shared
+        // operational intelligence pipeline.
+        let mut enriched_telemetry = Vec::with_capacity(telemetry_readings.len());
+
+        for telemetry in &telemetry_readings {
+            enriched_telemetry.push(
+                app_state
+                    .telemetry_enrichment
+                    .enrich(telemetry, &context)
+                    .await?,
+            );
+        }
+
+        // Process enriched telemetry through the shared motion pipeline.
         //
         // The mutex is held only while updating the in-memory motion tracker.
         // It is released before database operations begin.
-        let mut processed_telemetry = Vec::with_capacity(telemetry_readings.len());
+        let mut processed_telemetry = Vec::with_capacity(enriched_telemetry.len());
 
         {
             let mut telemetry_pipeline = app_state.telemetry_pipeline.lock().await;
 
-            for telemetry in &telemetry_readings {
+            for telemetry in &enriched_telemetry {
                 processed_telemetry.push(telemetry_pipeline.process(telemetry));
             }
         }
