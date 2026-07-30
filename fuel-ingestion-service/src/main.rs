@@ -5,6 +5,7 @@ mod domain;
 mod handlers;
 mod input_adapters;
 mod models;
+mod operational_behaviour_repository;
 mod orbi_inventory_repository;
 mod platform_handlers;
 mod platform_routes;
