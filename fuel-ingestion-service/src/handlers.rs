@@ -117,6 +117,7 @@ pub async fn ingest_reading_batch(
             {
                 process_motion_intelligence(
                     db_pool,
+                    app_state.behaviour_learning.as_ref(),
                     device_id,
                     vibration_sensor_id,
                     reading,

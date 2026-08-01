@@ -16,6 +16,7 @@ use crate::handlers::{
 use crate::platform_routes::platform_routes;
 use crate::services::alert_hub::AlertHub;
 use crate::services::calibration_loader::CalibrationLoader;
+use crate::services::operational_behaviour_learning::OperationalBehaviourLearningService;
 use crate::services::telemetry::telemetry_enrichment_service::TelemetryEnrichmentService;
 use crate::ws::alerts_ws_handler;
 use axum::http::{Method, header};
@@ -34,6 +35,7 @@ pub struct AppState {
     pub telemetry_pipeline: Arc<Mutex<TelemetryPipeline>>,
     pub calibration_loader: Arc<CalibrationLoader>,
     pub telemetry_enrichment: Arc<TelemetryEnrichmentService>,
+    pub behaviour_learning: Arc<OperationalBehaviourLearningService>,
 }
 
 pub fn app_routes(db_pool: PgPool, config: AppConfig, alert_hub: AlertHub) -> Router {
@@ -42,6 +44,8 @@ pub fn app_routes(db_pool: PgPool, config: AppConfig, alert_hub: AlertHub) -> Ro
     let telemetry_enrichment =
         Arc::new(TelemetryEnrichmentService::new(calibration_loader.clone()));
 
+    let behaviour_learning = Arc::new(OperationalBehaviourLearningService::new(db_pool.clone()));
+
     let app_state = AppState {
         db_pool,
         config,
@@ -49,6 +53,7 @@ pub fn app_routes(db_pool: PgPool, config: AppConfig, alert_hub: AlertHub) -> Ro
         telemetry_pipeline: Arc::new(Mutex::new(TelemetryPipeline::new())),
         calibration_loader,
         telemetry_enrichment,
+        behaviour_learning,
     };
 
     let cors = CorsLayer::new()

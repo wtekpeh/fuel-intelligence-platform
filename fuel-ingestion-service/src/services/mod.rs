@@ -10,6 +10,7 @@ pub mod fuel_detection;
 pub mod fuel_event_correlation;
 pub mod inventory_lifecycle;
 pub mod operational_behaviour;
+pub mod operational_behaviour_learning;
 pub mod operational_intelligence;
 pub mod operational_state_engine;
 pub mod platform;

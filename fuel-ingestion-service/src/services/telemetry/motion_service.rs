@@ -14,6 +14,7 @@ use crate::services::device_state::{
     classify_device_state_from_motion,
 };
 use crate::services::operational_behaviour::determine_operational_transition;
+use crate::services::operational_behaviour_learning::OperationalBehaviourLearningService;
 use crate::services::operational_intelligence::interpret_operational_transition;
 use crate::services::operational_state_engine::confirm_operational_state;
 
@@ -33,6 +34,7 @@ use crate::services::operational_state_engine::confirm_operational_state;
 /// Fuel persistence and fuel-event detection do not belong in this service.
 pub async fn process_motion_intelligence(
     db_pool: &PgPool,
+    behaviour_learning: &OperationalBehaviourLearningService,
     device_id: Uuid,
     vibration_sensor_id: Uuid,
     reading: &FuelReading,
@@ -108,6 +110,15 @@ pub async fn process_motion_intelligence(
 
     let confirmed_device_state = state_decision.confirmed_state;
     let state_changed = state_decision.transition_confirmed;
+
+    behaviour_learning
+        .process_motion_evidence(
+            vibration_sensor_id,
+            reading.timestamp,
+            motion_evidence,
+            speed_kmh,
+        )
+        .await?;
 
     println!(
         "[STATE ENGINE] device_id={}, previous_state={}, classified_state={}, \

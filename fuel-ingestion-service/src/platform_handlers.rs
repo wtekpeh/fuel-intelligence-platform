@@ -1,4 +1,6 @@
 use crate::catalogue_repository;
+use crate::domain::operational_behaviour::BehaviourType;
+use crate::operational_behaviour_repository;
 use crate::orbi_inventory_repository;
 use crate::repository;
 use crate::routes::AppState;
@@ -612,6 +614,105 @@ pub async fn get_active_sensor_calibration_handler(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(crate::models::ApiErrorResponse {
                     message: "Failed to fetch active sensor calibration.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
+pub async fn create_operational_behaviour_learning_session_handler(
+    State(app_state): State<AppState>,
+    Json(payload): Json<crate::models::CreateOperationalBehaviourLearningSessionRequest>,
+) -> impl IntoResponse {
+    let behaviour_type = match BehaviourType::from_str(&payload.behaviour_type) {
+        Some(value) => value,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(crate::models::ApiErrorResponse {
+                    message: format!(
+                        "Unknown behaviour type '{}'. Expected PARKED, IDLE or MOVING.",
+                        payload.behaviour_type
+                    ),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    match operational_behaviour_repository::create_learning_session(
+        &app_state.db_pool,
+        payload.device_id,
+        payload.sensor_id,
+        behaviour_type,
+        payload.requested_sample_count,
+    )
+    .await
+    {
+        Ok(learning_session) => (
+            StatusCode::CREATED,
+            Json(
+                crate::models::OperationalBehaviourLearningSessionMutationResponse {
+                    learning_session_id: learning_session.id,
+                    message: "Operational behaviour learning session created successfully."
+                        .to_string(),
+                },
+            ),
+        )
+            .into_response(),
+
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(crate::models::ApiErrorResponse {
+                message: error.to_string(),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn start_operational_behaviour_learning_session_handler(
+    State(app_state): State<AppState>,
+    Path(learning_session_id): Path<Uuid>,
+) -> impl IntoResponse {
+    match operational_behaviour_repository::start_learning_session(
+        &app_state.db_pool,
+        learning_session_id,
+    )
+    .await
+    {
+        Ok(Some(session)) => (
+            StatusCode::OK,
+            Json(
+                crate::models::OperationalBehaviourLearningSessionMutationResponse {
+                    learning_session_id: session.id,
+                    message: "Operational behaviour learning session started successfully."
+                        .to_string(),
+                },
+            ),
+        )
+            .into_response(),
+
+        Ok(None) => (
+            StatusCode::CONFLICT,
+            Json(crate::models::ApiErrorResponse {
+                message: "Learning session was not found or is not in NOT_STARTED status."
+                    .to_string(),
+            }),
+        )
+            .into_response(),
+
+        Err(error) => {
+            eprintln!(
+                "Failed to start operational behaviour learning session {}: {}",
+                learning_session_id, error
+            );
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to start operational behaviour learning session.".to_string(),
                 }),
             )
                 .into_response()

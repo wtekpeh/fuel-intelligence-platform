@@ -649,3 +649,21 @@ pub struct DeviceCatalogueModelResponse {
     pub is_active: bool,
     pub profiles: Vec<DeviceCatalogueHardwareProfileResponse>,
 }
+
+// -----------------------------------------------------------------------------
+// Operational Behaviour Learning
+// -----------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct CreateOperationalBehaviourLearningSessionRequest {
+    pub device_id: Uuid,
+    pub sensor_id: Uuid,
+    pub behaviour_type: String,
+    pub requested_sample_count: i32,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OperationalBehaviourLearningSessionMutationResponse {
+    pub learning_session_id: Uuid,
+    pub message: String,
+}

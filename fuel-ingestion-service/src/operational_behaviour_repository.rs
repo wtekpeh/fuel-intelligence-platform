@@ -4,13 +4,23 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::operational_behaviour::{
-    BehaviourType, LearningStatus, OperationalBehaviourLearningSession,
+    BehaviourProfile, BehaviourSample, BehaviourType, LearningStatus,
+    OperationalBehaviourLearningSession,
 };
 
+use crate::domain::telemetry::motion_buffer::MotionEvidence;
 /// Creates a new operational behaviour learning session.
 ///
 /// A newly created session begins in the `NOT_STARTED` state. The application
 /// service will explicitly move it into `COLLECTING` when learning begins.
+///
+#[derive(Debug)]
+pub enum BehaviourSampleRecordOutcome {
+    Recorded(OperationalBehaviourLearningSession),
+    SkippedBeforeSessionStart,
+    SkippedSessionFull,
+}
+
 pub async fn create_learning_session(
     db_pool: &PgPool,
     device_id: Uuid,
@@ -230,6 +240,325 @@ pub async fn start_learning_session(
         )
     })
     .transpose()
+}
+
+/// Loads all behaviour samples collected for one learning session.
+///
+/// Samples are returned in their original collection order so that
+/// diagnostics, replay, and future learning algorithms can inspect
+/// the sequence consistently.
+pub async fn list_behaviour_samples(
+    db_pool: &PgPool,
+    learning_session_id: Uuid,
+) -> Result<Vec<BehaviourSample>> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT
+            recorded_at,
+            vibration_score,
+            motion_ratio,
+            average_confidence,
+            sustained_motion,
+            motion_sample_count,
+            gps_speed_kmh,
+            sample_index
+        FROM operational_behaviour_samples
+        WHERE learning_session_id = $1
+        ORDER BY sample_index ASC
+        "#,
+        learning_session_id,
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    let samples = rows
+        .into_iter()
+        .map(|row| {
+            let sample_count = usize::try_from(row.motion_sample_count).map_err(|_| {
+                anyhow!(
+                    "Invalid motion sample count {} stored for learning session {}.",
+                    row.motion_sample_count,
+                    learning_session_id
+                )
+            })?;
+
+            Ok(BehaviourSample {
+                recorded_at: row.recorded_at,
+
+                motion_evidence: MotionEvidence {
+                    average_vibration_score: row.vibration_score,
+                    motion_ratio: row.motion_ratio,
+                    average_confidence: row.average_confidence,
+                    sustained_motion: row.sustained_motion,
+                    sample_count,
+                },
+
+                gps_speed_kmh: row.gps_speed_kmh,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(samples)
+}
+
+/// Creates or replaces the learned profile for one device, sensor,
+/// and operational behaviour.
+///
+/// The database has a unique constraint on:
+///
+/// device_id + sensor_id + behaviour_type
+///
+/// Therefore, retraining a behaviour updates the existing profile
+/// rather than creating multiple active profiles.
+pub async fn save_behaviour_profile(db_pool: &PgPool, profile: &BehaviourProfile) -> Result<Uuid> {
+    let sample_count = i32::try_from(profile.statistics.sample_count).map_err(|_| {
+        anyhow!(
+            "Behaviour profile sample count {} exceeds the PostgreSQL INTEGER range.",
+            profile.statistics.sample_count
+        )
+    })?;
+
+    let profile_id = sqlx::query_scalar!(
+        r#"
+        INSERT INTO operational_behaviour_profiles (
+            id,
+            device_id,
+            sensor_id,
+            behaviour_type,
+            learning_session_id,
+            sample_count,
+            average_vibration_score,
+            minimum_vibration_score,
+            maximum_vibration_score,
+            vibration_variance,
+            vibration_standard_deviation,
+            average_motion_ratio,
+            minimum_motion_ratio,
+            maximum_motion_ratio,
+            average_confidence,
+            sustained_motion_ratio,
+            average_gps_speed_kmh,
+            learned_at
+        )
+        VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            $5,
+            $6,
+            $7,
+            $8,
+            $9,
+            $10,
+            $11,
+            $12,
+            $13,
+            $14,
+            $15,
+            $16,
+            $17,
+            $18
+        )
+        ON CONFLICT (
+            device_id,
+            sensor_id,
+            behaviour_type
+        )
+        DO UPDATE
+        SET
+            learning_session_id = EXCLUDED.learning_session_id,
+            sample_count = EXCLUDED.sample_count,
+            average_vibration_score = EXCLUDED.average_vibration_score,
+            minimum_vibration_score = EXCLUDED.minimum_vibration_score,
+            maximum_vibration_score = EXCLUDED.maximum_vibration_score,
+            vibration_variance = EXCLUDED.vibration_variance,
+            vibration_standard_deviation =
+                EXCLUDED.vibration_standard_deviation,
+            average_motion_ratio = EXCLUDED.average_motion_ratio,
+            minimum_motion_ratio = EXCLUDED.minimum_motion_ratio,
+            maximum_motion_ratio = EXCLUDED.maximum_motion_ratio,
+            average_confidence = EXCLUDED.average_confidence,
+            sustained_motion_ratio = EXCLUDED.sustained_motion_ratio,
+            average_gps_speed_kmh = EXCLUDED.average_gps_speed_kmh,
+            learned_at = EXCLUDED.learned_at,
+            updated_at = NOW()
+        RETURNING id
+        "#,
+        profile.id,
+        profile.device_id,
+        profile.sensor_id,
+        profile.behaviour_type.as_str(),
+        profile.learning_session_id,
+        sample_count,
+        profile.statistics.average_vibration_score,
+        profile.statistics.minimum_vibration_score,
+        profile.statistics.maximum_vibration_score,
+        profile.statistics.vibration_variance,
+        profile.statistics.vibration_standard_deviation,
+        profile.statistics.average_motion_ratio,
+        profile.statistics.minimum_motion_ratio,
+        profile.statistics.maximum_motion_ratio,
+        profile.statistics.average_confidence,
+        profile.statistics.sustained_motion_ratio,
+        profile.statistics.average_gps_speed_kmh,
+        profile.learned_at,
+    )
+    .fetch_one(db_pool)
+    .await?;
+
+    Ok(profile_id)
+}
+
+/// Persists one behaviour sample and increments the learning-session
+/// sample count as one atomic database transaction.
+///
+/// The session row is locked while the operation is running so that
+/// concurrent telemetry batches cannot assign the same sample index
+/// or increment the counter beyond the requested sample count.
+pub async fn record_behaviour_sample(
+    db_pool: &PgPool,
+    learning_session_id: Uuid,
+    sample: &BehaviourSample,
+) -> Result<BehaviourSampleRecordOutcome> {
+    let mut transaction = db_pool.begin().await?;
+
+    let session = sqlx::query!(
+        r#"
+        SELECT
+            id,
+            device_id,
+            sensor_id,
+            behaviour_type,
+            status,
+            requested_sample_count,
+            collected_sample_count,
+            started_at,
+            completed_at,
+            failure_reason,
+            created_at,
+            updated_at
+        FROM operational_behaviour_learning_sessions
+        WHERE id = $1
+        FOR UPDATE
+        "#,
+        learning_session_id,
+    )
+    .fetch_optional(&mut *transaction)
+    .await?
+    .ok_or_else(|| {
+        anyhow!(
+            "Operational behaviour learning session {} was not found.",
+            learning_session_id
+        )
+    })?;
+
+    if session.status != LearningStatus::Collecting.as_str() {
+        return Err(anyhow!(
+            "Cannot record a behaviour sample for session {} because its status is {}.",
+            learning_session_id,
+            session.status
+        ));
+    }
+
+    if let Some(started_at) = session.started_at
+        && sample.recorded_at < started_at
+    {
+        transaction.rollback().await?;
+
+        return Ok(BehaviourSampleRecordOutcome::SkippedBeforeSessionStart);
+    }
+    if session.collected_sample_count >= session.requested_sample_count {
+        transaction.rollback().await?;
+
+        return Ok(BehaviourSampleRecordOutcome::SkippedSessionFull);
+    }
+
+    let sample_index = session.collected_sample_count + 1;
+
+    sqlx::query!(
+        r#"
+    INSERT INTO operational_behaviour_samples (
+        learning_session_id,
+        recorded_at,
+        vibration_score,
+        motion_ratio,
+        average_confidence,
+        sustained_motion,
+        motion_sample_count,
+        gps_speed_kmh,
+        sample_index
+    )
+    VALUES (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        $6,
+        $7,
+        $8,
+        $9
+    )
+    "#,
+        learning_session_id,
+        sample.recorded_at,
+        sample.motion_evidence.average_vibration_score,
+        sample.motion_evidence.motion_ratio,
+        sample.motion_evidence.average_confidence,
+        sample.motion_evidence.sustained_motion,
+        sample.motion_evidence.sample_count as i32,
+        sample.gps_speed_kmh,
+        sample_index,
+    )
+    .execute(&mut *transaction)
+    .await?;
+
+    let updated_session = sqlx::query!(
+        r#"
+        UPDATE operational_behaviour_learning_sessions
+        SET
+            collected_sample_count = $2,
+            updated_at = NOW()
+        WHERE id = $1
+        RETURNING
+            id,
+            device_id,
+            sensor_id,
+            behaviour_type,
+            status,
+            requested_sample_count,
+            collected_sample_count,
+            started_at,
+            completed_at,
+            failure_reason,
+            created_at,
+            updated_at
+        "#,
+        learning_session_id,
+        sample_index,
+    )
+    .fetch_one(&mut *transaction)
+    .await?;
+
+    transaction.commit().await?;
+
+    let session = map_learning_session(
+        updated_session.id,
+        updated_session.device_id,
+        updated_session.sensor_id,
+        updated_session.behaviour_type,
+        updated_session.status,
+        updated_session.requested_sample_count,
+        updated_session.collected_sample_count,
+        updated_session.started_at,
+        updated_session.completed_at,
+        updated_session.failure_reason,
+        updated_session.created_at,
+        updated_session.updated_at,
+    )?;
+
+    Ok(BehaviourSampleRecordOutcome::Recorded(session))
 }
 
 /// Marks a collecting learning session as completed.
