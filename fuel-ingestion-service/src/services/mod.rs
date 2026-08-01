@@ -1,3 +1,4 @@
+pub mod adaptive_behaviour_classifier;
 pub mod alert_hub;
 pub mod alert_rules;
 pub mod calibration_cache;

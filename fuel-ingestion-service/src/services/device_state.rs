@@ -197,6 +197,8 @@ mod tests {
     fn moving_motion_evidence() -> MotionEvidence {
         MotionEvidence {
             average_vibration_score: 5.0,
+            average_gravity_deviation_g: 0.0,
+            average_rotation_magnitude_dps: 0.0,
             motion_ratio: 0.8,
             average_confidence: 0.9,
             sustained_motion: true,
@@ -207,6 +209,8 @@ mod tests {
     fn idle_motion_evidence() -> MotionEvidence {
         MotionEvidence {
             average_vibration_score: 2.0,
+            average_gravity_deviation_g: 0.0,
+            average_rotation_magnitude_dps: 0.0,
             motion_ratio: 0.2,
             average_confidence: 0.4,
             sustained_motion: false,
@@ -217,6 +221,8 @@ mod tests {
     fn parked_motion_evidence() -> MotionEvidence {
         MotionEvidence {
             average_vibration_score: 0.3,
+            average_gravity_deviation_g: 0.0,
+            average_rotation_magnitude_dps: 0.0,
             motion_ratio: 0.0,
             average_confidence: 0.0,
             sustained_motion: false,

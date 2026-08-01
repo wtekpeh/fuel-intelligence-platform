@@ -3,7 +3,6 @@ use std::collections::VecDeque;
 use chrono::{DateTime, Utc};
 
 use super::imu_interpreter::ImuInterpretation;
-
 /// Number of interpreted IMU samples retained for motion evidence.
 ///
 /// Five samples provide a small rolling history that smooths
@@ -26,6 +25,18 @@ pub struct MotionSample {
 pub struct MotionEvidence {
     /// Mean vibration score across the current window.
     pub average_vibration_score: f64,
+
+    /// Mean pre-deadband gravity deviation across the current window.
+    ///
+    /// Unlike `average_vibration_score`, this value preserves small physical
+    /// accelerometer changes that may fall below the operational deadband.
+    pub average_gravity_deviation_g: f64,
+
+    /// Mean gyroscope-vector magnitude across the current window.
+    ///
+    /// This preserves physical rotation measurements before the operational
+    /// gyroscope deadband is applied.
+    pub average_rotation_magnitude_dps: f64,
 
     /// Fraction of samples indicating motion.
     ///
@@ -91,6 +102,20 @@ impl MotionBuffer {
             .sum::<f64>()
             / sample_count as f64;
 
+        let average_gravity_deviation_g = self
+            .samples
+            .iter()
+            .map(|sample| sample.interpretation.physical.gravity_deviation_g)
+            .sum::<f64>()
+            / sample_count as f64;
+
+        let average_rotation_magnitude_dps = self
+            .samples
+            .iter()
+            .map(|sample| sample.interpretation.physical.rotation_magnitude_dps)
+            .sum::<f64>()
+            / sample_count as f64;
+
         let average_confidence = self
             .samples
             .iter()
@@ -108,6 +133,8 @@ impl MotionBuffer {
 
         Some(MotionEvidence {
             average_vibration_score,
+            average_gravity_deviation_g,
+            average_rotation_magnitude_dps,
             motion_ratio,
             average_confidence,
             sustained_motion: motion_ratio >= 0.6,
@@ -118,6 +145,7 @@ impl MotionBuffer {
 
 #[cfg(test)]
 mod tests {
+    use super::super::physical_motion_metrics::PhysicalMotionMetrics;
     use super::*;
     use chrono::TimeZone;
 
@@ -127,9 +155,12 @@ mod tests {
         movement_confidence: f64,
     ) -> ImuInterpretation {
         ImuInterpretation {
-            acceleration_magnitude_g: 1.0,
+            physical: PhysicalMotionMetrics::new(
+                1.0,
+                vibration_score / 20.0,
+                vibration_score * 2.0,
+            ),
             dynamic_acceleration_g: 0.0,
-            rotation_magnitude_dps: 0.0,
             vibration_score,
             motion_detected,
             movement_confidence,

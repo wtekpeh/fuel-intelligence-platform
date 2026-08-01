@@ -1,3 +1,4 @@
+use super::physical_motion_metrics::PhysicalMotionMetrics;
 use crate::domain::telemetry::models::ImuTelemetry;
 
 /// Small accelerometer deviations can come from sensor noise,
@@ -30,14 +31,13 @@ const MOTION_SCORE_THRESHOLD: f64 = 2.0;
 /// and gyroscope measurements. Firmware must not calculate them.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImuInterpretation {
-    /// Magnitude of the three-axis accelerometer vector.
-    pub acceleration_magnitude_g: f64,
+    /// Physical measurements calculated before operational deadbands
+    /// and classification rules are applied.
+    pub physical: PhysicalMotionMetrics,
 
-    /// Difference between acceleration magnitude and normal gravity.
+    /// Acceleration remaining after the configured noise deadband
+    /// has been removed.
     pub dynamic_acceleration_g: f64,
-
-    /// Magnitude of the three-axis gyroscope vector.
-    pub rotation_magnitude_dps: f64,
 
     /// Normalized vibration metric between 0.0 and 10.0.
     pub vibration_score: f64,
@@ -49,6 +49,20 @@ pub struct ImuInterpretation {
     pub movement_confidence: f64,
 }
 
+pub fn calculate_physical_motion_metrics(imu: &ImuTelemetry) -> PhysicalMotionMetrics {
+    let acceleration_magnitude_g = vector_magnitude(imu.accel_x, imu.accel_y, imu.accel_z);
+
+    let gravity_deviation_g = (acceleration_magnitude_g - 1.0).abs();
+
+    let rotation_magnitude_dps = vector_magnitude(imu.gyro_x, imu.gyro_y, imu.gyro_z);
+
+    PhysicalMotionMetrics::new(
+        acceleration_magnitude_g,
+        gravity_deviation_g,
+        rotation_magnitude_dps,
+    )
+}
+
 /// Interprets raw IMU measurements into hardware-independent
 /// operational motion evidence.
 ///
@@ -56,14 +70,11 @@ pub struct ImuInterpretation {
 /// GPS and device health are evaluated separately by the device-state
 /// classifier.
 pub fn interpret_imu(imu: &ImuTelemetry) -> ImuInterpretation {
-    let acceleration_magnitude_g = vector_magnitude(imu.accel_x, imu.accel_y, imu.accel_z);
+    let physical_metrics = calculate_physical_motion_metrics(imu);
 
-    let rotation_magnitude_dps = vector_magnitude(imu.gyro_x, imu.gyro_y, imu.gyro_z);
+    let gravity_deviation_g = physical_metrics.gravity_deviation_g;
 
-    // A stationary accelerometer normally measures approximately 1 g
-    // because of gravity, regardless of its mounting orientation.
-    let gravity_deviation_g = (acceleration_magnitude_g - 1.0).abs();
-
+    let rotation_magnitude_dps = physical_metrics.rotation_magnitude_dps;
     // Remove expected sensor noise before generating operational evidence.
     let dynamic_acceleration_g = (gravity_deviation_g - ACCEL_NOISE_DEADBAND_G).max(0.0);
 
@@ -82,9 +93,8 @@ pub fn interpret_imu(imu: &ImuTelemetry) -> ImuInterpretation {
     let movement_confidence = (vibration_score / 4.0).clamp(0.0, 1.0);
 
     ImuInterpretation {
-        acceleration_magnitude_g,
+        physical: physical_metrics,
         dynamic_acceleration_g,
-        rotation_magnitude_dps,
         vibration_score,
         motion_detected,
         movement_confidence,

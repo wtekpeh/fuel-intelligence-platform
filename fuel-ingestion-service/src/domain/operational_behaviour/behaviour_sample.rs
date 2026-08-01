@@ -43,9 +43,11 @@ mod tests {
 
     fn evidence() -> MotionEvidence {
         MotionEvidence {
-            average_vibration_score: 0.5,
-            motion_ratio: 0.2,
-            average_confidence: 0.4,
+            average_vibration_score: 0.0,
+            average_gravity_deviation_g: 0.0,
+            average_rotation_magnitude_dps: 0.0,
+            motion_ratio: 0.0,
+            average_confidence: 0.0,
             sustained_motion: false,
             sample_count: 5,
         }

@@ -256,6 +256,8 @@ pub async fn list_behaviour_samples(
         SELECT
             recorded_at,
             vibration_score,
+            average_gravity_deviation_g,
+            average_rotation_magnitude_dps,
             motion_ratio,
             average_confidence,
             sustained_motion,
@@ -287,6 +289,10 @@ pub async fn list_behaviour_samples(
 
                 motion_evidence: MotionEvidence {
                     average_vibration_score: row.vibration_score,
+
+                    average_gravity_deviation_g: row.average_gravity_deviation_g,
+                    average_rotation_magnitude_dps: row.average_rotation_magnitude_dps,
+
                     motion_ratio: row.motion_ratio,
                     average_confidence: row.average_confidence,
                     sustained_motion: row.sustained_motion,
@@ -332,6 +338,17 @@ pub async fn save_behaviour_profile(db_pool: &PgPool, profile: &BehaviourProfile
             maximum_vibration_score,
             vibration_variance,
             vibration_standard_deviation,
+            average_gravity_deviation_g,
+            minimum_gravity_deviation_g,
+            maximum_gravity_deviation_g,
+            gravity_deviation_variance,
+            gravity_deviation_standard_deviation,
+
+            average_rotation_magnitude_dps,
+            minimum_rotation_magnitude_dps,
+            maximum_rotation_magnitude_dps,
+            rotation_magnitude_variance,
+            rotation_magnitude_standard_deviation,
             average_motion_ratio,
             minimum_motion_ratio,
             maximum_motion_ratio,
@@ -358,7 +375,17 @@ pub async fn save_behaviour_profile(db_pool: &PgPool, profile: &BehaviourProfile
             $15,
             $16,
             $17,
-            $18
+            $18,
+            $19,
+            $20,
+            $21,
+            $22,
+            $23,
+            $24,
+            $25,
+            $26,
+            $27,
+            $28
         )
         ON CONFLICT (
             device_id,
@@ -375,6 +402,35 @@ pub async fn save_behaviour_profile(db_pool: &PgPool, profile: &BehaviourProfile
             vibration_variance = EXCLUDED.vibration_variance,
             vibration_standard_deviation =
                 EXCLUDED.vibration_standard_deviation,
+            average_gravity_deviation_g =
+                EXCLUDED.average_gravity_deviation_g,
+
+            minimum_gravity_deviation_g =
+                EXCLUDED.minimum_gravity_deviation_g,
+
+            maximum_gravity_deviation_g =
+                EXCLUDED.maximum_gravity_deviation_g,
+
+            gravity_deviation_variance =
+                EXCLUDED.gravity_deviation_variance,
+
+            gravity_deviation_standard_deviation =
+                EXCLUDED.gravity_deviation_standard_deviation,
+
+            average_rotation_magnitude_dps =
+                EXCLUDED.average_rotation_magnitude_dps,
+
+            minimum_rotation_magnitude_dps =
+                EXCLUDED.minimum_rotation_magnitude_dps,
+
+            maximum_rotation_magnitude_dps =
+                EXCLUDED.maximum_rotation_magnitude_dps,
+
+            rotation_magnitude_variance =
+                EXCLUDED.rotation_magnitude_variance,
+
+            rotation_magnitude_standard_deviation =
+                EXCLUDED.rotation_magnitude_standard_deviation,
             average_motion_ratio = EXCLUDED.average_motion_ratio,
             minimum_motion_ratio = EXCLUDED.minimum_motion_ratio,
             maximum_motion_ratio = EXCLUDED.maximum_motion_ratio,
@@ -396,6 +452,16 @@ pub async fn save_behaviour_profile(db_pool: &PgPool, profile: &BehaviourProfile
         profile.statistics.maximum_vibration_score,
         profile.statistics.vibration_variance,
         profile.statistics.vibration_standard_deviation,
+        profile.statistics.average_gravity_deviation_g,
+        profile.statistics.minimum_gravity_deviation_g,
+        profile.statistics.maximum_gravity_deviation_g,
+        profile.statistics.gravity_deviation_variance,
+        profile.statistics.gravity_deviation_standard_deviation,
+        profile.statistics.average_rotation_magnitude_dps,
+        profile.statistics.minimum_rotation_magnitude_dps,
+        profile.statistics.maximum_rotation_magnitude_dps,
+        profile.statistics.rotation_magnitude_variance,
+        profile.statistics.rotation_magnitude_standard_deviation,
         profile.statistics.average_motion_ratio,
         profile.statistics.minimum_motion_ratio,
         profile.statistics.maximum_motion_ratio,
@@ -408,6 +474,127 @@ pub async fn save_behaviour_profile(db_pool: &PgPool, profile: &BehaviourProfile
     .await?;
 
     Ok(profile_id)
+}
+
+/// Loads all learned operational behaviour profiles for one device
+/// and vibration sensor.
+///
+/// The adaptive classifier uses the returned PARKED, IDLE, and MOVING
+/// profiles to compare current physical motion evidence against the
+/// device's learned behaviour.
+pub async fn list_behaviour_profiles(
+    db_pool: &PgPool,
+    device_id: Uuid,
+    sensor_id: Uuid,
+) -> Result<Vec<BehaviourProfile>> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT
+            id,
+            device_id,
+            sensor_id,
+            behaviour_type,
+            learning_session_id,
+            sample_count,
+
+            average_vibration_score,
+            minimum_vibration_score,
+            maximum_vibration_score,
+            vibration_variance,
+            vibration_standard_deviation,
+
+            average_gravity_deviation_g,
+            minimum_gravity_deviation_g,
+            maximum_gravity_deviation_g,
+            gravity_deviation_variance,
+            gravity_deviation_standard_deviation,
+
+            average_rotation_magnitude_dps,
+            minimum_rotation_magnitude_dps,
+            maximum_rotation_magnitude_dps,
+            rotation_magnitude_variance,
+            rotation_magnitude_standard_deviation,
+
+            average_motion_ratio,
+            minimum_motion_ratio,
+            maximum_motion_ratio,
+            average_confidence,
+            sustained_motion_ratio,
+            average_gps_speed_kmh,
+            learned_at
+        FROM operational_behaviour_profiles
+        WHERE device_id = $1
+          AND sensor_id = $2
+        ORDER BY behaviour_type ASC
+        "#,
+        device_id,
+        sensor_id,
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    rows.into_iter()
+        .map(|row| {
+            let behaviour_type = BehaviourType::from_str(&row.behaviour_type).ok_or_else(|| {
+                anyhow!(
+                    "Unsupported operational behaviour type stored in profile {}: {}",
+                    row.id,
+                    row.behaviour_type
+                )
+            })?;
+
+            let sample_count = usize::try_from(row.sample_count).map_err(|_| {
+                anyhow!(
+                    "Invalid sample count {} stored for behaviour profile {}.",
+                    row.sample_count,
+                    row.id
+                )
+            })?;
+
+            Ok(BehaviourProfile {
+                id: row.id,
+                device_id: row.device_id,
+                sensor_id: row.sensor_id,
+                behaviour_type,
+                learning_session_id: row.learning_session_id,
+
+                statistics: crate::domain::operational_behaviour::BehaviourProfileStatistics {
+                    sample_count,
+
+                    average_vibration_score: row.average_vibration_score,
+                    minimum_vibration_score: row.minimum_vibration_score,
+                    maximum_vibration_score: row.maximum_vibration_score,
+                    vibration_variance: row.vibration_variance,
+                    vibration_standard_deviation: row.vibration_standard_deviation,
+
+                    average_gravity_deviation_g: row.average_gravity_deviation_g,
+                    minimum_gravity_deviation_g: row.minimum_gravity_deviation_g,
+                    maximum_gravity_deviation_g: row.maximum_gravity_deviation_g,
+                    gravity_deviation_variance: row.gravity_deviation_variance,
+                    gravity_deviation_standard_deviation: row.gravity_deviation_standard_deviation,
+
+                    average_rotation_magnitude_dps: row.average_rotation_magnitude_dps,
+                    minimum_rotation_magnitude_dps: row.minimum_rotation_magnitude_dps,
+                    maximum_rotation_magnitude_dps: row.maximum_rotation_magnitude_dps,
+                    rotation_magnitude_variance: row.rotation_magnitude_variance,
+                    rotation_magnitude_standard_deviation: row
+                        .rotation_magnitude_standard_deviation,
+
+                    average_motion_ratio: row.average_motion_ratio,
+                    minimum_motion_ratio: row.minimum_motion_ratio,
+                    maximum_motion_ratio: row.maximum_motion_ratio,
+
+                    average_confidence: row.average_confidence,
+
+                    sustained_motion_ratio: row.sustained_motion_ratio,
+
+                    average_gps_speed_kmh: row.average_gps_speed_kmh,
+                },
+
+                learned_at: row.learned_at,
+            })
+        })
+        .collect()
 }
 
 /// Persists one behaviour sample and increments the learning-session
@@ -482,6 +669,8 @@ pub async fn record_behaviour_sample(
         learning_session_id,
         recorded_at,
         vibration_score,
+        average_gravity_deviation_g,
+        average_rotation_magnitude_dps,
         motion_ratio,
         average_confidence,
         sustained_motion,
@@ -498,12 +687,16 @@ pub async fn record_behaviour_sample(
         $6,
         $7,
         $8,
-        $9
+        $9,
+        $10,
+        $11
     )
     "#,
         learning_session_id,
         sample.recorded_at,
         sample.motion_evidence.average_vibration_score,
+        sample.motion_evidence.average_gravity_deviation_g,
+        sample.motion_evidence.average_rotation_magnitude_dps,
         sample.motion_evidence.motion_ratio,
         sample.motion_evidence.average_confidence,
         sample.motion_evidence.sustained_motion,

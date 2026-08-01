@@ -76,16 +76,33 @@ mod tests {
             learned_at: Utc.with_ymd_and_hms(2026, 1, 1, 12, 0, 0).single().unwrap(),
             statistics: BehaviourProfileStatistics {
                 sample_count: 50,
+
                 average_vibration_score: 3.2,
                 minimum_vibration_score: 2.1,
                 maximum_vibration_score: 4.8,
                 vibration_variance: 0.64,
                 vibration_standard_deviation: 0.8,
+
+                average_gravity_deviation_g: 0.06,
+                minimum_gravity_deviation_g: 0.02,
+                maximum_gravity_deviation_g: 0.10,
+                gravity_deviation_variance: 0.0004,
+                gravity_deviation_standard_deviation: 0.02,
+
+                average_rotation_magnitude_dps: 2.5,
+                minimum_rotation_magnitude_dps: 1.2,
+                maximum_rotation_magnitude_dps: 4.1,
+                rotation_magnitude_variance: 0.25,
+                rotation_magnitude_standard_deviation: 0.5,
+
                 average_motion_ratio: 0.45,
                 minimum_motion_ratio: 0.20,
                 maximum_motion_ratio: 0.70,
+
                 average_confidence: 0.92,
+
                 sustained_motion_ratio: 0.75,
+
                 average_gps_speed_kmh: Some(8.5),
             },
         }

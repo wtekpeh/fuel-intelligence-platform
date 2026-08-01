@@ -112,7 +112,9 @@ mod tests {
 
     use chrono::{TimeZone, Utc};
 
-    use crate::domain::telemetry::imu_interpreter::ImuInterpretation;
+    use crate::domain::telemetry::{
+        imu_interpreter::ImuInterpretation, physical_motion_metrics::PhysicalMotionMetrics,
+    };
 
     fn create_interpretation(
         vibration_score: f64,
@@ -120,9 +122,8 @@ mod tests {
         movement_confidence: f64,
     ) -> ImuInterpretation {
         ImuInterpretation {
-            acceleration_magnitude_g: 1.0,
+            physical: PhysicalMotionMetrics::new(1.0, 0.0, 0.0),
             dynamic_acceleration_g: 0.0,
-            rotation_magnitude_dps: 0.0,
             vibration_score,
             motion_detected,
             movement_confidence,

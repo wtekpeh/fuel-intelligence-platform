@@ -25,6 +25,36 @@ pub struct BehaviourProfileStatistics {
     /// vibration scores.
     pub vibration_standard_deviation: f64,
 
+    /// Arithmetic mean of pre-deadband gravity deviation values.
+    pub average_gravity_deviation_g: f64,
+
+    /// Lowest pre-deadband gravity deviation observed during learning.
+    pub minimum_gravity_deviation_g: f64,
+
+    /// Highest pre-deadband gravity deviation observed during learning.
+    pub maximum_gravity_deviation_g: f64,
+
+    /// Population variance of pre-deadband gravity deviation values.
+    pub gravity_deviation_variance: f64,
+
+    /// Population standard deviation of pre-deadband gravity deviation values.
+    pub gravity_deviation_standard_deviation: f64,
+
+    /// Arithmetic mean of gyroscope-vector magnitudes.
+    pub average_rotation_magnitude_dps: f64,
+
+    /// Lowest gyroscope-vector magnitude observed during learning.
+    pub minimum_rotation_magnitude_dps: f64,
+
+    /// Highest gyroscope-vector magnitude observed during learning.
+    pub maximum_rotation_magnitude_dps: f64,
+
+    /// Population variance of gyroscope-vector magnitudes.
+    pub rotation_magnitude_variance: f64,
+
+    /// Population standard deviation of gyroscope-vector magnitudes.
+    pub rotation_magnitude_standard_deviation: f64,
+
     /// Arithmetic mean of all motion ratios.
     pub average_motion_ratio: f64,
 
@@ -67,6 +97,16 @@ impl BehaviourProfileStatistics {
     pub fn has_predominantly_sustained_motion(&self) -> bool {
         self.sustained_motion_ratio >= 0.5
     }
+
+    /// Returns the observed pre-deadband gravity-deviation interval.
+    pub fn gravity_deviation_range(&self) -> f64 {
+        self.maximum_gravity_deviation_g - self.minimum_gravity_deviation_g
+    }
+
+    /// Returns the observed gyroscope-magnitude interval.
+    pub fn rotation_magnitude_range(&self) -> f64 {
+        self.maximum_rotation_magnitude_dps - self.minimum_rotation_magnitude_dps
+    }
 }
 
 #[cfg(test)]
@@ -81,6 +121,17 @@ mod tests {
             maximum_vibration_score: 5.0,
             vibration_variance: 2.0,
             vibration_standard_deviation: 2.0_f64.sqrt(),
+            average_gravity_deviation_g: 0.06,
+            minimum_gravity_deviation_g: 0.02,
+            maximum_gravity_deviation_g: 0.10,
+            gravity_deviation_variance: 0.0004,
+            gravity_deviation_standard_deviation: 0.02,
+
+            average_rotation_magnitude_dps: 2.5,
+            minimum_rotation_magnitude_dps: 1.0,
+            maximum_rotation_magnitude_dps: 4.0,
+            rotation_magnitude_variance: 0.25,
+            rotation_magnitude_standard_deviation: 0.5,
             average_motion_ratio: 0.6,
             minimum_motion_ratio: 0.2,
             maximum_motion_ratio: 0.9,
@@ -117,5 +168,19 @@ mod tests {
         statistics.sustained_motion_ratio = 0.49;
 
         assert!(!statistics.has_predominantly_sustained_motion());
+    }
+
+    #[test]
+    fn calculates_gravity_deviation_range() {
+        let statistics = statistics();
+
+        assert!((statistics.gravity_deviation_range() - 0.08).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn calculates_rotation_magnitude_range() {
+        let statistics = statistics();
+
+        assert!((statistics.rotation_magnitude_range() - 3.0).abs() < f64::EPSILON);
     }
 }
