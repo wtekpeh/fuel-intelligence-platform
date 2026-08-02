@@ -9,9 +9,9 @@ use crate::repository::{
     self, NewDeviceStateEvent, NewOperationalIntelligenceEvent, NewOperationalTransitionEvent,
     StoredTelemetryPosition, get_latest_device_state,
 };
+use crate::services::adaptive_behaviour_service::AdaptiveBehaviourService;
 use crate::services::device_state::{
     DeviceOperationalState, calculate_distance_meters, calculate_speed_kmh, classify_device_state,
-    classify_device_state_from_motion,
 };
 use crate::services::operational_behaviour::determine_operational_transition;
 use crate::services::operational_behaviour_learning::OperationalBehaviourLearningService;
@@ -72,21 +72,34 @@ pub async fn process_motion_intelligence(
         Some(reading.longitude),
     );
 
-    let motion_device_state = classify_device_state_from_motion(
-        Some("ONLINE"),
-        motion_evidence,
-        previous_latitude,
-        previous_longitude,
-        Some(reading.latitude),
-        Some(reading.longitude),
-    );
+    let adaptive_behaviour_service = AdaptiveBehaviourService::new(db_pool.clone());
+
+    let adaptive_decision = adaptive_behaviour_service
+        .classify(
+            device_id,
+            vibration_sensor_id,
+            Some("ONLINE"),
+            motion_evidence,
+            previous_latitude,
+            previous_longitude,
+            Some(reading.latitude),
+            Some(reading.longitude),
+        )
+        .await?;
+
+    let motion_device_state = adaptive_decision.state.clone();
 
     println!(
-        "[CLASSIFIER DEBUG] device_id={}, state={}, legacy_state={}, \
-        distance_meters={:?}, speed_kmh={:?}, vibration_score={:.4}, \
-        imu_motion_detected={}, motion_evidence={:?}",
+        "[CLASSIFIER DEBUG] device_id={}, state={}, source={}, \
+    matched_profile_id={:?}, adaptive_distance={:?}, \
+    legacy_state={}, distance_meters={:?}, speed_kmh={:?}, \
+    vibration_score={:.4}, imu_motion_detected={}, \
+    motion_evidence={:?}",
         device_id,
         motion_device_state.as_str(),
+        adaptive_decision.source.as_str(),
+        adaptive_decision.matched_profile_id,
+        adaptive_decision.adaptive_distance,
         legacy_device_state.as_str(),
         distance_meters,
         speed_kmh,
@@ -229,13 +242,18 @@ pub async fn process_motion_intelligence(
                 latitude: Some(reading.latitude),
                 longitude: Some(reading.longitude),
 
-                source: "telemetry".to_string(),
+                source: format!("telemetry:{}", adaptive_decision.source.as_str()),
 
                 message: Some(format!(
                     "Device state confirmed as {:?}. Classified state: {:?}. \
-                    Vibration score: {:.2}, movement confidence: {:.2}",
+                    Classification source: {}. Matched profile: {:?}. \
+                    Adaptive distance: {:?}. Vibration score: {:.2}, \
+                    movement confidence: {:.2}",
                     confirmed_device_state,
                     motion_device_state,
+                    adaptive_decision.source.as_str(),
+                    adaptive_decision.matched_profile_id,
+                    adaptive_decision.adaptive_distance,
                     imu_interpretation.vibration_score,
                     imu_interpretation.movement_confidence,
                 )),

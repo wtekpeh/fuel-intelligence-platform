@@ -472,14 +472,14 @@ GET /api/geofences/{organization_id}
 POST /api/geofences/check-position
 ```
 
-`````md
+``````md
 ## Geofence Transition Events
 
 The backend now supports automatic geofence transition detection during telemetry ingestion.
 
 Current transition types:
 
-````text
+`````text
 ENTERED_ZONE
 EXITED_ZONE
 
@@ -536,88 +536,57 @@ replay investigation
 investigation timeline correlation
 future geofence intelligence rules
 
----
 
-### Location 3
-
-Go all the way to the bottom.
-
-Find:
-
-```md
 # Current Development Status
 
-Implemented:
+The ORBI Sensor Intelligence Platform has now completed the core
+Operational Behaviour Intelligence pipeline.
 
-- PostGIS spatial intelligence layer
-- GeoJSON geofence APIs
-- backend geofence persistence
-- operational polygon intelligence
-- ST_Contains spatial checks
-- replay-aware geofence intelligence
-- device-aware geofence assignment foundation
-- telemetry position geofence checks
-- geofence transition detection
-- geofence transition event persistence
-- enriched geofence transition APIs
-- device-filtered geofence transition queries
-- investigation-ready geofence transition intelligence
-- persisted GPS movement recovery
-- cross-request movement continuity
-- GPS distance estimation
-- approximate speed estimation
-- operational transition detection
-- journey lifecycle intelligence
-- transition-only operational state persistence
-- investigation timeline optimization
+Completed platform capabilities include:
 
----
+- Enterprise telemetry ingestion pipeline
+- Device provisioning and hardware profile management
+- Device health monitoring
+- GPS movement detection
+- IMU telemetry interpretation
+- Physical Motion Metrics generation
+- MotionEvidence rolling aggregation
+- Operational State Engine
+- Operational Behaviour Learning
+- Behaviour Profile generation
+- Adaptive Behaviour Classification
+- Cross-request movement intelligence
+- Telemetry calibration pipeline
+- Operational event generation
+- Investigation Intelligence foundation
+- Replay Intelligence foundation
+- Analytics Intelligence foundation
 
-### Location 4
+Adaptive operational behaviour has been validated using real hardware.
 
-Find:
+Validation includes:
 
-```md
-Planned spatial intelligence capabilities:
+- PARKED behaviour learning
+- IDLE behaviour learning
+- MOVING behaviour learning
+- Behaviour Profile persistence
+- Adaptive live classification
+- Automatic rule-based fallback
+- GPS-authoritative movement classification
 
-- depot entry/exit events
-```
-````
-
-Remove:
-
-```md
-- depot entry/exit events
-```
-
-because we have already implemented it.
-
-Leave the rest:
-
-```md
-- restricted-zone alerts
-- dwell detection
-- route corridor analysis
-- unauthorized fueling detection
-- theft outside depot intelligence
-- replay spatial investigation workflows
-- operational hotspot analysis
-- future route-risk intelligence
-```
-
----
-
-Those are the only four places I would touch in the ingestion service README right now. That keeps the document accurate and avoids duplication.
+The platform now supports installation-specific operational behaviour
+learning while maintaining deterministic fallback behaviour for devices
+that have not yet completed learning.
 
 Current geofence types:
 
-```text
+
 DEPOT
 FUELING_STATION
 RESTRICTED_ZONE
 SAFE_CORRIDOR
 CUSTOMER_SITE
-```
+
 
 Current spatial intelligence capabilities include:
 
@@ -876,7 +845,9 @@ based on the existing backend hierarchy already present in the database.
 
 ```http
 POST /api/fuel-readings/batch
-````
+`````
+``````
+
 `````
 
 ## Organization Fleet Overview
@@ -1287,6 +1258,217 @@ future ML-assisted behavioral analysis
 
 ---
 
+# Operational Behaviour Learning
+
+The Device State Engine is now complemented by an adaptive Operational
+Behaviour Learning system.
+
+Rather than relying solely on fixed thresholds, ORBI can learn the
+physical operating characteristics of an individual installation using
+real telemetry collected from deployed hardware.
+
+This allows operational behaviour to adapt to different vehicles,
+mounting positions, suspension characteristics, and sensor installations
+without requiring firmware changes.
+
+## Behaviour Learning Workflow
+
+Operational behaviour learning follows the lifecycle below:
+
+Create Learning Session
+↓
+Start Learning Session
+↓
+Collect MotionEvidence Samples
+↓
+Generate Behaviour Statistics
+↓
+Persist Behaviour Profile
+↓
+Adaptive Classification
+
+Each learning session targets one operational behaviour.
+
+Current supported behaviours:
+
+PARKED
+IDLE
+MOVING
+
+Each behaviour is learned independently using real telemetry.
+
+---
+
+## Physical Motion Metrics
+
+Unlike the legacy threshold-based classifier, behaviour learning uses
+physical motion metrics derived from calibrated IMU telemetry.
+
+Current learned metrics include:
+
+- vibration score
+- gravity deviation
+- rotation magnitude
+- motion ratio
+- movement confidence
+- GPS speed
+
+These measurements are calculated before operational thresholds are
+applied, allowing the platform to learn the true physical behaviour of
+an installation.
+
+---
+
+## MotionEvidence
+
+Learning operates on MotionEvidence rather than individual telemetry
+packets.
+
+MotionEvidence represents a rolling summary of recent motion behaviour
+and currently includes:
+
+- average vibration score
+- average gravity deviation
+- average rotation magnitude
+- motion ratio
+- average movement confidence
+- sustained motion detection
+- estimated GPS speed
+
+This rolling model reduces transient sensor noise while preserving
+meaningful operational behaviour.
+
+---
+
+## Behaviour Profiles
+
+Successful learning sessions generate Behaviour Profiles that describe
+the physical characteristics of each learned behaviour.
+
+Each profile stores statistical summaries including:
+
+- sample count
+- average
+- minimum
+- maximum
+- variance
+- standard deviation
+
+for the learned motion metrics.
+
+These profiles are persisted and reused for future operational
+classification.
+
+---
+
+## Adaptive Behaviour Classification
+
+Operational classification now follows a hierarchical decision model.
+
+GPS Movement
+│
+├── Significant movement detected
+│ ↓
+│ MOVING
+│
+└── No significant movement
+↓
+Behaviour Profiles Available?
+│
+Yes │ No
+│
+▼
+Adaptive Behaviour Matching
+│
+▼
+Legacy Rule-Based Classification
+│
+▼
+Operational State Engine
+
+GPS-confirmed travel remains authoritative.
+
+Adaptive profile matching is used only when complete learned behaviour
+profiles exist.
+
+If suitable profiles are unavailable, the platform automatically falls
+back to the deterministic rule-based classifier.
+
+This guarantees continuous operation while allowing installations to
+benefit from adaptive behaviour learning whenever sufficient training
+data exists.
+
+---
+
+## Behaviour Profile Eligibility
+
+Adaptive classification becomes active only when all required behaviour
+profiles exist.
+
+Current requirements:
+
+- PARKED profile
+- IDLE profile
+- MOVING profile
+- minimum sample count satisfied
+- valid physical statistics
+
+Incomplete or invalid profiles automatically disable adaptive
+classification for that installation.
+
+---
+
+## Installation Requirements
+
+Behaviour profiles are installation-specific.
+
+Reliable classification requires:
+
+- secure sensor mounting
+- fixed sensor orientation
+- consistent mechanical coupling
+
+Changing the mounting position or orientation may require the behaviour
+profiles to be relearned.
+
+---
+
+## Real Hardware Validation
+
+The adaptive behaviour pipeline has been validated using a real ORBI
+device.
+
+Validation included:
+
+- PARKED learning
+- IDLE learning
+- MOVING learning
+- Behaviour Profile generation
+- Adaptive Behaviour Classification
+- Live telemetry integration
+
+This validation confirms that adaptive behaviour learning functions
+correctly using production telemetry rather than simulated datasets.
+
+---
+
+## Future Enhancements
+
+Planned improvements include:
+
+- guided recalibration workflow
+- controlled behaviour profile replacement
+- profile quality scoring
+- behaviour profile version history
+- periodic adaptive recalibration
+- installation health validation
+
+Future recalibration will preserve existing validated profiles until new
+profiles have been successfully verified, preventing poor-quality
+training data from replacing trusted operational behaviour.
+
+---
+
 # Multi-Sensor Correlation Layer
 
 The platform now supports deterministic multi-sensor operational correlation.
@@ -1309,7 +1491,6 @@ The correlation layer helps distinguish between:
 
 Current correlation statuses:
 
-````text
 Consistent
 Suspicious
 Conflicting
@@ -1338,10 +1519,10 @@ correlation_reason
 Example:
 
 {
-  "event_type": "THEFT",
-  "confidence": "High",
-  "correlation_status": "Consistent",
-  "correlation_reason": "Fuel theft pattern aligns with parked stationary vehicle."
+"event_type": "THEFT",
+"confidence": "High",
+"correlation_status": "Consistent",
+"correlation_reason": "Fuel theft pattern aligns with parked stationary vehicle."
 }
 
 This provides the foundation for:
@@ -1370,7 +1551,6 @@ before deciding whether an alert should be escalated.
 
 Current alert severities:
 
-```text
 Info
 Warning
 Critical
@@ -1378,16 +1558,16 @@ Critical
 Current implemented examples:
 
 THEFT
-+ High confidence
-+ Consistent operational correlation
-====================================
-Critical alert
+
+- High confidence
+- # Consistent operational correlation
+  Critical alert
 
 REFILL
-+ Medium confidence
-+ Conflicting operational correlation
-====================================
-Warning alert
+
+- Medium confidence
+- # Conflicting operational correlation
+  Warning alert
 
 Alerts are persisted independently from raw fuel events.
 
@@ -1414,11 +1594,11 @@ GET /api/alerts
 Example response:
 
 [
-  {
-    "alert_type": "THEFT",
-    "severity": "Critical",
-    "reason": "High-confidence theft with operationally consistent correlation."
-  }
+{
+"alert_type": "THEFT",
+"severity": "Critical",
+"reason": "High-confidence theft with operationally consistent correlation."
+}
 ]
 
 This layer provides the operational foundation for:
@@ -1439,7 +1619,7 @@ fuel event detected
 → alert rule evaluation
 → alert persistence
 → immediate WebSocket broadcast
-````
+```
 
 Current endpoint:
 
@@ -2942,13 +3122,15 @@ Modular Sensor Architecture ✅
 ↓
 Calibration Storage Foundation ✅
 ↓
-Telemetry Calibration Pipeline ← Current
+Telemetry Calibration Pipeline ✅
 ↓
-KUM Fuel Sensor Integration
+Operational Behaviour Learning ✅
 ↓
-Fuel Intelligence Validation
+Adaptive Behaviour Classification ✅
 ↓
-Sensor Adapter Layer
+Real Hardware Validation ✅
+↓
+KUM Fuel Sensor Integration ← Current
 ↓
 Fuel Intelligence Validation
 ↓
@@ -2978,7 +3160,6 @@ The platform is designed to be hardware and sensor agnostic.
 
 Future hardware integration will follow this architecture:
 
-```text
 Physical Sensor
         ↓
 Sensor Adapter
@@ -2990,7 +3171,6 @@ Sensor Profile
 Hardware Profile
         ↓
 Operational Intelligence
-```
 
 This architecture allows multiple hardware vendors and communication
 protocols (Modbus, RS485, CAN/J1939, MQTT, LoRaWAN, custom protocols,
@@ -3020,3 +3200,4 @@ Pending:
 - ML-assisted anomaly scoring
 - Redis/Kafka streaming
 - industrial hardware integration
+`````

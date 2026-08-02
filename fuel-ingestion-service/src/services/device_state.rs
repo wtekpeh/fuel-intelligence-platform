@@ -142,7 +142,7 @@ pub fn classify_device_state(
 
 /// Determines whether two GPS positions are separated by enough distance
 /// to represent meaningful asset movement.
-fn has_meaningful_gps_displacement(
+pub fn has_meaningful_gps_displacement(
     previous_latitude: Option<f64>,
     previous_longitude: Option<f64>,
     current_latitude: Option<f64>,
