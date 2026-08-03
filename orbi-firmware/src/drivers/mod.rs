@@ -4,3 +4,4 @@ pub mod modem;
 pub mod vibration;
 
 pub use modem::Modem;
+pub mod kum;

@@ -23,6 +23,9 @@ Current firmware capabilities include:
   - Accelerometer (X, Y, Z)
   - Gyroscope (X, Y, Z)
   - IMU temperature
+  - Verified RS485 / Modbus communication
+  - Verified KUM ultrasonic fuel sensor communication
+  - Raw KUM Modbus measurement acquisition
 - LTE backend communication
 - HTTP batch telemetry uploads
 - Persistent SD card queue
@@ -601,12 +604,22 @@ Future I²C devices may include:
 
 The primary industrial sensor interface.
 
-Planned support includes:
+The RS485 communication layer has now been successfully validated on the ORBI reference hardware using a MAX485 transceiver and a KUM ultrasonic fuel sensor.
 
-- Fuel level sensors
-- Industrial level sensors
-- Pressure sensors
-- Third-party Modbus devices
+Verified capabilities include:
+
+- UART2 communication
+- MAX485 RS485 transceiver integration
+- Modbus RTU request transmission
+- Successful Modbus response reception
+- Raw KUM measurement acquisition
+
+Future work includes:
+
+- Generic Modbus abstraction
+- Additional industrial sensors
+- Multi-vendor register profiles
+- Generic sensor adapters
 
 The firmware is intentionally being developed with a generic Modbus architecture rather than a sensor-specific implementation.
 
@@ -689,19 +702,15 @@ This configures:
 
 Build the production firmware:
 
-```bash
 cd ~/projects/fuel-intelligence-platform/orbi-firmware
 
 source ~/export-esp.sh
 
 cargo build --release
-```
 
 The firmware image will be generated at:
 
-```text
 target/xtensa-esp32-none-elf/release/orbi-firmware
-```
 
 ---
 
@@ -709,13 +718,11 @@ target/xtensa-esp32-none-elf/release/orbi-firmware
 
 Flash the firmware to the ESP32:
 
-```bash
 espflash flash \
-    --monitor \
-    --ignore-app-descriptor \
-    --port COM5 \
-    "\\wsl.localhost\Ubuntu\home\william\projects\fuel-intelligence-platform\orbi-firmware\target\xtensa-esp32-none-elf\release\orbi-firmware"
-```
+ --monitor \
+ --ignore-app-descriptor \
+ --port COM5 \
+ "\\wsl.localhost\Ubuntu\home\william\projects\fuel-intelligence-platform\orbi-firmware\target\xtensa-esp32-none-elf\release\orbi-firmware"
 
 ---
 
@@ -1445,6 +1452,42 @@ GNSS speed is converted from knots to kilometres per hour before being included 
 
 ---
 
+## RS485 / Modbus
+
+The RS485 communication subsystem has been successfully validated on the ORBI reference hardware.
+
+Verified functionality includes:
+
+- UART2 communication
+- MAX485 transceiver operation
+- Modbus RTU communication
+- Successful communication with the KUM ultrasonic fuel sensor
+- Raw measurement acquisition from the sensor
+
+This validation establishes the firmware communication foundation required for future fuel telemetry integration.
+
+### Hardware Validation Notes
+
+The current ORBI reference hardware has been validated using:
+
+- LilyGO T-A7670
+- MAX485 RS485 transceiver
+- KUM ultrasonic fuel sensor
+
+During validation it was confirmed that the reference MAX485 module communicates successfully using the following TTL wiring:
+
+GPIO21 → MAX485 TXD
+
+GPIO22 → MAX485 RXD
+
+VDD3V3 → MAX485 VCC
+
+GND → MAX485 GND
+
+This wiring was validated through successful Modbus RTU communication with the KUM sensor.
+
+Different RS485 modules may expose their TTL interface differently and should always be verified during hardware bring-up.
+
 ## Telemetry
 
 The telemetry subsystem currently supports:
@@ -1733,15 +1776,32 @@ This architecture will allow future hardware profiles to be created by combining
 
 # Phase 3 — RS485 / Modbus Integration
 
-Following the Sensor Abstraction Layer, the first production sensor integration will be the KUM ultrasonic fuel sensor.
+Following the Sensor Abstraction Layer, the first production sensor integration is the KUM ultrasonic fuel sensor.
 
-Planned capabilities include:
+## Hardware Foundation Completed ✅
 
-- Generic RS485 transport
-- Modbus RTU communication
+The following capabilities have been successfully validated on the ORBI reference hardware:
+
+- UART2 bring-up
+- MAX485 RS485 transceiver integration
+- Modbus RTU request transmission
+- Successful Modbus RTU response reception
+- Physical communication with the KUM ultrasonic fuel sensor
+- Raw KUM measurement acquisition
+
+These validations establish the firmware communication foundation required for RS485-based sensor support.
+
+## Remaining Integration Work
+
+The remaining Phase 3 work includes:
+
+- Generic RS485 transport abstraction
+- Generic Modbus client
 - Configurable device profiles
 - Register-based measurement acquisition
-- Fuel level normalization
+- Fuel measurement decoding
+- Fuel telemetry integration
+- Telemetry Builder integration
 - Tank calibration support
 - Sensor diagnostics
 - Multi-vendor register mapping

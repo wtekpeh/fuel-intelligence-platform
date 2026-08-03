@@ -10,7 +10,7 @@ mod storage;
 mod telemetry;
 
 use board::BoardPins;
-use drivers::Modem;
+use drivers::{kum::KumSensor, Modem};
 use esp_backtrace as _;
 use esp_hal::i2c::master::{Config as I2cConfig, I2c};
 use esp_hal::main;
@@ -80,6 +80,10 @@ fn main() -> ! {
     );
 
     let mut modem = Modem::new(peripherals.UART1, peripherals.GPIO26, peripherals.GPIO27);
+
+    let mut kum_sensor = KumSensor::new(peripherals.UART2, peripherals.GPIO21, peripherals.GPIO22);
+
+    kum_sensor.query_and_print_raw_response(&delay);
 
     drivers::gnss::initialize(&mut modem, &delay);
 
