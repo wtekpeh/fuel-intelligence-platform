@@ -31,16 +31,52 @@ pub struct PositionTelemetry {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FuelTelemetry {
+    /// Raw physical measurement received from the fuel sensor.
+    ///
+    /// This remains available even before tank calibration has
+    /// been applied.
+    pub raw: RawFuelTelemetry,
+
+    /// Calibrated tank values produced by the backend.
+    ///
+    /// This is `None` until a valid tank calibration profile has
+    /// converted the raw sensor measurement into litres and
+    /// percentage.
+    pub calibrated: Option<CalibratedFuelTelemetry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RawFuelTelemetry {
+    /// Smoothed ultrasonic distance between the sensor and the
+    /// detected liquid surface.
+    pub smooth_distance_cm: f64,
+
+    /// Current real-time ultrasonic distance.
+    pub realtime_distance_cm: f64,
+
+    /// Unfiltered native ultrasonic distance.
+    pub raw_distance_cm: f64,
+
+    /// Temperature reported by the KUM sensor.
+    pub temperature_c: f64,
+
+    /// Sensor-specific status byte returned by the KUM protocol.
+    pub status_byte_1: u8,
+
+    /// Sensor-specific status byte returned by the KUM protocol.
+    pub status_byte_2: u8,
+
+    /// Raw-data validity value returned by the KUM sensor.
+    pub raw_data_validity: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CalibratedFuelTelemetry {
+    /// Fuel volume produced by backend tank calibration.
     pub litres: f64,
+
+    /// Tank fill percentage produced by backend calibration.
     pub percentage: f64,
-
-    /// Native value reported by the sensor.
-    /// This may represent different things depending
-    /// on the sensor technology (RS485, ultrasonic,
-    /// capacitive, CAN, etc.).
-    pub sensor_value: Option<f64>,
-
-    pub temperature: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

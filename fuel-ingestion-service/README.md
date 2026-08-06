@@ -78,11 +78,15 @@ Raw measurements received from physical hardware.
 
 Examples:
 
+Examples:
+
 - GPS coordinates
-- Fuel level
+- Raw ultrasonic distance to the fuel surface
+- Fuel-sensor temperature
+- Fuel-sensor status values
 - Accelerometer
 - Gyroscope
-- Temperature
+- IMU temperature
 
 Operational State
 
@@ -145,25 +149,74 @@ Like GPS and Fuel telemetry, these measurements contain no operational interpret
 
 These are produced by the Operational Intelligence layer after telemetry has been processed.
 
+For fuel-capable ORBI devices, the firmware transmits raw physical fuel-sensor measurements rather than calibrated litres or tank percentage.
+
+Current KUM ultrasonic measurements include:
+
+- smoothed distance to the liquid surface
+- real-time distance
+- raw distance
+- sensor temperature
+- sensor status bytes
+- raw-data validity
+
+The backend is responsible for converting these physical measurements into:
+
+- fuel height
+- calibrated litres
+- tank percentage
+- fuel consumption
+- refill events
+- leak events
+- theft events
+
+This allows tank calibration and fuel intelligence to evolve without requiring firmware updates.
+
 ---
+
+## Measurement-First Fuel Telemetry
+
+ORBI fuel telemetry now follows a measurement-first architecture.
+
+The firmware does not calculate fuel litres or tank percentage.
+
+Instead, the KUM ultrasonic sensor produces physical distance measurements:
+
+KUM Sensor
+↓
+RS485 / Modbus RTU
+↓
+Raw Distance Measurements
+↓
+Firmware Telemetry
+↓
+Backend Canonical Telemetry
+↓
+Tank Calibration
+↓
+Litres and Percentage
+↓
+Fuel Intelligence
 
 ## Telemetry Processing Pipeline
 
 The platform processes telemetry using the following architecture:
 
-Telemetry Packet
+TelemetryBatch
 ↓
-Telemetry Router
+TelemetryReading Request Model
 ↓
 Canonical Telemetry Mapping
 ↓
-Persist Raw Telemetry
+RawFuelTelemetry / PositionTelemetry / ImuTelemetry
 ↓
-Resolve Provisioned Sensor
+Resolve Provisioned Device and Sensors
 ↓
-Load Active Calibration
+Load Active Installation Calibration
 ↓
 Apply Calibration
+↓
+CalibratedFuelTelemetry
 ↓
 Telemetry Processing Pipeline
 ├── Filtering
@@ -185,14 +238,6 @@ Investigation Engine
 ↓
 Analytics Intelligence
 
-Each sensor service is responsible only for processing its own calibrated sensor domain.
-
-Sensor services never resolve calibration directly. They receive measurements that have already passed through the telemetry processing pipeline.
-
-The Intelligence Engine combines observations from multiple sensor services to produce operational events and alerts.
-
----
-
 ## Sensor Service Responsibilities
 
 GPS Service
@@ -204,10 +249,19 @@ GPS Service
 
 Fuel Service
 
-- Fuel persistence
-- Fuel event detection
-- Leak detection
-- Refill detection
+Current responsibilities:
+
+- raw fuel telemetry acceptance
+- calibrated fuel persistence when a valid calibrated value exists
+- preservation of the original raw telemetry payload
+- fuel event detection for calibrated fuel readings
+- leak detection
+- refill detection
+- theft detection
+
+The Fuel Service does not invent a fuel value when litres are unavailable.
+
+For physical KUM telemetry, calibrated persistence is deferred until the backend calibration pipeline has converted the raw ultrasonic distance into litres and percentage.
 
 Motion Service
 
@@ -324,6 +378,14 @@ The service currently supports:
   - gyroscope (X, Y, Z)
   - IMU temperature
 - backwards-compatible support for legacy vibration and motion fields
+- canonical `TelemetryBatch` ingestion
+- canonical `TelemetryReading` request model
+- raw KUM ultrasonic distance ingestion
+- raw fuel-sensor temperature ingestion
+- KUM sensor status and validity ingestion
+- separation of raw and calibrated fuel telemetry
+- compatibility aliases for legacy `FuelReading` and `ReadingBatch`
+- optional legacy litres and percentage during migration
 
 ---
 
@@ -843,16 +905,50 @@ based on the existing backend hierarchy already present in the database.
 
 ## Batch Ingestion
 
-```http
+
 POST /api/fuel-readings/batch
-`````
-``````
+
+The route name is retained temporarily for compatibility, but the endpoint now accepts a general telemetry batch rather than a fuel-only payload.
+
+Current request structure:
+
+```json
+{
+  "device_id": "ORBI-GPS-003",
+  "synced_at": "2026-08-06T18:39:56Z",
+  "readings": [
+    {
+      "device_id": "ORBI-GPS-003",
+      "timestamp": "2026-08-06T18:39:56Z",
+      "latitude": 51.877655,
+      "longitude": -0.4293796,
+      "speed": 0.0,
+      "heading": 344.94,
+
+      "fuel_distance_smooth_cm": 18.14,
+      "fuel_distance_realtime_cm": 18.06,
+      "fuel_distance_raw_cm": 15.35,
+      "fuel_sensor_temperature_c": 29.0,
+      "fuel_sensor_status_1": 11,
+      "fuel_sensor_status_2": 193,
+      "fuel_raw_data_validity": 16,
+
+      "accel_x_g": 1.053833,
+      "accel_y_g": 0.14550781,
+      "accel_z_g": -0.08850098,
+      "gyro_x_dps": -0.9847328,
+      "gyro_y_dps": 2.1526718,
+      "gyro_z_dps": -1.4351145,
+      "imu_temperature_c": 26.674116,
+      "simulation_mode": "physical_gps_imu"
+    }
+  ]
+}
 
 `````
 
 ## Organization Fleet Overview
 
-````http
 GET /api/organizations/{organization_id}/fleet-overview
 
 Returns the assets, devices, sensors, device status, and open alert counts for a selected organization.
@@ -876,16 +972,16 @@ open_alert_count
 Example response:
 
 [
-  {
-    "asset_name": "Demo Fuel Truck",
-    "asset_type": "truck",
-    "capacity_litres": 200.0,
-    "device_code": "DEV_CORR_TEST_004",
-    "device_status": "ONLINE",
-    "sensor_count": 1,
-    "sensor_types": ["fuel_level"],
-    "open_alert_count": 13
-  }
+{
+"asset_name": "Demo Fuel Truck",
+"asset_type": "truck",
+"capacity_litres": 200.0,
+"device_code": "DEV_CORR_TEST_004",
+"device_status": "ONLINE",
+"sensor_count": 1,
+"sensor_types": ["fuel_level"],
+"open_alert_count": 13
+}
 ]
 
 Frontend flow supported by this endpoint:
@@ -898,16 +994,13 @@ Organization landing page
 
 This endpoint strengthens the platform structure by making the dashboard organization-aware and device-aware instead of being a single global screen.
 
-
 Your README already has the organization overview section, so this fleet overview belongs directly after it. :contentReference[oaicite:0]{index=0}
 
 ---
 
 ## List Fuel Events
 
-```http
 GET /api/fuel-events
-````
 
 Fuel event responses include:
 
@@ -1991,6 +2084,15 @@ Implemented:
 - shared telemetry processing architecture
 - reusable motion intelligence foundation
 - rolling motion evidence pipeline
+- measurement-first fuel telemetry contract
+- canonical `TelemetryReading` request model
+- canonical `TelemetryBatch` request model
+- `RawFuelTelemetry`
+- `CalibratedFuelTelemetry`
+- raw KUM telemetry mapping
+- optional calibrated fuel values
+- compatibility support for legacy fuel payloads
+- safe skipping of calibrated fuel persistence when litres are unavailable
 
 # Device & Hardware Management
 
@@ -3130,7 +3232,15 @@ Adaptive Behaviour Classification ✅
 ↓
 Real Hardware Validation ✅
 ↓
-KUM Fuel Sensor Integration ← Current
+KUM Fuel Sensor Hardware Integration ✅
+↓
+Raw KUM Telemetry Ingestion ✅
+↓
+Measurement-First Fuel Contract ✅
+↓
+Tank Calibration Integration ← Current
+↓
+Calibrated Fuel Persistence
 ↓
 Fuel Intelligence Validation
 ↓
@@ -3161,15 +3271,23 @@ The platform is designed to be hardware and sensor agnostic.
 Future hardware integration will follow this architecture:
 
 Physical Sensor
-        ↓
-Sensor Adapter
-        ↓
-Normalized Telemetry
-        ↓
+↓
+Provisioned Sensor Instance
+↓
 Sensor Profile
-        ↓
-Hardware Profile
-        ↓
+↓
+Sensor Adapter
+↓
+Raw Vendor Measurement
+↓
+RawFuelTelemetry
+↓
+Installation-Specific Calibration
+↓
+CalibratedFuelTelemetry
+↓
+Fuel Persistence
+↓
 Operational Intelligence
 
 This architecture allows multiple hardware vendors and communication
@@ -3200,4 +3318,8 @@ Pending:
 - ML-assisted anomaly scoring
 - Redis/Kafka streaming
 - industrial hardware integration
-`````
+
+```
+
+```
+``````

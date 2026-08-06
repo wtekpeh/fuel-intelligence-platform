@@ -14,33 +14,43 @@ pub fn build_telemetry_payload(reading: &TelemetryRecord<'_>) -> String<1024> {
         &mut payload,
         format_args!(
             "{{\
-                \"device_id\":\"{}\",\
-                \"synced_at\":\"{}\",\
-                \"readings\":[{{\
-                    \"device_id\":\"{}\",\
-                    \"timestamp\":\"{}\",\
-                    \"fuel_level_litres\":{},\
-                    \"fuel_level_percentage\":{},\
-                    \"latitude\":{},\
-                    \"longitude\":{},\
-                    \"speed\":{},\
-                    \"heading\":{},\
-                    \"accel_x_g\":{},\
-                    \"accel_y_g\":{},\
-                    \"accel_z_g\":{},\
-                    \"gyro_x_dps\":{},\
-                    \"gyro_y_dps\":{},\
-                    \"gyro_z_dps\":{},\
-                    \"imu_temperature_c\":{},\
-                    \"simulation_mode\":\"{}\"\
-                }}]\
-            }}",
+        \"device_id\":\"{}\",\
+        \"synced_at\":\"{}\",\
+        \"readings\":[{{\
+            \"device_id\":\"{}\",\
+            \"timestamp\":\"{}\",\
+            \"fuel_distance_smooth_cm\":{},\
+            \"fuel_distance_realtime_cm\":{},\
+            \"fuel_distance_raw_cm\":{},\
+            \"fuel_sensor_temperature_c\":{},\
+            \"fuel_sensor_status_1\":{},\
+            \"fuel_sensor_status_2\":{},\
+            \"fuel_raw_data_validity\":{},\
+            \"latitude\":{},\
+            \"longitude\":{},\
+            \"speed\":{},\
+            \"heading\":{},\
+            \"accel_x_g\":{},\
+            \"accel_y_g\":{},\
+            \"accel_z_g\":{},\
+            \"gyro_x_dps\":{},\
+            \"gyro_y_dps\":{},\
+            \"gyro_z_dps\":{},\
+            \"imu_temperature_c\":{},\
+            \"simulation_mode\":\"{}\"\
+        }}]\
+    }}",
             reading.device_id,
             reading.timestamp,
             reading.device_id,
             reading.timestamp,
-            reading.fuel_level_litres,
-            reading.fuel_level_percentage,
+            reading.fuel_distance_smooth_cm,
+            reading.fuel_distance_realtime_cm,
+            reading.fuel_distance_raw_cm,
+            reading.fuel_sensor_temperature_c,
+            reading.fuel_sensor_status_1,
+            reading.fuel_sensor_status_2,
+            reading.fuel_raw_data_validity,
             reading.latitude,
             reading.longitude,
             reading.speed,

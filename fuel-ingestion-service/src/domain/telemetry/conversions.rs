@@ -1,5 +1,6 @@
 use crate::domain::telemetry::models::{
-    DiagnosticTelemetry, FuelTelemetry, ImuTelemetry, PositionTelemetry, TelemetryReading,
+    CalibratedFuelTelemetry, DiagnosticTelemetry, FuelTelemetry, ImuTelemetry, PositionTelemetry,
+    RawFuelTelemetry, TelemetryReading,
 };
 use crate::models::FuelReading;
 
@@ -25,12 +26,45 @@ impl From<&FuelReading> for TelemetryReading {
                 hdop: None,
             }),
 
-            fuel: Some(FuelTelemetry {
-                litres: reading.fuel_level_litres,
-                percentage: reading.fuel_level_percentage,
-                sensor_value: None,
-                temperature: None,
-            }),
+            fuel: match (
+                reading.fuel_distance_smooth_cm,
+                reading.fuel_distance_realtime_cm,
+                reading.fuel_distance_raw_cm,
+                reading.fuel_sensor_temperature_c,
+                reading.fuel_sensor_status_1,
+                reading.fuel_sensor_status_2,
+                reading.fuel_raw_data_validity,
+            ) {
+                (
+                    Some(smooth_distance_cm),
+                    Some(realtime_distance_cm),
+                    Some(raw_distance_cm),
+                    Some(temperature_c),
+                    Some(status_byte_1),
+                    Some(status_byte_2),
+                    Some(raw_data_validity),
+                ) => Some(FuelTelemetry {
+                    raw: RawFuelTelemetry {
+                        smooth_distance_cm,
+                        realtime_distance_cm,
+                        raw_distance_cm,
+                        temperature_c,
+                        status_byte_1,
+                        status_byte_2,
+                        raw_data_validity,
+                    },
+
+                    calibrated: match (reading.fuel_level_litres, reading.fuel_level_percentage) {
+                        (Some(litres), Some(percentage)) => {
+                            Some(CalibratedFuelTelemetry { litres, percentage })
+                        }
+
+                        _ => None,
+                    },
+                }),
+
+                _ => None,
+            },
 
             imu: Some(ImuTelemetry {
                 accel_x: reading.accel_x_g,

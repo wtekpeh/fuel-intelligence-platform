@@ -28,14 +28,33 @@ pub struct TelemetryRecord<'a> {
     pub heading: f64,
 
     /*
-     * Fuel measurements.
+     * KUM ultrasonic fuel sensor measurements.
      *
-     * These fields remain in the shared telemetry structure so the existing
-     * telemetry pipeline is not disrupted. They will be connected to the
-     * physical fuel sensor during the later fuel-sensor phase.
+     * These are the direct physical measurements reported by the
+     * sensor.
+     *
+     * The firmware intentionally does not calculate:
+     *
+     * - fuel height
+     * - fuel volume
+     * - tank percentage
+     *
+     * Those calculations require backend tank calibration and remain
+     * part of the ORBI Intelligence Platform.
      */
-    pub fuel_level_litres: f32,
-    pub fuel_level_percentage: f32,
+    pub fuel_distance_smooth_cm: f32,
+
+    pub fuel_distance_realtime_cm: f32,
+
+    pub fuel_distance_raw_cm: f32,
+
+    pub fuel_sensor_temperature_c: f32,
+
+    pub fuel_sensor_status_1: u8,
+
+    pub fuel_sensor_status_2: u8,
+
+    pub fuel_raw_data_validity: u8,
 
     /*
      * MPU6050 accelerometer measurements.

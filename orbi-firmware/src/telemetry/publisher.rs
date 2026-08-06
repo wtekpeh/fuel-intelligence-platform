@@ -2,10 +2,10 @@ use esp_hal::delay::Delay;
 use esp_println::println;
 
 use crate::{
-    drivers::{gnss::GpsInfo, vibration::ImuData, Modem},
+    drivers::Modem,
     network::http,
     storage::RecordStorage,
-    telemetry::{payload, record::TelemetryRecord},
+    telemetry::{payload, record::TelemetryRecord, snapshot::SensorSnapshot},
 };
 
 /*
@@ -255,13 +255,15 @@ pub fn publish_live_fix<S>(
     modem: &mut Modem,
     delay: &Delay,
     device_code: &str,
-    gps_info: &GpsInfo,
-    imu_data: &ImuData,
+    snapshot: &SensorSnapshot<'_>,
     mut storage: Option<&mut S>,
 ) -> bool
 where
     S: RecordStorage,
 {
+    let gps_info = snapshot.gps;
+    let imu_data = snapshot.imu;
+
     println!("========================");
     println!("LIVE SENSOR MEASUREMENTS");
     println!("========================");
@@ -282,6 +284,37 @@ where
 
     println!("IMU Temperature: {} C", imu_data.temperature_c);
 
+    match snapshot.fuel {
+        Some(measurement) => {
+            println!(
+                "Fuel smooth distance: {} cm",
+                measurement.smooth_distance_cm
+            );
+
+            println!(
+                "Fuel real-time distance: {} cm",
+                measurement.realtime_distance_cm
+            );
+
+            println!("Fuel raw distance: {} cm", measurement.raw_distance_cm);
+
+            println!("Fuel sensor temperature: {} C", measurement.temperature_c);
+
+            println!("Fuel status byte 1: 0x{:02X}", measurement.status_byte_1);
+
+            println!("Fuel status byte 2: 0x{:02X}", measurement.status_byte_2);
+
+            println!(
+                "Fuel raw data validity: 0x{:02X}",
+                measurement.raw_data_validity
+            );
+        }
+
+        None => {
+            println!("Fuel measurement unavailable for this telemetry cycle.");
+        }
+    }
+
     /*
      * The firmware records physical measurements only.
      *
@@ -299,11 +332,39 @@ where
         heading: gps_info.heading,
 
         /*
-         * Fuel sensor integration will be completed during the later
-         * fuel-measurement phase.
+         * The KUM driver now provides raw physical measurements.
+         *
+         * Tank calibration, fuel volume, and percentage remain backend
+         * responsibilities, so the firmware publishes the raw sensor
+         * measurements only.
          */
-        fuel_level_litres: 0.0,
-        fuel_level_percentage: 0.0,
+        fuel_distance_smooth_cm: snapshot
+            .fuel
+            .map_or(0.0, |measurement| measurement.smooth_distance_cm),
+
+        fuel_distance_realtime_cm: snapshot
+            .fuel
+            .map_or(0.0, |measurement| measurement.realtime_distance_cm),
+
+        fuel_distance_raw_cm: snapshot
+            .fuel
+            .map_or(0.0, |measurement| measurement.raw_distance_cm),
+
+        fuel_sensor_temperature_c: snapshot
+            .fuel
+            .map_or(0.0, |measurement| measurement.temperature_c),
+
+        fuel_sensor_status_1: snapshot
+            .fuel
+            .map_or(0, |measurement| measurement.status_byte_1),
+
+        fuel_sensor_status_2: snapshot
+            .fuel
+            .map_or(0, |measurement| measurement.status_byte_2),
+
+        fuel_raw_data_validity: snapshot
+            .fuel
+            .map_or(0, |measurement| measurement.raw_data_validity),
 
         accel_x_g: imu_data.accel_x_g,
         accel_y_g: imu_data.accel_y_g,

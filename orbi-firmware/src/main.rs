@@ -83,7 +83,7 @@ fn main() -> ! {
 
     let mut kum_sensor = KumSensor::new(peripherals.UART2, peripherals.GPIO21, peripherals.GPIO22);
 
-    kum_sensor.query_and_print_raw_response(&delay);
+    kum_sensor.read_and_print_measurement(&delay);
 
     drivers::gnss::initialize(&mut modem, &delay);
 
@@ -121,8 +121,16 @@ fn main() -> ! {
         speed: 0.0,
         heading: 335.36,
 
-        fuel_level_litres: 0.0,
-        fuel_level_percentage: 0.0,
+        fuel_distance_smooth_cm: 0.0,
+        fuel_distance_realtime_cm: 0.0,
+        fuel_distance_raw_cm: 0.0,
+
+        fuel_sensor_temperature_c: 0.0,
+
+        fuel_sensor_status_1: 0,
+        fuel_sensor_status_2: 0,
+
+        fuel_raw_data_validity: 0,
 
         accel_x_g: imu_test.as_ref().map_or(0.0, |v| v.accel_x_g),
         accel_y_g: imu_test.as_ref().map_or(0.0, |v| v.accel_y_g),
@@ -413,12 +421,34 @@ fn main() -> ! {
                     }
                 };
 
+                let fuel_measurement = match kum_sensor.read_measurement(&delay) {
+                    Ok(measurement) => {
+                        println!("KUM measurement obtained for live telemetry.");
+
+                        Some(measurement)
+                    }
+
+                    Err(error) => {
+                        println!(
+                            "WARNING: KUM measurement unavailable for this telemetry cycle: {:?}",
+                            error
+                        );
+
+                        None
+                    }
+                };
+
+                let sensor_snapshot = telemetry::snapshot::SensorSnapshot {
+                    gps: &gps_info,
+                    imu: &imu_data,
+                    fuel: fuel_measurement.as_ref(),
+                };
+
                 let cloud_contact_succeeded = telemetry::publisher::publish_live_fix(
                     &mut modem,
                     &delay,
                     runtime_identity.device_code(),
-                    &gps_info,
-                    &imu_data,
+                    &sensor_snapshot,
                     persistent_storage.as_mut(),
                 );
 

@@ -31,8 +31,13 @@ pub fn format_telemetry_record(record: &TelemetryRecord<'_>) -> String<768> {
                 \"longitude\":{},\
                 \"speed\":{},\
                 \"heading\":{},\
-                \"fuel_level_litres\":{},\
-                \"fuel_level_percentage\":{},\
+                \"fuel_distance_smooth_cm\":{},\
+                \"fuel_distance_realtime_cm\":{},\
+                \"fuel_distance_raw_cm\":{},\
+                \"fuel_sensor_temperature_c\":{},\
+                \"fuel_sensor_status_1\":{},\
+                \"fuel_sensor_status_2\":{},\
+                \"fuel_raw_data_validity\":{},\
                 \"accel_x_g\":{},\
                 \"accel_y_g\":{},\
                 \"accel_z_g\":{},\
@@ -48,8 +53,13 @@ pub fn format_telemetry_record(record: &TelemetryRecord<'_>) -> String<768> {
             record.longitude,
             record.speed,
             record.heading,
-            record.fuel_level_litres,
-            record.fuel_level_percentage,
+            record.fuel_distance_smooth_cm,
+            record.fuel_distance_realtime_cm,
+            record.fuel_distance_raw_cm,
+            record.fuel_sensor_temperature_c,
+            record.fuel_sensor_status_1,
+            record.fuel_sensor_status_2,
+            record.fuel_raw_data_validity,
             record.accel_x_g,
             record.accel_y_g,
             record.accel_z_g,

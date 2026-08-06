@@ -2,14 +2,29 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// One physical telemetry measurement received from an ORBI device.
+///
+/// This request model contains measurements only.
+///
+/// It does not contain operational conclusions such as:
+///
+/// - parked, idle, or moving state;
+/// - fuel theft, refill, or leak events;
+/// - sensor-health decisions;
+/// - calibrated tank volume.
+///
+/// Those values are produced by backend services after ingestion.
 #[derive(Debug, Deserialize, Serialize)]
-pub struct FuelReading {
+pub struct TelemetryReading {
+    /*
+     * Device and measurement identity.
+     */
     pub device_id: String,
     pub timestamp: DateTime<Utc>,
 
-    pub fuel_level_litres: f64,
-    pub fuel_level_percentage: f64,
-
+    /*
+     * GNSS measurements.
+     */
     pub latitude: f64,
     pub longitude: f64,
 
@@ -19,7 +34,54 @@ pub struct FuelReading {
     #[serde(default)]
     pub heading: f64,
 
-    // Physical MPU6050 measurements.
+    /*
+     * Raw KUM ultrasonic fuel-sensor measurements.
+     *
+     * These values represent the physical distance between the
+     * ultrasonic sensor and the detected liquid surface.
+     *
+     * They are optional because not every ORBI hardware profile
+     * includes a fuel sensor.
+     */
+    #[serde(default)]
+    pub fuel_distance_smooth_cm: Option<f64>,
+
+    #[serde(default)]
+    pub fuel_distance_realtime_cm: Option<f64>,
+
+    #[serde(default)]
+    pub fuel_distance_raw_cm: Option<f64>,
+
+    #[serde(default)]
+    pub fuel_sensor_temperature_c: Option<f64>,
+
+    #[serde(default)]
+    pub fuel_sensor_status_1: Option<u8>,
+
+    #[serde(default)]
+    pub fuel_sensor_status_2: Option<u8>,
+
+    #[serde(default)]
+    pub fuel_raw_data_validity: Option<u8>,
+
+    /*
+     * Temporary compatibility fields for legacy simulators and
+     * previously generated payloads.
+     *
+     * New physical ORBI firmware does not send these values.
+     *
+     * They remain optional until the downstream fuel-calibration
+     * pipeline has been migrated completely.
+     */
+    #[serde(default)]
+    pub fuel_level_litres: Option<f64>,
+
+    #[serde(default)]
+    pub fuel_level_percentage: Option<f64>,
+
+    /*
+     * Raw MPU6050 physical measurements.
+     */
     #[serde(default)]
     pub accel_x_g: f64,
 
@@ -41,25 +103,36 @@ pub struct FuelReading {
     #[serde(default)]
     pub imu_temperature_c: f64,
 
-    // Temporary legacy compatibility fields.
-    //
-    // Older simulators and backend services may still reference these fields.
-    // New physical firmware payloads no longer send them.
+    /*
+     * Temporary compatibility fields used by older simulators and
+     * backend services.
+     */
     #[serde(default)]
     pub vibration_level: f64,
 
     #[serde(default)]
     pub motion_detected: bool,
 
+    #[serde(default)]
     pub simulation_mode: String,
 }
 
+/// One synchronized batch of physical telemetry measurements.
 #[derive(Debug, Deserialize, Serialize)]
-pub struct ReadingBatch {
+pub struct TelemetryBatch {
     pub device_id: String,
     pub synced_at: DateTime<Utc>,
-    pub readings: Vec<FuelReading>,
+    pub readings: Vec<TelemetryReading>,
 }
+
+/*
+ * Temporary aliases.
+ *
+ * These allow the handler and downstream services to continue compiling
+ * while they are migrated from the old fuel-specific terminology.
+ */
+pub type FuelReading = TelemetryReading;
+pub type ReadingBatch = TelemetryBatch;
 
 #[derive(Debug, Serialize)]
 pub struct ApiResponse {

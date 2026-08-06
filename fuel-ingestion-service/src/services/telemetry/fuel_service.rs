@@ -20,6 +20,19 @@ pub async fn persist_fuel_reading(
 ) -> Result<()> {
     let raw_payload: Value = serde_json::to_value(reading)?;
 
+    /*
+     * Physical firmware now submits raw fuel measurements.
+     *
+     * A calibrated litres value may not yet exist.
+     *
+     * In that case we preserve the raw payload but defer creation of the
+     * calibrated fuel sensor reading until the calibration pipeline has
+     * produced a valid litres measurement.
+     */
+    let Some(fuel_level_litres) = reading.fuel_level_litres else {
+        return Ok(());
+    };
+
     persist_sensor_reading(
         db_pool,
         NewSensorReading {
@@ -27,15 +40,12 @@ pub async fn persist_fuel_reading(
             device_id,
             recorded_at: reading.timestamp,
 
-            value: reading.fuel_level_litres,
+            value: fuel_level_litres,
             unit: "litres".to_string(),
 
             latitude: Some(reading.latitude),
             longitude: Some(reading.longitude),
 
-            // Motion evidence is now persisted through the shared vibration
-            // and operational-intelligence pipeline rather than being owned
-            // by the fuel sensor reading.
             vibration_level: None,
             motion_detected: None,
 

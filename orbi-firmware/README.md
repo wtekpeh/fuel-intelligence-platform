@@ -26,6 +26,12 @@ Current firmware capabilities include:
   - Verified RS485 / Modbus communication
   - Verified KUM ultrasonic fuel sensor communication
   - Raw KUM Modbus measurement acquisition
+- SensorSnapshot abstraction layer
+- Measurement-first telemetry model
+- Raw fuel telemetry generation
+- KUM telemetry integration into the unified telemetry pipeline
+- Raw fuel telemetry persistence to the SD queue
+- Raw fuel telemetry batch uploads
 - LTE backend communication
 - HTTP batch telemetry uploads
 - Persistent SD card queue
@@ -123,29 +129,26 @@ Instead, the backend combines measurements from multiple sensor domains to gener
 ## Firmware Processing Pipeline
 
 Physical Sensors
-
-↓
-
+│
+▼
 Hardware Drivers
-
-↓
-
+│
+▼
 Raw Measurements
-
-↓
-
-Telemetry Builder
-
-↓
-
+│
+▼
+SensorSnapshot
+│
+▼
+TelemetryRecord
+│
+▼
 Persistent Queue
-
-↓
-
+│
+▼
 Publisher
-
-↓
-
+│
+▼
 ORBI Platform
 
 This architecture allows new sensors to be integrated without redesigning storage, replay, networking, or scheduling.
@@ -260,6 +263,14 @@ Drivers should **never contain business logic**. Their responsibility is simply 
 ---
 
 ### Telemetry Layer
+
+The telemetry layer is built around a measurement-first architecture.
+
+Individual hardware drivers contribute measurements to a SensorSnapshot, which represents one complete physical sampling cycle.
+
+The telemetry subsystem transforms the SensorSnapshot into a TelemetryRecord for storage, replay, and backend transmission.
+
+This abstraction allows new sensor technologies to be integrated without changing the telemetry publishing interface.
 
 The telemetry layer packages hardware measurements into a unified telemetry payload for transmission to the ORBI Platform.
 
@@ -499,6 +510,12 @@ Responsibilities include:
 
 - Measurement packaging
 - Telemetry packet construction
+- Payload generation
+- Runtime publishing
+- Replay payload generation
+- Backend telemetry serialization
+- SensorSnapshot construction
+- TelemetryRecord generation
 - Payload generation
 - Runtime publishing
 - Replay payload generation
@@ -940,12 +957,26 @@ Once initialization has completed, the firmware enters a continuous telemetry lo
 
 Each iteration performs the following sequence.
 
-Read GNSS Position
-│
-▼
+Read GNSS
+
+↓
+
+Read IMU
+
+↓
+
+Read Fuel Sensor (if installed)
+
+↓
+
+Build SensorSnapshot
+
+↓
+
 Build TelemetryRecord
-│
-▼
+
+↓
+
 Append to ORBIQ.LOG
 │
 ▼
@@ -1463,6 +1494,11 @@ Verified functionality includes:
 - Modbus RTU communication
 - Successful communication with the KUM ultrasonic fuel sensor
 - Raw measurement acquisition from the sensor
+- Decoding KUM measurement frames
+- SensorSnapshot integration
+- Unified telemetry generation
+- SD queue persistence of raw fuel telemetry
+- LTE transmission of raw fuel telemetry
 
 This validation establishes the firmware communication foundation required for future fuel telemetry integration.
 
@@ -1499,6 +1535,10 @@ The telemetry subsystem currently supports:
 - Raw IMU measurements
 - JSON serialization
 - Backend upload
+- SensorSnapshot abstraction
+- Measurement-first telemetry
+- Raw KUM fuel telemetry
+- Physical sensor snapshots
 
 ---
 
@@ -1513,6 +1553,18 @@ The SD card subsystem provides:
 - ACK persistence
 - Runtime queue cleanup
 - Boot queue cleanup
+
+### Measurement-First Telemetry
+
+Version 0.2.0 introduced a measurement-first telemetry architecture.
+
+Firmware now publishes physical sensor measurements rather than derived operational values.
+
+A SensorSnapshot aggregates measurements from all installed sensors during each sampling cycle before constructing a TelemetryRecord.
+
+Raw fuel telemetry from the KUM ultrasonic sensor is transmitted without calibration, allowing the ORBI backend to perform tank calibration, normalization, and fuel intelligence centrally.
+
+This architecture cleanly separates measurement acquisition from operational interpretation and provides a scalable foundation for supporting additional sensor technologies.
 
 ---
 
@@ -1788,8 +1840,39 @@ The following capabilities have been successfully validated on the ORBI referenc
 - Successful Modbus RTU response reception
 - Physical communication with the KUM ultrasonic fuel sensor
 - Raw KUM measurement acquisition
+- UART loopback validation on GPIO21 and GPIO22
 
 These validations establish the firmware communication foundation required for RS485-based sensor support.
+
+During hardware bring-up, the following reference wiring was successfully validated for the current MAX485 transceiver module:
+
+LilyGO GPIO21 → MAX485 TXD
+LilyGO GPIO22 → MAX485 RXD
+LilyGO VDD3V3 → MAX485 VCC
+LilyGO GND → MAX485 GND
+
+MAX485 A+ → KUM A
+MAX485 B- → KUM B
+
+The communication path validated during testing is:
+
+ESP32 UART2
+│
+▼
+MAX485 RS485 Transceiver
+│
+▼
+RS485 Bus
+│
+▼
+KUM Ultrasonic Fuel Sensor
+│
+▼
+21-byte Modbus RTU Response
+
+This milestone confirms that the firmware can reliably communicate with the KUM sensor over RS485 using Modbus RTU.
+
+---
 
 ## Remaining Integration Work
 
@@ -1797,10 +1880,9 @@ The remaining Phase 3 work includes:
 
 - Generic RS485 transport abstraction
 - Generic Modbus client
-- Configurable device profiles
-- Register-based measurement acquisition
 - Fuel measurement decoding
-- Fuel telemetry integration
+- Sensor abstraction integration
+- Fuel telemetry generation
 - Telemetry Builder integration
 - Tank calibration support
 - Sensor diagnostics
