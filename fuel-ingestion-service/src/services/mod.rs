@@ -8,6 +8,7 @@ pub mod calibration_type;
 pub mod confidence_scoring;
 pub mod device_health;
 pub mod device_state;
+pub mod fuel_calibration_service;
 pub mod fuel_detection;
 pub mod fuel_event_correlation;
 pub mod inventory_lifecycle;

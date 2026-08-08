@@ -1,13 +1,9 @@
-use std::sync::Arc;
-
 use anyhow::Result;
 
 use crate::{
-    domain::telemetry::models::TelemetryReading,
-    repository::RegisteredTelemetryContext,
-    services::{calibration_loader::CalibrationLoader, calibration_type::CalibrationType},
+    domain::telemetry::models::TelemetryReading, repository::RegisteredTelemetryContext,
+    services::fuel_calibration_service::FuelCalibrationService,
 };
-
 /// Applies fuel-specific enrichments to canonical telemetry.
 ///
 /// Current responsibility:
@@ -21,12 +17,14 @@ use crate::{
 /// - Producing calibrated litres and percentage.
 #[derive(Clone)]
 pub struct FuelEnrichment {
-    calibration_loader: Arc<CalibrationLoader>,
+    calibration_service: FuelCalibrationService,
 }
 
 impl FuelEnrichment {
-    pub fn new(calibration_loader: Arc<CalibrationLoader>) -> Self {
-        Self { calibration_loader }
+    pub fn new(calibration_service: FuelCalibrationService) -> Self {
+        Self {
+            calibration_service,
+        }
     }
 
     /// Applies fuel enrichment directly to the supplied canonical telemetry.
@@ -44,26 +42,36 @@ impl FuelEnrichment {
             return Ok(());
         };
 
-        let Some(_fuel) = telemetry.fuel.as_mut() else {
+        let Some(fuel) = telemetry.fuel.as_mut() else {
             return Ok(());
         };
 
-        let Some(_calibration) = self
-            .calibration_loader
-            .get_active(sensor_id, CalibrationType::Fuel.as_str())
-            .await?
-        else {
-            return Ok(());
-        };
+        let calibrated = self
+            .calibration_service
+            .calibrate(sensor_id, fuel.raw.smooth_distance_cm)
+            .await?;
 
-        // The active calibration has now been resolved.
-        //
-        // Calibration mathematics will be implemented after we define
-        // and validate the supported calibration_values JSON formats.
-        //
-        // `_fuel` and `_calibration` are intentionally retained here
-        // because they will become the inputs to that transformation.
+        match calibrated {
+            Some(calibrated_fuel) => {
+                fuel.calibrated = Some(calibrated_fuel);
+            }
 
+            None => {
+                /*
+                 * No verified calibration currently exists for the measured
+                 * liquid level.
+                 *
+                 * Preserve the raw KUM measurement while leaving the
+                 * calibrated quantity unavailable.
+                 */
+                fuel.calibrated = None;
+
+                println!(
+                    "Fuel calibration unavailable below verified range for sensor {}: level={} cm",
+                    sensor_id, fuel.raw.smooth_distance_cm,
+                );
+            }
+        }
         Ok(())
     }
 }

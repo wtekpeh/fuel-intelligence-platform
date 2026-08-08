@@ -3,7 +3,7 @@ use anyhow::{Context, Result, anyhow};
 use crate::models::SensorCalibration;
 use crate::services::calibration_type::CalibrationType;
 
-use super::ImuCalibration;
+use super::{FuelCalibration, ImuCalibration};
 
 /// Converts persisted calibration records into strongly typed
 /// domain calibration objects.
@@ -30,6 +30,20 @@ impl CalibrationFactory {
         typed_calibration
             .validate()
             .context("Invalid IMU calibration values.")?;
+
+        Ok(typed_calibration)
+    }
+
+    pub fn fuel(calibration: &SensorCalibration) -> Result<FuelCalibration> {
+        Self::ensure_calibration_type(calibration, CalibrationType::Fuel.as_str())?;
+
+        let typed_calibration: FuelCalibration =
+            serde_json::from_value(calibration.calibration_values.clone())
+                .context("Failed to deserialize fuel calibration.")?;
+
+        typed_calibration
+            .validate_lookup_table()
+            .context("Invalid fuel calibration lookup table.")?;
 
         Ok(typed_calibration)
     }

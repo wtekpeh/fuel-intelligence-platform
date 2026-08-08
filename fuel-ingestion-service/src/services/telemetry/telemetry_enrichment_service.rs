@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
+use crate::services::fuel_calibration_service::FuelCalibrationService;
 use crate::{
     domain::telemetry::models::TelemetryReading,
     repository::RegisteredTelemetryContext,
@@ -19,12 +20,20 @@ pub struct TelemetryEnrichmentService {
 
 impl TelemetryEnrichmentService {
     pub fn new(calibration_loader: Arc<CalibrationLoader>) -> Self {
-        Self {
-            fuel: FuelEnrichment::new(calibration_loader.clone()),
-            imu: ImuEnrichment::new(calibration_loader),
-        }
-    }
+        /*
+         * Construct shared domain services.
+         */
+        let fuel_calibration_service = FuelCalibrationService::new(calibration_loader.clone());
 
+        /*
+         * Construct telemetry enrichments.
+         */
+        let fuel = FuelEnrichment::new(fuel_calibration_service);
+
+        let imu = ImuEnrichment::new(calibration_loader);
+
+        Self { fuel, imu }
+    }
     /// Applies every telemetry enrichment before telemetry
     /// enters the operational intelligence pipeline.
     pub async fn enrich(
