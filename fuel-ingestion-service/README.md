@@ -3238,9 +3238,17 @@ Raw KUM Telemetry Ingestion ✅
 ↓
 Measurement-First Fuel Contract ✅
 ↓
-Tank Calibration Integration ← Current
+Tank Calibration Integration ✅
 ↓
-Calibrated Fuel Persistence
+Calibrated Fuel Persistence ✅
+↓
+Real KUM Calibration Validation ✅
+↓
+Guided Calibration Session API ← Current
+↓
+Progressive Calibration Workflow
+↓
+Guided Calibration Wizard
 ↓
 Fuel Intelligence Validation
 ↓

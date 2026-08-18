@@ -117,7 +117,7 @@ mod tests {
 
     #[test]
     fn valid_imu_calibration_is_decoded() {
-        let calibration = sensor_calibration("IMU", valid_imu_values());
+        let calibration = sensor_calibration("imu", valid_imu_values());
 
         let decoded =
             CalibrationFactory::imu(&calibration).expect("valid IMU calibration should decode");
@@ -141,21 +141,21 @@ mod tests {
 
     #[test]
     fn wrong_calibration_type_is_rejected() {
-        let calibration = sensor_calibration("FUEL", valid_imu_values());
+        let calibration = sensor_calibration("fuel", valid_imu_values());
 
         let error = CalibrationFactory::imu(&calibration)
             .expect_err("non-IMU calibration type should fail");
 
         assert_eq!(
             error.to_string(),
-            "Expected IMU calibration, but found FUEL."
+            "Expected imu calibration, but found fuel."
         );
     }
 
     #[test]
     fn missing_required_field_is_rejected() {
         let calibration = sensor_calibration(
-            "IMU",
+            "imu",
             json!({
                 "accelerometer_bias": {
                     "x": 0.0,
@@ -177,7 +177,7 @@ mod tests {
 
     #[test]
     fn invalid_json_shape_is_rejected() {
-        let calibration = sensor_calibration("IMU", json!([1, 2, 3]));
+        let calibration = sensor_calibration("imu", json!([1, 2, 3]));
 
         let error = CalibrationFactory::imu(&calibration)
             .expect_err("array calibration values should fail");
@@ -192,7 +192,7 @@ mod tests {
     #[test]
     fn zero_scale_is_rejected_by_domain_validation() {
         let calibration = sensor_calibration(
-            "IMU",
+            "imu",
             json!({
                 "accelerometer_bias": {
                     "x": 0.0,
@@ -229,5 +229,129 @@ mod tests {
         let source = error.root_cause().to_string();
 
         assert_eq!(source, "accelerometer_scale.y must not be zero.");
+    }
+
+    #[test]
+    fn valid_fuel_calibration_is_decoded() {
+        let calibration = sensor_calibration(
+            "fuel",
+            json!({
+                "tank_capacity_litres": 200.0,
+                "points": [
+                    {
+                        "level_cm": 10.0,
+                        "litres": 20.0
+                    },
+                    {
+                        "level_cm": 30.0,
+                        "litres": 60.0
+                    },
+                    {
+                        "level_cm": 50.0,
+                        "litres": 100.0
+                    },
+                    {
+                        "level_cm": 100.0,
+                        "litres": 200.0
+                    }
+                ]
+            }),
+        );
+
+        let decoded =
+            CalibrationFactory::fuel(&calibration).expect("valid fuel calibration should decode");
+
+        assert_eq!(decoded.tank_capacity_litres, 200.0);
+        assert_eq!(decoded.points.len(), 4);
+
+        assert_eq!(decoded.points[0].level_cm, 10.0);
+        assert_eq!(decoded.points[0].litres, 20.0);
+
+        assert_eq!(decoded.points[3].level_cm, 100.0);
+        assert_eq!(decoded.points[3].litres, 200.0);
+    }
+
+    #[test]
+    fn invalid_fuel_lookup_table_is_rejected_by_domain_validation() {
+        let calibration = sensor_calibration(
+            "fuel",
+            json!({
+                "tank_capacity_litres": 200.0,
+                "points": [
+                    {
+                        "level_cm": 10.0,
+                        "litres": 20.0
+                    },
+                    {
+                        "level_cm": 30.0,
+                        "litres": 60.0
+                    },
+                    {
+                        "level_cm": 50.0,
+                        "litres": 100.0
+                    },
+                    {
+                        "level_cm": 100.0,
+                        "litres": 180.0
+                    }
+                ]
+            }),
+        );
+
+        let error = CalibrationFactory::fuel(&calibration)
+            .expect_err("invalid fuel lookup table should fail domain validation");
+
+        assert!(
+            error
+                .to_string()
+                .contains("Invalid fuel calibration lookup table.")
+        );
+    }
+
+    #[test]
+    fn wrong_type_is_rejected_for_fuel_calibration() {
+        let calibration = sensor_calibration(
+            "imu",
+            json!({
+                "tank_capacity_litres": 200.0,
+                "points": [
+                    {
+                        "level_cm": 10.0,
+                        "litres": 20.0
+                    },
+                    {
+                        "level_cm": 100.0,
+                        "litres": 200.0
+                    }
+                ]
+            }),
+        );
+
+        let error = CalibrationFactory::fuel(&calibration)
+            .expect_err("non-fuel calibration type should fail");
+
+        assert_eq!(
+            error.to_string(),
+            "Expected fuel calibration, but found imu."
+        );
+    }
+
+    #[test]
+    fn missing_required_fuel_field_is_rejected() {
+        let calibration = sensor_calibration(
+            "fuel",
+            json!({
+                "tank_capacity_litres": 200.0
+            }),
+        );
+
+        let error = CalibrationFactory::fuel(&calibration)
+            .expect_err("incomplete fuel calibration should fail");
+
+        assert!(
+            error
+                .to_string()
+                .contains("Failed to deserialize fuel calibration.")
+        );
     }
 }

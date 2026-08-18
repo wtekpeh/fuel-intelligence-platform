@@ -109,7 +109,12 @@ pub async fn ingest_reading_batch(
 
         let organization_id = get_organization_id_for_device(db_pool, device_id).await?;
 
-        for (reading, processed) in payload.readings.iter().zip(processed_telemetry.iter()) {
+        for ((reading, enriched), processed) in payload
+            .readings
+            .iter()
+            .zip(enriched_telemetry.iter())
+            .zip(processed_telemetry.iter())
+        {
             // Run shared Motion Intelligence for every product that has the
             // standard ORBI vibration capability.
             if let (Some(vibration_sensor_id), Some(processed)) =
@@ -154,8 +159,14 @@ pub async fn ingest_reading_batch(
             }
 
             // Run Fuel Intelligence only for products with a fuel sensor.
+            //
+            // Fuel persistence consumes the enriched canonical fuel telemetry so that
+            // the stored litres value comes from backend tank calibration rather than
+            // directly from the physical firmware payload.
             if let Some(fuel_sensor_id) = context.fuel_sensor_id {
-                persist_fuel_reading(db_pool, device_id, fuel_sensor_id, reading).await?;
+                if let Some(fuel) = enriched.fuel.as_ref() {
+                    persist_fuel_reading(db_pool, device_id, fuel_sensor_id, reading, fuel).await?;
+                }
 
                 detect_fuel_event(
                     db_pool,

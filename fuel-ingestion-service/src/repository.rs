@@ -2167,6 +2167,12 @@ pub async fn update_device(
     device_id: Uuid,
     request: &UpdateDeviceRequest,
 ) -> Result<()> {
+    let mut transaction = db_pool.begin().await?;
+
+    // Update the device itself.
+    //
+    // The hardware profile describes the sensor capabilities that this
+    // particular ORBI device is expected to have.
     sqlx::query!(
         r#"
         UPDATE devices
@@ -2179,8 +2185,87 @@ pub async fn update_device(
         request.device_code,
         request.hardware_profile_id,
     )
-    .execute(db_pool)
+    .execute(&mut *transaction)
     .await?;
+
+    // Load every sensor capability required by the new hardware profile.
+    //
+    // We deliberately do this inside the same transaction as the device
+    // update so that the device cannot end up pointing at a hardware profile
+    // while its required sensor instances are missing.
+    let profile_sensors = sqlx::query!(
+        r#"
+        SELECT
+            sensor_type,
+            unit
+        FROM hardware_profile_sensors
+        WHERE hardware_profile_id = $1
+        ORDER BY sensor_type
+        "#,
+        request.hardware_profile_id,
+    )
+    .fetch_all(&mut *transaction)
+    .await?;
+
+    for profile_sensor in profile_sensors {
+        let sensor_code = profile_sensor.sensor_type.to_lowercase();
+
+        // Retain an existing compatible sensor if the device already has one.
+        //
+        // For example, upgrading:
+        //
+        // GPS_ONLY
+        //   GPS
+        //   VIBRATION
+        //
+        // to:
+        //
+        // FUEL_INTELLIGENCE
+        //   FUEL
+        //   GPS
+        //   VIBRATION
+        //
+        // must retain GPS and VIBRATION and create only FUEL.
+        let existing_sensor_id = sqlx::query_scalar!(
+            r#"
+            SELECT id
+            FROM sensors
+            WHERE device_id = $1
+              AND sensor_code = $2
+            LIMIT 1
+            "#,
+            device_id,
+            sensor_code,
+        )
+        .fetch_optional(&mut *transaction)
+        .await?;
+
+        if existing_sensor_id.is_some() {
+            continue;
+        }
+
+        // This sensor is required by the new profile but does not currently
+        // exist for the device, so create the missing sensor instance.
+        sqlx::query!(
+            r#"
+            INSERT INTO sensors (
+                device_id,
+                sensor_code,
+                sensor_type,
+                unit
+            )
+            VALUES ($1, $2, $3, $4)
+            "#,
+            device_id,
+            sensor_code,
+            profile_sensor.sensor_type,
+            profile_sensor.unit,
+        )
+        .execute(&mut *transaction)
+        .await?;
+    }
+
+    transaction.commit().await?;
 
     Ok(())
 }

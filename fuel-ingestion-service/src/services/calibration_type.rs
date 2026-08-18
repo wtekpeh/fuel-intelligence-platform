@@ -12,6 +12,19 @@ pub enum CalibrationType {
 }
 
 impl CalibrationType {
+    /// Parses an external calibration type into a supported domain value.
+    ///
+    /// External callers may use different casing or surrounding whitespace,
+    /// but application code and PostgreSQL always use the canonical lowercase
+    /// representation returned by `as_str()`.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "imu" => Some(Self::Imu),
+            "fuel" => Some(Self::Fuel),
+            _ => None,
+        }
+    }
+
     /// Returns the canonical value stored in PostgreSQL.
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -38,5 +51,26 @@ mod tests {
 
         assert_eq!(CalibrationType::Fuel.as_str(), "fuel");
         assert_eq!(CalibrationType::Fuel.to_string(), "fuel");
+    }
+
+    #[test]
+    fn supported_calibration_types_are_parsed() {
+        assert_eq!(CalibrationType::parse("imu"), Some(CalibrationType::Imu));
+
+        assert_eq!(CalibrationType::parse("IMU"), Some(CalibrationType::Imu));
+
+        assert_eq!(
+            CalibrationType::parse(" fuel "),
+            Some(CalibrationType::Fuel)
+        );
+
+        assert_eq!(CalibrationType::parse("FUEL"), Some(CalibrationType::Fuel));
+    }
+
+    #[test]
+    fn unsupported_calibration_type_is_rejected() {
+        assert_eq!(CalibrationType::parse("temperature"), None);
+        assert_eq!(CalibrationType::parse(""), None);
+        assert_eq!(CalibrationType::parse("   "), None);
     }
 }
