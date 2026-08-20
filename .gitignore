@@ -90,3 +90,5 @@ secrets/
 # Generated identity files
 identity.bin
 board-identity.bin
+*.Identifier
+*.Identifier
