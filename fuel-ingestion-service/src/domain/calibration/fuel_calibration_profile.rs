@@ -71,6 +71,22 @@ impl FuelCalibrationProfile {
         self.calibration.validate_lookup_table()?;
 
         /*
+         * Every guided calibration session must be internally valid before
+         * the profile can be considered valid.
+         *
+         * This protects the profile from containing impossible session states,
+         * such as:
+         *
+         * - completed sessions without completion timestamps;
+         * - active or paused sessions with completion timestamps;
+         * - invalid verified litre ranges;
+         * - completed sessions with too few verified points.
+         */
+        for session in &self.sessions {
+            session.validate()?;
+        }
+
+        /*
          * Coverage quantities must be finite and remain inside the
          * declared tank-capacity range.
          */
@@ -195,5 +211,153 @@ impl FuelCalibrationProfile {
     /// Returns true when further verified calibration coverage is needed.
     pub fn requires_progressive_calibration(&self) -> bool {
         self.coverage.is_partial()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn valid_calibration() -> FuelCalibration {
+        FuelCalibration {
+            tank_capacity_litres: 200.0,
+            points: vec![
+                super::super::FuelCalibrationPoint {
+                    level_cm: 10.0,
+                    litres: 20.0,
+                },
+                super::super::FuelCalibrationPoint {
+                    level_cm: 100.0,
+                    litres: 200.0,
+                },
+            ],
+        }
+    }
+
+    fn paused_session() -> FuelCalibrationSession {
+        FuelCalibrationSession {
+            id: Uuid::new_v4(),
+            started_at: Utc::now(),
+            completed_at: None,
+            status: super::super::FuelCalibrationSessionStatus::Paused,
+            starting_litres: 20.0,
+            ending_litres: 80.0,
+            captured_point_count: 1,
+        }
+    }
+
+    fn completed_session() -> FuelCalibrationSession {
+        let started_at = Utc::now();
+
+        FuelCalibrationSession {
+            id: Uuid::new_v4(),
+            started_at,
+            completed_at: Some(started_at + chrono::Duration::minutes(10)),
+            status: super::super::FuelCalibrationSessionStatus::Completed,
+            starting_litres: 20.0,
+            ending_litres: 80.0,
+            captured_point_count: 2,
+        }
+    }
+
+    fn progressive_profile() -> FuelCalibrationProfile {
+        FuelCalibrationProfile {
+            id: Uuid::new_v4(),
+            sensor_id: Uuid::new_v4(),
+            calibration: valid_calibration(),
+            status: FuelCalibrationStatus::Progressive,
+            coverage: FuelCalibrationCoverage {
+                verified_from_litres: 20.0,
+                verified_to_litres: 80.0,
+                coverage_percentage: 30.0,
+            },
+            confidence: FuelCalibrationConfidence::Medium,
+            sessions: vec![paused_session()],
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn progressive_profile_allows_valid_paused_session() {
+        let profile = progressive_profile();
+
+        assert!(profile.validate().is_ok());
+        assert!(profile.requires_progressive_calibration());
+    }
+
+    #[test]
+    fn invalid_session_makes_profile_invalid() {
+        let mut profile = progressive_profile();
+
+        profile.sessions[0].completed_at = Some(Utc::now());
+
+        let error = profile
+            .validate()
+            .expect_err("invalid session should invalidate profile");
+
+        assert_eq!(
+            error.to_string(),
+            "A paused calibration session must not have a completion time."
+        );
+    }
+
+    #[test]
+    fn validated_profile_requires_completed_session() {
+        let mut profile = progressive_profile();
+        profile.status = FuelCalibrationStatus::Validated;
+
+        let error = profile
+            .validate()
+            .expect_err("validated profile without completed session should fail");
+
+        assert_eq!(
+            error.to_string(),
+            "Validated and production calibrations require at least one completed session."
+        );
+    }
+
+    #[test]
+    fn validated_profile_accepts_completed_session() {
+        let mut profile = progressive_profile();
+
+        profile.status = FuelCalibrationStatus::Validated;
+        profile.sessions = vec![completed_session()];
+
+        assert!(profile.validate().is_ok());
+    }
+
+    #[test]
+    fn production_profile_rejects_low_confidence() {
+        let mut profile = progressive_profile();
+
+        profile.status = FuelCalibrationStatus::Production;
+        profile.confidence = FuelCalibrationConfidence::Low;
+        profile.sessions = vec![completed_session()];
+
+        let error = profile
+            .validate()
+            .expect_err("production profile with low confidence should fail");
+
+        assert_eq!(
+            error.to_string(),
+            "A production calibration cannot have low confidence."
+        );
+    }
+
+    #[test]
+    fn verified_confidence_requires_complete_coverage() {
+        let mut profile = progressive_profile();
+
+        profile.confidence = FuelCalibrationConfidence::Verified;
+
+        let error = profile
+            .validate()
+            .expect_err("verified confidence with partial coverage should fail");
+
+        assert_eq!(
+            error.to_string(),
+            "Verified calibration confidence requires complete tank coverage."
+        );
     }
 }
