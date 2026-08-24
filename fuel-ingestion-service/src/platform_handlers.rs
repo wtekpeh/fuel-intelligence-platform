@@ -492,6 +492,153 @@ pub async fn provision_inventory_device_handler(
     }
 }
 
+//--------Guided Fuel Calibration Management
+
+pub async fn create_fuel_calibration_profile_handler(
+    State(app_state): State<AppState>,
+    Path(sensor_id): Path<Uuid>,
+    Json(payload): Json<crate::models::CreateFuelCalibrationProfileRequest>,
+) -> impl IntoResponse {
+    match crate::services::platform::fuel_calibration::create_profile(
+        &app_state.db_pool,
+        sensor_id,
+        payload.tank_capacity_litres,
+    )
+    .await
+    {
+        Ok(profile_id) => (
+            StatusCode::CREATED,
+            Json(crate::models::FuelCalibrationProfileMutationResponse {
+                profile_id,
+                message: "Fuel calibration profile created successfully.".to_string(),
+            }),
+        )
+            .into_response(),
+
+        Err(error) => {
+            let message = error.to_string();
+
+            /*
+             * A nonexistent sensor is a resource lookup failure.
+             */
+            if message.contains("Sensor not found") {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(crate::models::ApiErrorResponse { message }),
+                )
+                    .into_response();
+            }
+
+            /*
+             * The guided fuel-calibration workflow may only be attached
+             * to an installed FUEL sensor.
+             */
+            if message.contains("not a FUEL sensor") || message.contains("Tank capacity") {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(crate::models::ApiErrorResponse { message }),
+                )
+                    .into_response();
+            }
+
+            /*
+             * A sensor must not have two simultaneous current calibration
+             * profiles. Historical superseded profiles are allowed, but
+             * only one current workflow may exist.
+             */
+            if message.contains("already has a current fuel calibration profile")
+                || message.contains("unique_current_fuel_calibration_profile")
+            {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(crate::models::ApiErrorResponse { message }),
+                )
+                    .into_response();
+            }
+
+            eprintln!(
+                "Failed to create guided fuel calibration profile for sensor {}: {}",
+                sensor_id, message
+            );
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to create fuel calibration profile.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
+pub async fn start_fuel_calibration_session_handler(
+    State(app_state): State<AppState>,
+    Path(profile_id): Path<Uuid>,
+    Json(payload): Json<crate::models::StartFuelCalibrationSessionRequest>,
+) -> impl IntoResponse {
+    match crate::services::platform::fuel_calibration::start_session(
+        &app_state.db_pool,
+        profile_id,
+        payload.starting_litres,
+    )
+    .await
+    {
+        Ok(session_id) => (
+            StatusCode::CREATED,
+            Json(crate::models::FuelCalibrationSessionMutationResponse {
+                session_id,
+                message: "Fuel calibration session started successfully.".to_string(),
+            }),
+        )
+            .into_response(),
+
+        Err(error) => {
+            let message = error.to_string();
+
+            if message.contains("profile not found") {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(crate::models::ApiErrorResponse { message }),
+                )
+                    .into_response();
+            }
+
+            if message.contains("Starting fuel quantity") || message.contains("superseded profile")
+            {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(crate::models::ApiErrorResponse { message }),
+                )
+                    .into_response();
+            }
+
+            if message.contains("already has an unfinished session")
+                || message.contains("unique_unfinished_fuel_calibration_session")
+            {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(crate::models::ApiErrorResponse { message }),
+                )
+                    .into_response();
+            }
+
+            eprintln!(
+                "Failed to start guided fuel calibration session for profile {}: {}",
+                profile_id, message
+            );
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to start fuel calibration session.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
 //--------Sensor Calibration Management
 
 pub async fn create_sensor_calibration_handler(

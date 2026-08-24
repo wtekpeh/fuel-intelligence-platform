@@ -623,6 +623,141 @@ pub struct SensorCalibrationMutationResponse {
     pub message: String,
 }
 
+// -----------------------------------------------------------------------------
+// Guided Fuel Calibration
+// -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
+// Guided Fuel Calibration
+// -----------------------------------------------------------------------------
+
+/// Starts a new managed calibration profile for one installed fuel sensor.
+///
+/// Tank capacity is known independently of the current quantity of fuel
+/// inside the tank.
+#[derive(Debug, Deserialize)]
+pub struct CreateFuelCalibrationProfileRequest {
+    pub tank_capacity_litres: f64,
+}
+
+/// Starts a new guided calibration session.
+///
+/// `starting_litres` is optional because the installer may not know the
+/// absolute quantity currently inside the tank when calibration begins.
+///
+/// In that case ORBI records relative fuel changes until an absolute
+/// anchor is established later.
+#[derive(Debug, Deserialize)]
+pub struct StartFuelCalibrationSessionRequest {
+    pub starting_litres: Option<f64>,
+}
+
+/// Records one physical KUM observation during an active guided session.
+///
+/// `cumulative_change_litres` represents the known change relative to the
+/// beginning of the session:
+///
+/// - 0.0   = no known change from session start;
+/// - 20.0  = twenty litres added;
+/// - -20.0 = twenty litres removed.
+#[derive(Debug, Deserialize)]
+pub struct CaptureFuelCalibrationPointRequest {
+    pub level_cm: f64,
+    pub cumulative_change_litres: f64,
+}
+
+/// Establishes an absolute quantity reference after calibration has
+/// already begun.
+///
+/// The cumulative change identifies the calibration position being
+/// anchored, while `absolute_litres` establishes its actual tank quantity.
+#[derive(Debug, Deserialize)]
+pub struct ApplyFuelCalibrationAnchorRequest {
+    pub cumulative_change_litres: f64,
+    pub absolute_litres: f64,
+}
+
+/// Generic response for creation of a guided calibration profile.
+#[derive(Debug, Serialize)]
+pub struct FuelCalibrationProfileMutationResponse {
+    pub profile_id: Uuid,
+    pub message: String,
+}
+
+/// Generic response for operations affecting one guided calibration session.
+#[derive(Debug, Serialize)]
+pub struct FuelCalibrationSessionMutationResponse {
+    pub session_id: Uuid,
+    pub message: String,
+}
+
+/// Response returned after recording one guided calibration point.
+#[derive(Debug, Serialize)]
+pub struct FuelCalibrationPointMutationResponse {
+    pub point_id: Uuid,
+    pub message: String,
+}
+
+/// One verified or unresolved KUM observation belonging to a guided
+/// calibration session.
+#[derive(Debug, Serialize)]
+pub struct FuelCalibrationSessionPointResponse {
+    pub id: Uuid,
+    pub level_cm: f64,
+    pub cumulative_change_litres: f64,
+    pub resolved_litres: Option<f64>,
+    pub captured_at: DateTime<Utc>,
+}
+
+/// One guided calibration session.
+///
+/// Absolute starting and ending quantities remain optional until an
+/// anchor has made the relative calibration evidence resolvable.
+#[derive(Debug, Serialize)]
+pub struct FuelCalibrationSessionResponse {
+    pub id: Uuid,
+    pub status: String,
+
+    pub started_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+
+    pub starting_litres: Option<f64>,
+    pub ending_litres: Option<f64>,
+
+    pub anchor_cumulative_change_litres: Option<f64>,
+    pub anchor_absolute_litres: Option<f64>,
+    pub anchor_established_at: Option<DateTime<Utc>>,
+
+    pub points: Vec<FuelCalibrationSessionPointResponse>,
+}
+
+/// Management representation of the current guided fuel-calibration
+/// profile.
+///
+/// This describes calibration progress. It is intentionally separate
+/// from `SensorCalibration`, which represents a published runtime
+/// calibration.
+#[derive(Debug, Serialize)]
+pub struct FuelCalibrationProfileResponse {
+    pub id: Uuid,
+    pub sensor_id: Uuid,
+
+    pub tank_capacity_litres: f64,
+
+    pub status: String,
+    pub confidence: String,
+
+    pub verified_from_litres: f64,
+    pub verified_to_litres: f64,
+    pub coverage_percentage: f64,
+
+    pub published_calibration_id: Option<Uuid>,
+
+    pub sessions: Vec<FuelCalibrationSessionResponse>,
+
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CreateOrganizationRequest {
     pub organization_name: String,

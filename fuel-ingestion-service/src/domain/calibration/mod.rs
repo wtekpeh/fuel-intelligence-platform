@@ -1,10 +1,13 @@
 mod calibration_factory;
 pub mod fuel_calibration;
+mod fuel_calibration_anchor;
 mod fuel_calibration_confidence;
 mod fuel_calibration_coverage;
 mod fuel_calibration_engine;
 mod fuel_calibration_profile;
+mod fuel_calibration_resolver;
 mod fuel_calibration_session;
+mod fuel_calibration_session_point;
 mod fuel_calibration_session_status;
 mod fuel_calibration_status;
 mod imu_calibration;
@@ -13,10 +16,13 @@ mod vector3;
 
 pub use calibration_factory::CalibrationFactory;
 pub use fuel_calibration::{FuelCalibration, FuelCalibrationPoint};
+pub use fuel_calibration_anchor::FuelCalibrationAnchor;
 pub use fuel_calibration_confidence::FuelCalibrationConfidence;
 pub use fuel_calibration_coverage::FuelCalibrationCoverage;
 pub use fuel_calibration_engine::FuelCalibrationEngine;
+pub use fuel_calibration_resolver::resolve_session_points;
 pub use fuel_calibration_session::FuelCalibrationSession;
+pub use fuel_calibration_session_point::FuelCalibrationSessionPoint;
 pub use fuel_calibration_session_status::FuelCalibrationSessionStatus;
 pub use fuel_calibration_status::FuelCalibrationStatus;
 pub use imu_calibration::ImuCalibration;

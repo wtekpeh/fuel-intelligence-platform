@@ -2,6 +2,7 @@ mod catalogue_repository;
 mod config;
 mod db;
 mod domain;
+mod fuel_calibration_repository;
 mod handlers;
 mod input_adapters;
 mod models;

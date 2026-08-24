@@ -24,11 +24,22 @@ pub struct FuelCalibrationSession {
     /// Current lifecycle state of this guided calibration session.
     pub status: FuelCalibrationSessionStatus,
 
-    /// Fuel quantity at the beginning of this session.
-    pub starting_litres: f64,
+    /// Absolute fuel quantity at the beginning of the session.
+    ///
+    /// This may be unknown when calibration begins. For example, an
+    /// installer may arrive at a partially filled tank without knowing
+    /// the exact quantity currently present.
+    pub starting_litres: Option<f64>,
 
-    /// Fuel quantity when the session ended.
-    pub ending_litres: f64,
+    /// Absolute fuel quantity at the end of the session.
+    ///
+    /// This remains unknown until the session obtains an absolute
+    /// calibration anchor such as:
+    ///
+    /// - confirmed empty tank;
+    /// - confirmed full tank;
+    /// - independently measured fuel quantity.
+    pub ending_litres: Option<f64>,
 
     /// Number of verified calibration points captured.
     pub captured_point_count: usize,
@@ -36,8 +47,14 @@ pub struct FuelCalibrationSession {
 
 impl FuelCalibrationSession {
     /// Returns the verified litres covered during this session.
-    pub fn verified_range(&self) -> f64 {
-        (self.ending_litres - self.starting_litres).max(0.0)
+    pub fn verified_range(&self) -> Option<f64> {
+        match (self.starting_litres, self.ending_litres) {
+            (Some(starting_litres), Some(ending_litres)) => {
+                Some((ending_litres - starting_litres).max(0.0))
+            }
+
+            _ => None,
+        }
     }
 
     pub fn is_active(&self) -> bool {
@@ -55,34 +72,66 @@ impl FuelCalibrationSession {
     /// Validates the lifecycle and verified range of this guided
     /// calibration session.
     pub fn validate(&self) -> Result<()> {
-        if !self.starting_litres.is_finite() || self.starting_litres < 0.0 {
-            return Err(anyhow!(
-                "Calibration session starting litres must be a finite non-negative value."
-            ));
+        /*
+         * Starting and ending absolute quantities are optional while a
+         * calibration session is active or paused.
+         *
+         * When present, however, they must always contain physically
+         * meaningful values.
+         */
+        if let Some(starting_litres) = self.starting_litres {
+            if !starting_litres.is_finite() || starting_litres < 0.0 {
+                return Err(anyhow!(
+                    "Calibration session starting litres must be a finite non-negative value."
+                ));
+            }
         }
 
-        if !self.ending_litres.is_finite() || self.ending_litres < 0.0 {
-            return Err(anyhow!(
-                "Calibration session ending litres must be a finite non-negative value."
-            ));
+        if let Some(ending_litres) = self.ending_litres {
+            if !ending_litres.is_finite() || ending_litres < 0.0 {
+                return Err(anyhow!(
+                    "Calibration session ending litres must be a finite non-negative value."
+                ));
+            }
         }
 
-        if self.ending_litres < self.starting_litres {
-            return Err(anyhow!(
-                "Calibration session ending litres must not be below starting litres."
-            ));
-        }
-
-        if let Some(completed_at) = self.completed_at
-            && completed_at < self.started_at
+        /*
+         * The litre ordering rule can only be evaluated once both
+         * absolute quantities have been resolved.
+         */
+        if let (Some(starting_litres), Some(ending_litres)) =
+            (self.starting_litres, self.ending_litres)
         {
-            return Err(anyhow!(
-                "Calibration session completion time must not be before its start time."
-            ));
+            if ending_litres < starting_litres {
+                return Err(anyhow!(
+                    "Calibration session ending litres must not be below starting litres."
+                ));
+            }
         }
 
+        /*
+         * A completion timestamp, whenever present, must not precede
+         * the beginning of the calibration session.
+         */
+        if let Some(completed_at) = self.completed_at {
+            if completed_at < self.started_at {
+                return Err(anyhow!(
+                    "Calibration session completion time must not be before its start time."
+                ));
+            }
+        }
+
+        /*
+         * Validate lifecycle-specific rules.
+         */
         match self.status {
             FuelCalibrationSessionStatus::Active => {
+                /*
+                 * An active session is still collecting evidence.
+                 *
+                 * Its absolute starting and ending fuel quantities may
+                 * legitimately still be unknown.
+                 */
                 if self.completed_at.is_some() {
                     return Err(anyhow!(
                         "An active calibration session must not have a completion time."
@@ -91,6 +140,12 @@ impl FuelCalibrationSession {
             }
 
             FuelCalibrationSessionStatus::Paused => {
+                /*
+                 * A paused session remains unfinished and may be resumed
+                 * later.
+                 *
+                 * Its absolute fuel quantities may also still be unresolved.
+                 */
                 if self.completed_at.is_some() {
                     return Err(anyhow!(
                         "A paused calibration session must not have a completion time."
@@ -99,12 +154,29 @@ impl FuelCalibrationSession {
             }
 
             FuelCalibrationSessionStatus::Completed => {
+                /*
+                 * A completed session must have an explicit completion
+                 * timestamp.
+                 */
                 if self.completed_at.is_none() {
                     return Err(anyhow!(
                         "A completed calibration session must have a completion time."
                     ));
                 }
 
+                /*
+                 * By completion time, an absolute calibration anchor must
+                 * have resolved both ends of the session into litres.
+                 */
+                if self.starting_litres.is_none() || self.ending_litres.is_none() {
+                    return Err(anyhow!(
+                        "A completed calibration session must have resolved starting and ending litres."
+                    ));
+                }
+
+                /*
+                 * One observation cannot define a usable calibration range.
+                 */
                 if self.captured_point_count < 2 {
                     return Err(anyhow!(
                         "A completed calibration session must contain at least two verified points."
@@ -130,8 +202,8 @@ mod tests {
             started_at,
             completed_at: None,
             status,
-            starting_litres: 20.0,
-            ending_litres: 40.0,
+            starting_litres: Some(20.0),
+            ending_litres: Some(40.0),
             captured_point_count: 1,
         }
     }
@@ -229,8 +301,8 @@ mod tests {
     #[test]
     fn ending_litres_must_not_be_below_starting_litres() {
         let mut session = base_session(FuelCalibrationSessionStatus::Active);
-        session.starting_litres = 50.0;
-        session.ending_litres = 40.0;
+        session.starting_litres = Some(50.0);
+        session.ending_litres = Some(40.0);
 
         let error = session
             .validate()
@@ -262,6 +334,48 @@ mod tests {
     fn verified_range_returns_positive_session_coverage() {
         let session = base_session(FuelCalibrationSessionStatus::Active);
 
-        assert_eq!(session.verified_range(), 20.0);
+        assert_eq!(session.verified_range(), Some(20.0));
+    }
+
+    #[test]
+    fn active_session_allows_unknown_starting_and_ending_litres() {
+        let mut session = base_session(FuelCalibrationSessionStatus::Active);
+
+        session.starting_litres = None;
+        session.ending_litres = None;
+
+        assert!(session.validate().is_ok());
+        assert_eq!(session.verified_range(), None);
+    }
+
+    #[test]
+    fn paused_session_allows_unknown_starting_and_ending_litres() {
+        let mut session = base_session(FuelCalibrationSessionStatus::Paused);
+
+        session.starting_litres = None;
+        session.ending_litres = None;
+
+        assert!(session.validate().is_ok());
+        assert_eq!(session.verified_range(), None);
+    }
+
+    #[test]
+    fn completed_session_requires_resolved_litre_values() {
+        let mut session = base_session(FuelCalibrationSessionStatus::Completed);
+
+        session.completed_at = Some(session.started_at + Duration::minutes(10));
+        session.captured_point_count = 2;
+
+        session.starting_litres = None;
+        session.ending_litres = None;
+
+        let error = session
+            .validate()
+            .expect_err("completed session with unresolved litres should fail");
+
+        assert_eq!(
+            error.to_string(),
+            "A completed calibration session must have resolved starting and ending litres."
+        );
     }
 }

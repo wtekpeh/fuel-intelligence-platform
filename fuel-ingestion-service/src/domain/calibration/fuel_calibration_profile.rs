@@ -29,8 +29,22 @@ pub struct FuelCalibrationProfile {
     /// Provisioned fuel-sensor instance that owns the calibration.
     pub sensor_id: Uuid,
 
-    /// Current verified lookup-table calibration.
-    pub calibration: FuelCalibration,
+    /// Declared physical tank capacity for this installation.
+    ///
+    /// This exists independently of whether enough verified evidence has
+    /// already been collected to construct a publishable calibration.
+    pub tank_capacity_litres: f64,
+
+    /// Current publishable fuel lookup-table calibration.
+    ///
+    /// This remains `None` while guided calibration is still collecting
+    /// or resolving verified observations and no valid runtime lookup
+    /// table has yet been produced.
+    ///
+    /// Once sufficient verified points form a valid fuel calibration,
+    /// the profile may hold that calibration and eventually publish it
+    /// into `sensor_calibrations`.
+    pub calibration: Option<FuelCalibration>,
 
     /// Current lifecycle state.
     pub status: FuelCalibrationStatus,
@@ -66,9 +80,26 @@ impl FuelCalibrationProfile {
         const PERCENTAGE_TOLERANCE: f64 = 0.001;
 
         /*
-         * First validate the underlying lookup table.
+         * Tank capacity belongs to the calibration profile itself because a
+         * guided profile may exist before a publishable lookup table has been
+         * constructed.
          */
-        self.calibration.validate_lookup_table()?;
+        if !self.tank_capacity_litres.is_finite() || self.tank_capacity_litres <= 0.0 {
+            return Err(anyhow!(
+                "Fuel calibration profile tank capacity must be a finite positive value."
+            ));
+        }
+
+        /*
+         * A guided calibration profile may exist before enough verified
+         * observations are available to construct a publishable lookup table.
+         *
+         * Whenever a runtime calibration exists, however, it must satisfy the
+         * complete FuelCalibration domain rules.
+         */
+        if let Some(calibration) = &self.calibration {
+            calibration.validate_lookup_table()?;
+        }
 
         /*
          * Every guided calibration session must be internally valid before
@@ -92,7 +123,7 @@ impl FuelCalibrationProfile {
          */
         if !self.coverage.verified_from_litres.is_finite()
             || self.coverage.verified_from_litres < 0.0
-            || self.coverage.verified_from_litres > self.calibration.tank_capacity_litres
+            || self.coverage.verified_from_litres > self.tank_capacity_litres
         {
             return Err(anyhow!(
                 "Verified starting quantity must be between zero and the tank capacity."
@@ -101,7 +132,7 @@ impl FuelCalibrationProfile {
 
         if !self.coverage.verified_to_litres.is_finite()
             || self.coverage.verified_to_litres < 0.0
-            || self.coverage.verified_to_litres > self.calibration.tank_capacity_litres
+            || self.coverage.verified_to_litres > self.tank_capacity_litres
         {
             return Err(anyhow!(
                 "Verified ending quantity must be between zero and the tank capacity."
@@ -136,7 +167,7 @@ impl FuelCalibrationProfile {
             self.coverage.verified_to_litres - self.coverage.verified_from_litres;
 
         let calculated_coverage_percentage =
-            verified_range_litres / self.calibration.tank_capacity_litres * 100.0;
+            verified_range_litres / self.tank_capacity_litres * 100.0;
 
         if (self.coverage.coverage_percentage - calculated_coverage_percentage).abs()
             > PERCENTAGE_TOLERANCE
@@ -169,6 +200,24 @@ impl FuelCalibrationProfile {
         {
             return Err(anyhow!(
                 "Validated and production calibrations require at least one completed session."
+            ));
+        }
+
+        /*
+         * Validated and production profiles must also have a publishable
+         * lookup-table calibration.
+         *
+         * Completed guided sessions provide verified evidence, but the profile
+         * cannot be considered validated or production-ready until that evidence
+         * has produced a mathematically valid FuelCalibration.
+         */
+        if matches!(
+            self.status,
+            FuelCalibrationStatus::Validated | FuelCalibrationStatus::Production
+        ) && self.calibration.is_none()
+        {
+            return Err(anyhow!(
+                "Validated and production calibration profiles require a publishable fuel calibration."
             ));
         }
 
@@ -240,8 +289,8 @@ mod tests {
             started_at: Utc::now(),
             completed_at: None,
             status: super::super::FuelCalibrationSessionStatus::Paused,
-            starting_litres: 20.0,
-            ending_litres: 80.0,
+            starting_litres: Some(20.0),
+            ending_litres: Some(80.0),
             captured_point_count: 1,
         }
     }
@@ -254,8 +303,8 @@ mod tests {
             started_at,
             completed_at: Some(started_at + chrono::Duration::minutes(10)),
             status: super::super::FuelCalibrationSessionStatus::Completed,
-            starting_litres: 20.0,
-            ending_litres: 80.0,
+            starting_litres: Some(20.0),
+            ending_litres: Some(80.0),
             captured_point_count: 2,
         }
     }
@@ -264,7 +313,8 @@ mod tests {
         FuelCalibrationProfile {
             id: Uuid::new_v4(),
             sensor_id: Uuid::new_v4(),
-            calibration: valid_calibration(),
+            tank_capacity_litres: 200.0,
+            calibration: Some(valid_calibration()),
             status: FuelCalibrationStatus::Progressive,
             coverage: FuelCalibrationCoverage {
                 verified_from_litres: 20.0,
@@ -358,6 +408,34 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "Verified calibration confidence requires complete tank coverage."
+        );
+    }
+
+    #[test]
+    fn progressive_profile_allows_missing_publishable_calibration() {
+        let mut profile = progressive_profile();
+
+        profile.calibration = None;
+
+        assert!(profile.validate().is_ok());
+        assert!(profile.requires_progressive_calibration());
+    }
+
+    #[test]
+    fn validated_profile_requires_publishable_calibration() {
+        let mut profile = progressive_profile();
+
+        profile.status = FuelCalibrationStatus::Validated;
+        profile.sessions = vec![completed_session()];
+        profile.calibration = None;
+
+        let error = profile
+            .validate()
+            .expect_err("validated profile without calibration should fail");
+
+        assert_eq!(
+            error.to_string(),
+            "Validated and production calibration profiles require a publishable fuel calibration."
         );
     }
 }

@@ -1,5 +1,5 @@
 use crate::platform_handlers::{
-    assign_device_asset_handler, create_asset_handler,
+    assign_device_asset_handler, create_asset_handler, create_fuel_calibration_profile_handler,
     create_operational_behaviour_learning_session_handler, create_orbi_inventory_device_handler,
     create_organization_handler, create_sensor_calibration_handler, delete_asset_handler,
     delete_device_handler, delete_organization_handler, get_active_sensor_calibration_handler,
@@ -7,9 +7,9 @@ use crate::platform_handlers::{
     list_device_sensors_handler, list_devices_handler, list_hardware_profile_sensors_handler,
     list_hardware_profiles_handler, list_orbi_inventory_devices_handler,
     list_sensor_calibrations_handler, provision_inventory_device_handler, register_device_handler,
-    start_operational_behaviour_learning_session_handler, update_asset_handler,
-    update_device_handler, update_orbi_inventory_status_handler, update_organization_handler,
-    verify_orbi_inventory_device_handler,
+    start_fuel_calibration_session_handler, start_operational_behaviour_learning_session_handler,
+    update_asset_handler, update_device_handler, update_orbi_inventory_status_handler,
+    update_organization_handler, verify_orbi_inventory_device_handler,
 };
 
 use crate::routes::AppState;
@@ -103,5 +103,14 @@ pub fn platform_routes() -> Router<AppState> {
         .route(
             "/api/operational-behaviour/learning-sessions/:learning_session_id/start",
             post(start_operational_behaviour_learning_session_handler),
+        )
+        // Guided Fuel Calibration
+        .route(
+            "/api/sensors/:sensor_id/fuel-calibration",
+            post(create_fuel_calibration_profile_handler),
+        )
+        .route(
+            "/api/fuel-calibration/profiles/:profile_id/sessions",
+            post(start_fuel_calibration_session_handler),
         )
 }

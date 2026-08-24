@@ -558,6 +558,21 @@ pub async fn sensor_exists(db_pool: &PgPool, sensor_id: Uuid) -> Result<bool> {
     Ok(exists)
 }
 
+pub async fn get_sensor_type(db_pool: &PgPool, sensor_id: Uuid) -> Result<Option<String>> {
+    let sensor_type = sqlx::query_scalar!(
+        r#"
+        SELECT sensor_type
+        FROM sensors
+        WHERE id = $1
+        "#,
+        sensor_id,
+    )
+    .fetch_optional(db_pool)
+    .await?;
+
+    Ok(sensor_type)
+}
+
 pub async fn create_sensor_calibration(
     db_pool: &PgPool,
     sensor_id: Uuid,
