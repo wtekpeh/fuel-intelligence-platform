@@ -50,7 +50,18 @@ impl FuelCalibrationSession {
     pub fn verified_range(&self) -> Option<f64> {
         match (self.starting_litres, self.ending_litres) {
             (Some(starting_litres), Some(ending_litres)) => {
-                Some((ending_litres - starting_litres).max(0.0))
+                /*
+                 * Guided calibration may proceed in either direction:
+                 *
+                 * filling:
+                 *     20 L -> 80 L
+                 *
+                 * draining:
+                 *     80 L -> 20 L
+                 *
+                 * Coverage is the absolute quantity traversed.
+                 */
+                Some((ending_litres - starting_litres).abs())
             }
 
             _ => None,
@@ -63,6 +74,10 @@ impl FuelCalibrationSession {
 
     pub fn is_paused(&self) -> bool {
         self.status == FuelCalibrationSessionStatus::Paused
+    }
+
+    pub fn is_abandoned(&self) -> bool {
+        self.status == FuelCalibrationSessionStatus::Abandoned
     }
 
     pub fn is_completed(&self) -> bool {
@@ -91,20 +106,6 @@ impl FuelCalibrationSession {
             if !ending_litres.is_finite() || ending_litres < 0.0 {
                 return Err(anyhow!(
                     "Calibration session ending litres must be a finite non-negative value."
-                ));
-            }
-        }
-
-        /*
-         * The litre ordering rule can only be evaluated once both
-         * absolute quantities have been resolved.
-         */
-        if let (Some(starting_litres), Some(ending_litres)) =
-            (self.starting_litres, self.ending_litres)
-        {
-            if ending_litres < starting_litres {
-                return Err(anyhow!(
-                    "Calibration session ending litres must not be below starting litres."
                 ));
             }
         }
@@ -149,6 +150,21 @@ impl FuelCalibrationSession {
                 if self.completed_at.is_some() {
                     return Err(anyhow!(
                         "A paused calibration session must not have a completion time."
+                    ));
+                }
+            }
+
+            FuelCalibrationSessionStatus::Abandoned => {
+                /*
+                 * An abandoned session is permanently unfinished.
+                 *
+                 * It remains stored for historical/audit purposes but does not
+                 * receive a completion timestamp and does not become verified
+                 * calibration evidence.
+                 */
+                if self.completed_at.is_some() {
+                    return Err(anyhow!(
+                        "An abandoned calibration session must not have a completion time."
                     ));
                 }
             }
@@ -299,19 +315,30 @@ mod tests {
     }
 
     #[test]
-    fn ending_litres_must_not_be_below_starting_litres() {
+    fn draining_session_allows_ending_litres_below_starting_litres() {
         let mut session = base_session(FuelCalibrationSessionStatus::Active);
+
         session.starting_litres = Some(50.0);
-        session.ending_litres = Some(40.0);
+        session.ending_litres = Some(20.0);
 
-        let error = session
-            .validate()
-            .expect_err("ending litres below starting litres should fail");
+        assert!(session.validate().is_ok());
+        assert_eq!(session.verified_range(), Some(30.0));
+    }
 
-        assert_eq!(
-            error.to_string(),
-            "Calibration session ending litres must not be below starting litres."
-        );
+    #[test]
+    fn completed_draining_session_is_valid() {
+        let mut session = base_session(FuelCalibrationSessionStatus::Completed);
+
+        session.starting_litres = Some(100.0);
+        session.ending_litres = Some(0.0);
+
+        session.completed_at = Some(session.started_at + Duration::minutes(10));
+
+        session.captured_point_count = 2;
+
+        assert!(session.validate().is_ok());
+        assert!(session.is_completed());
+        assert_eq!(session.verified_range(), Some(100.0));
     }
 
     #[test]
@@ -377,5 +404,45 @@ mod tests {
             error.to_string(),
             "A completed calibration session must have resolved starting and ending litres."
         );
+    }
+
+    #[test]
+    fn abandoned_session_without_completion_time_is_valid() {
+        let session = base_session(FuelCalibrationSessionStatus::Abandoned);
+
+        assert!(session.validate().is_ok());
+
+        assert!(!session.is_active());
+        assert!(!session.is_paused());
+        assert!(session.is_abandoned());
+        assert!(!session.is_completed());
+    }
+
+    #[test]
+    fn abandoned_session_must_not_have_completion_time() {
+        let mut session = base_session(FuelCalibrationSessionStatus::Abandoned);
+
+        session.completed_at = Some(session.started_at + Duration::minutes(10));
+
+        let error = session
+            .validate()
+            .expect_err("abandoned session with completion time should fail");
+
+        assert_eq!(
+            error.to_string(),
+            "An abandoned calibration session must not have a completion time."
+        );
+    }
+
+    #[test]
+    fn abandoned_session_allows_unknown_litre_values() {
+        let mut session = base_session(FuelCalibrationSessionStatus::Abandoned);
+
+        session.starting_litres = None;
+        session.ending_litres = None;
+
+        assert!(session.validate().is_ok());
+        assert_eq!(session.verified_range(), None);
+        assert!(session.is_abandoned());
     }
 }

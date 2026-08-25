@@ -572,6 +572,155 @@ pub async fn create_fuel_calibration_profile_handler(
     }
 }
 
+pub async fn get_fuel_calibration_profile_handler(
+    State(app_state): State<AppState>,
+    Path(sensor_id): Path<Uuid>,
+) -> impl IntoResponse {
+    match crate::services::platform::fuel_calibration::get_profile(&app_state.db_pool, sensor_id)
+        .await
+    {
+        Ok(Some(profile)) => (StatusCode::OK, Json(profile)).into_response(),
+
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(crate::models::ApiErrorResponse {
+                message: "No current fuel calibration profile was found for this sensor."
+                    .to_string(),
+            }),
+        )
+            .into_response(),
+
+        Err(error) => {
+            let message = error.to_string();
+
+            eprintln!(
+                "Failed to load guided fuel calibration profile for sensor {}: {}",
+                sensor_id, message
+            );
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to load fuel calibration profile.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
+pub async fn abandon_fuel_calibration_session_handler(
+    State(app_state): State<AppState>,
+    Path(session_id): Path<Uuid>,
+) -> impl IntoResponse {
+    match crate::services::platform::fuel_calibration::abandon_session(
+        &app_state.db_pool,
+        session_id,
+    )
+    .await
+    {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(crate::models::FuelCalibrationSessionMutationResponse {
+                session_id,
+                message: "Fuel calibration session abandoned successfully.".to_string(),
+            }),
+        )
+            .into_response(),
+
+        Err(error) => {
+            let message = error.to_string();
+
+            if message.contains("session was not found") {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(crate::models::ApiErrorResponse { message }),
+                )
+                    .into_response();
+            }
+
+            if message
+                .contains("Only an active or paused fuel calibration session can be abandoned")
+            {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(crate::models::ApiErrorResponse { message }),
+                )
+                    .into_response();
+            }
+
+            eprintln!(
+                "Failed to abandon fuel calibration session {}: {}",
+                session_id, message
+            );
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to abandon fuel calibration session.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
+pub async fn supersede_fuel_calibration_profile_handler(
+    State(app_state): State<AppState>,
+    Path(profile_id): Path<Uuid>,
+) -> impl IntoResponse {
+    match crate::services::platform::fuel_calibration::supersede_profile(
+        &app_state.db_pool,
+        profile_id,
+    )
+    .await
+    {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(crate::models::FuelCalibrationProfileMutationResponse {
+                profile_id,
+                message: "Fuel calibration profile superseded successfully.".to_string(),
+            }),
+        )
+            .into_response(),
+
+        Err(error) => {
+            let message = error.to_string();
+
+            if message.contains("profile was not found") {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(crate::models::ApiErrorResponse { message }),
+                )
+                    .into_response();
+            }
+
+            if message.contains("already superseded")
+                || message.contains("cannot be superseded while it has an unfinished session")
+            {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(crate::models::ApiErrorResponse { message }),
+                )
+                    .into_response();
+            }
+
+            eprintln!(
+                "Failed to supersede fuel calibration profile {}: {}",
+                profile_id, message
+            );
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to supersede fuel calibration profile.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
 pub async fn start_fuel_calibration_session_handler(
     State(app_state): State<AppState>,
     Path(profile_id): Path<Uuid>,
@@ -632,6 +781,274 @@ pub async fn start_fuel_calibration_session_handler(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(crate::models::ApiErrorResponse {
                     message: "Failed to start fuel calibration session.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
+pub async fn capture_fuel_calibration_point_handler(
+    State(app_state): State<AppState>,
+    Path(session_id): Path<Uuid>,
+    Json(payload): Json<crate::models::CaptureFuelCalibrationPointRequest>,
+) -> impl IntoResponse {
+    match crate::services::platform::fuel_calibration::capture_point(
+        &app_state.db_pool,
+        session_id,
+        payload.level_cm,
+        payload.cumulative_change_litres,
+    )
+    .await
+    {
+        Ok(point_id) => (
+            StatusCode::CREATED,
+            Json(crate::models::FuelCalibrationPointMutationResponse {
+                point_id,
+                message: "Fuel calibration point captured successfully.".to_string(),
+            }),
+        )
+            .into_response(),
+
+        Err(error) => {
+            let message = error.to_string();
+
+            if message.contains("session was not found") {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(crate::models::ApiErrorResponse { message }),
+                )
+                    .into_response();
+            }
+
+            if message.contains("Fuel calibration level")
+                || message.contains("Cumulative fuel change")
+                || message.contains("can only be captured while the session is active")
+                || message.contains("outside the declared tank capacity")
+            {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(crate::models::ApiErrorResponse { message }),
+                )
+                    .into_response();
+            }
+
+            if message.contains("unique_fuel_calibration_session_change") {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(crate::models::ApiErrorResponse {
+                        message:
+                            "A calibration point already exists for this cumulative fuel change."
+                                .to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+
+            eprintln!(
+                "Failed to capture fuel calibration point for session {}: {}",
+                session_id, message
+            );
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to capture fuel calibration point.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
+pub async fn pause_fuel_calibration_session_handler(
+    State(app_state): State<AppState>,
+    Path(session_id): Path<Uuid>,
+) -> impl IntoResponse {
+    match crate::services::platform::fuel_calibration::pause_session(&app_state.db_pool, session_id)
+        .await
+    {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(crate::models::FuelCalibrationSessionMutationResponse {
+                session_id,
+                message: "Fuel calibration session paused successfully.".to_string(),
+            }),
+        )
+            .into_response(),
+
+        Err(error) => {
+            let message = error.to_string();
+
+            eprintln!(
+                "Failed to pause fuel calibration session {}: {}",
+                session_id, message
+            );
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to pause fuel calibration session.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
+pub async fn resume_fuel_calibration_session_handler(
+    State(app_state): State<AppState>,
+    Path(session_id): Path<Uuid>,
+) -> impl IntoResponse {
+    match crate::services::platform::fuel_calibration::resume_session(
+        &app_state.db_pool,
+        session_id,
+    )
+    .await
+    {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(crate::models::FuelCalibrationSessionMutationResponse {
+                session_id,
+                message: "Fuel calibration session resumed successfully.".to_string(),
+            }),
+        )
+            .into_response(),
+
+        Err(error) => {
+            let message = error.to_string();
+
+            eprintln!(
+                "Failed to resume fuel calibration session {}: {}",
+                session_id, message
+            );
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to resume fuel calibration session.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
+pub async fn apply_fuel_calibration_anchor_handler(
+    State(app_state): State<AppState>,
+    Path(session_id): Path<Uuid>,
+    Json(payload): Json<crate::models::ApplyFuelCalibrationAnchorRequest>,
+) -> impl IntoResponse {
+    match crate::services::platform::fuel_calibration::apply_anchor(
+        &app_state.db_pool,
+        session_id,
+        payload.cumulative_change_litres,
+        payload.absolute_litres,
+    )
+    .await
+    {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(crate::models::FuelCalibrationSessionMutationResponse {
+                session_id,
+                message: "Fuel calibration anchor applied successfully.".to_string(),
+            }),
+        )
+            .into_response(),
+
+        Err(error) => {
+            let message = error.to_string();
+
+            if message.contains("session was not found") {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(crate::models::ApiErrorResponse { message }),
+                )
+                    .into_response();
+            }
+
+            if message.contains("Only an active or paused")
+                || message.contains("cannot be applied before")
+                || message.contains("must correspond to a captured calibration point")
+                || message.contains("Tank capacity")
+                || message.contains("Calibration anchor")
+                || message.contains("resolves outside the declared tank capacity")
+            {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(crate::models::ApiErrorResponse { message }),
+                )
+                    .into_response();
+            }
+
+            eprintln!(
+                "Failed to apply fuel calibration anchor for session {}: {}",
+                session_id, message
+            );
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to apply fuel calibration anchor.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
+pub async fn complete_fuel_calibration_session_handler(
+    State(app_state): State<AppState>,
+    Path(session_id): Path<Uuid>,
+) -> impl IntoResponse {
+    match crate::services::platform::fuel_calibration::complete_session(
+        &app_state.db_pool,
+        session_id,
+    )
+    .await
+    {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(crate::models::FuelCalibrationSessionMutationResponse {
+                session_id,
+                message: "Fuel calibration session completed successfully.".to_string(),
+            }),
+        )
+            .into_response(),
+
+        Err(error) => {
+            let message = error.to_string();
+
+            if message.contains("session was not found") {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(crate::models::ApiErrorResponse { message }),
+                )
+                    .into_response();
+            }
+
+            if message.contains("Only an active or paused")
+                || message.contains("cannot be completed")
+                || message.contains("at least two verified points")
+                || message.contains("remain unresolved")
+                || message.contains("outside the declared tank capacity")
+            {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(crate::models::ApiErrorResponse { message }),
+                )
+                    .into_response();
+            }
+
+            eprintln!(
+                "Failed to complete fuel calibration session {}: {}",
+                session_id, message
+            );
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to complete fuel calibration session.".to_string(),
                 }),
             )
                 .into_response()

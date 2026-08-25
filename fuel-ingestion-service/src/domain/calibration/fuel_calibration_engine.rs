@@ -4,24 +4,34 @@ use crate::domain::telemetry::models::CalibratedFuelTelemetry;
 
 use super::FuelCalibration;
 
-/// Converts KUM liquid-level measurements into calibrated fuel
-/// quantities using a verified lookup table.
+/// Converts KUM measurements into calibrated fuel quantities using a
+/// verified lookup table.
+///
+/// Physical bench testing confirmed:
+///
+/// - lower fuel quantity  -> lower measured level;
+/// - higher fuel quantity -> higher measured level.
+///
+/// Lookup points are therefore ordered by:
+///
+/// - strictly increasing litres;
+/// - strictly increasing `level_cm`.
 ///
 /// Behaviour:
 ///
-/// - Measurements inside the verified level range are interpolated.
-/// - Measurements above the final full-tank point are clamped to the
+/// - Measurements inside the verified range are interpolated.
+/// - Measurements above the final full-tank point are clamped to
 ///   declared tank capacity.
 /// - Measurements below the first verified point return `None`,
-///   because the lower tank range has not yet been calibrated.
+///   because that lower fuel range has not yet been verified.
 /// - Extrapolation below the verified range is deliberately avoided.
-/// #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MeasurementClassification {
     BelowVerifiedRange,
     WithinVerifiedRange,
     AboveVerifiedRange,
 }
-///
+
 pub struct FuelCalibrationEngine;
 
 impl FuelCalibrationEngine {
@@ -30,11 +40,12 @@ impl FuelCalibrationEngine {
         calibration: &FuelCalibration,
     ) -> Result<Option<CalibratedFuelTelemetry>> {
         /*
-         * The engine normally receives a typed calibration produced by
-         * CalibrationFactory, which has already validated the lookup table.
+         * The runtime calibration is normally produced through
+         * CalibrationFactory and has already passed lookup-table
+         * validation.
          *
-         * This finite-value check still protects the mathematical boundary
-         * against an invalid live sensor measurement.
+         * The live sensor measurement still needs its own finite-value
+         * protection.
          */
         if !measured_level_cm.is_finite() {
             return Err(anyhow!("Measured fuel level must be a finite value."));
@@ -62,10 +73,14 @@ impl FuelCalibrationEngine {
 
         /*
          * Locate the two verified calibration points that bound the
-         * measured liquid level.
+         * measured level.
          *
-         * Lookup-table validation guarantees that both level and litre
-         * quantities are strictly increasing.
+         * Lookup-table validation guarantees that both:
+         *
+         * - level_cm;
+         * - litres;
+         *
+         * increase strictly from one point to the next.
          */
         for neighbouring_points in calibration.points.windows(2) {
             let lower_point = &neighbouring_points[0];
@@ -104,10 +119,18 @@ impl FuelCalibrationEngine {
             .last()
             .ok_or_else(|| anyhow!("Fuel calibration contains no points."))?;
 
+        /*
+         * Below the first verified level means the measurement represents
+         * less fuel than our current verified calibration range covers.
+         */
         if measured_level_cm < first_point.level_cm {
             return Ok(MeasurementClassification::BelowVerifiedRange);
         }
 
+        /*
+         * At or above the final verified full-tank point, clamp to tank
+         * capacity rather than extrapolating beyond the physical maximum.
+         */
         if measured_level_cm >= final_point.level_cm {
             return Ok(MeasurementClassification::AboveVerifiedRange);
         }
@@ -186,7 +209,6 @@ mod tests {
             .unwrap();
 
         assert_eq!(calibrated.litres, 60.0);
-
         assert_eq!(calibrated.percentage, 30.0);
     }
 
@@ -263,6 +285,46 @@ mod tests {
         assert!((calibrated.litres - expected_litres).abs() < tolerance);
 
         assert!((calibrated.percentage - expected_percentage).abs() < tolerance);
+    }
+
+    #[test]
+    fn physical_bench_curve_interpolates_in_correct_direction() {
+        let calibration = FuelCalibration {
+            tank_capacity_litres: 1.5,
+
+            points: vec![
+                FuelCalibrationPoint {
+                    level_cm: 19.80,
+                    litres: 1.00,
+                },
+                FuelCalibrationPoint {
+                    level_cm: 24.80,
+                    litres: 1.25,
+                },
+                FuelCalibrationPoint {
+                    level_cm: 30.00,
+                    litres: 1.50,
+                },
+            ],
+        };
+
+        /*
+         * 22.30 cm lies halfway between:
+         *
+         * 19.80 cm -> 1.00 L
+         * 24.80 cm -> 1.25 L
+         *
+         * so the expected result is 1.125 L.
+         */
+        let calibrated = FuelCalibrationEngine::apply(22.30, &calibration)
+            .unwrap()
+            .unwrap();
+
+        let tolerance = 0.0001;
+
+        assert!((calibrated.litres - 1.125).abs() < tolerance);
+
+        assert!((calibrated.percentage - 75.0).abs() < tolerance);
     }
 
     #[test]

@@ -13,6 +13,16 @@ pub enum FuelCalibrationSessionStatus {
     /// The session has been intentionally stopped and can be resumed later.
     Paused,
 
+    /// The calibration attempt has been intentionally abandoned.
+    ///
+    /// The session remains available for audit/history but must not:
+    ///
+    /// - collect additional points;
+    /// - be resumed;
+    /// - be completed;
+    /// - contribute verified profile coverage.
+    Abandoned,
+
     /// The session has been completed and its verified points can
     /// contribute to calibration-profile coverage.
     Completed,

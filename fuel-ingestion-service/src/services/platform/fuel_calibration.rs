@@ -4,6 +4,10 @@ use uuid::Uuid;
 
 use crate::domain::calibration::FuelCalibrationAnchor;
 use crate::fuel_calibration_repository;
+use crate::models::{
+    FuelCalibrationProfileResponse, FuelCalibrationSessionPointResponse,
+    FuelCalibrationSessionResponse,
+};
 use crate::repository;
 
 pub async fn create_profile(
@@ -193,6 +197,30 @@ pub async fn resume_session(db_pool: &PgPool, session_id: Uuid) -> Result<()> {
     fuel_calibration_repository::resume_fuel_calibration_session(db_pool, session_id).await
 }
 
+pub async fn abandon_session(db_pool: &PgPool, session_id: Uuid) -> Result<()> {
+    fuel_calibration_repository::abandon_fuel_calibration_session(db_pool, session_id).await
+}
+
+pub async fn supersede_profile(db_pool: &PgPool, profile_id: Uuid) -> Result<()> {
+    /*
+     * A profile must not be superseded while it still contains an
+     * active or paused calibration session.
+     *
+     * Abandoned and completed sessions are historical and therefore
+     * do not block retirement of the profile.
+     */
+    if fuel_calibration_repository::get_unfinished_fuel_calibration_session(db_pool, profile_id)
+        .await?
+        .is_some()
+    {
+        return Err(anyhow!(
+            "Fuel calibration profile cannot be superseded while it has an unfinished session."
+        ));
+    }
+
+    fuel_calibration_repository::supersede_fuel_calibration_profile(db_pool, profile_id).await
+}
+
 pub async fn apply_anchor(
     db_pool: &PgPool,
     session_id: Uuid,
@@ -210,4 +238,111 @@ pub async fn apply_anchor(
 
 pub async fn complete_session(db_pool: &PgPool, session_id: Uuid) -> Result<()> {
     fuel_calibration_repository::complete_fuel_calibration_session(db_pool, session_id).await
+}
+
+pub async fn get_profile(
+    db_pool: &PgPool,
+    sensor_id: Uuid,
+) -> Result<Option<FuelCalibrationProfileResponse>> {
+    /*
+     * Load the current non-superseded guided calibration profile
+     * belonging to this installed fuel sensor.
+     */
+    let profile =
+        fuel_calibration_repository::get_current_fuel_calibration_profile(db_pool, sensor_id)
+            .await?;
+
+    let Some(profile) = profile else {
+        return Ok(None);
+    };
+
+    /*
+     * Load the complete guided-session history for this profile.
+     *
+     * This includes:
+     *
+     * - active sessions;
+     * - paused sessions;
+     * - completed sessions.
+     *
+     * That allows Platform Management to completely reconstruct
+     * calibration progress after a browser restart, backend restart,
+     * installer pause, or later return to the vehicle.
+     */
+    let stored_sessions =
+        fuel_calibration_repository::list_fuel_calibration_sessions(db_pool, profile.id).await?;
+
+    let mut sessions = Vec::with_capacity(stored_sessions.len());
+
+    for stored_session in stored_sessions {
+        /*
+         * Load every physical KUM observation captured during this
+         * particular guided calibration session.
+         */
+        let stored_points = fuel_calibration_repository::list_fuel_calibration_session_points(
+            db_pool,
+            stored_session.id,
+        )
+        .await?;
+
+        /*
+         * Convert repository rows into API response models.
+         */
+        let points = stored_points
+            .into_iter()
+            .map(|point| FuelCalibrationSessionPointResponse {
+                id: point.id,
+                level_cm: point.level_cm,
+                cumulative_change_litres: point.cumulative_change_litres,
+                resolved_litres: point.resolved_litres,
+                captured_at: point.captured_at,
+            })
+            .collect();
+
+        sessions.push(FuelCalibrationSessionResponse {
+            id: stored_session.id,
+            status: stored_session.status,
+
+            started_at: stored_session.started_at,
+            completed_at: stored_session.completed_at,
+
+            starting_litres: stored_session.starting_litres,
+            ending_litres: stored_session.ending_litres,
+
+            anchor_cumulative_change_litres: stored_session.anchor_cumulative_change_litres,
+
+            anchor_absolute_litres: stored_session.anchor_absolute_litres,
+
+            anchor_established_at: stored_session.anchor_established_at,
+
+            points,
+        });
+    }
+
+    /*
+     * Return the complete management representation.
+     *
+     * This is workflow state, not the published runtime calibration
+     * stored in sensor_calibrations.
+     */
+    Ok(Some(FuelCalibrationProfileResponse {
+        id: profile.id,
+        sensor_id: profile.sensor_id,
+
+        tank_capacity_litres: profile.tank_capacity_litres,
+
+        status: profile.status,
+        confidence: profile.confidence,
+
+        verified_from_litres: profile.verified_from_litres,
+        verified_to_litres: profile.verified_to_litres,
+        coverage_percentage: profile.coverage_percentage,
+
+        published_calibration_id: profile.published_calibration_id,
+
+        sessions,
+
+        created_at: profile.created_at,
+        updated_at: profile.updated_at,
+    }))
 }

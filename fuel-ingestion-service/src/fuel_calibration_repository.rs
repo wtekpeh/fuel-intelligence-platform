@@ -141,6 +141,47 @@ pub async fn get_fuel_calibration_profile_by_id(
     Ok(profile)
 }
 
+pub async fn supersede_fuel_calibration_profile(db_pool: &PgPool, profile_id: Uuid) -> Result<()> {
+    let result = sqlx::query!(
+        r#"
+        UPDATE fuel_calibration_profiles
+        SET
+            status = 'superseded',
+            updated_at = NOW()
+        WHERE id = $1
+          AND status <> 'superseded'
+        "#,
+        profile_id,
+    )
+    .execute(db_pool)
+    .await?;
+
+    if result.rows_affected() == 0 {
+        let existing_status = sqlx::query_scalar!(
+            r#"
+            SELECT status
+            FROM fuel_calibration_profiles
+            WHERE id = $1
+            "#,
+            profile_id,
+        )
+        .fetch_optional(db_pool)
+        .await?;
+
+        match existing_status {
+            None => {
+                return Err(anyhow!("Fuel calibration profile was not found."));
+            }
+
+            Some(_) => {
+                return Err(anyhow!("Fuel calibration profile is already superseded."));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 pub async fn start_fuel_calibration_session(
     db_pool: &PgPool,
     profile_id: Uuid,
@@ -202,6 +243,38 @@ pub async fn get_unfinished_fuel_calibration_session(
     .await?;
 
     Ok(session)
+}
+
+pub async fn list_fuel_calibration_sessions(
+    db_pool: &PgPool,
+    profile_id: Uuid,
+) -> Result<Vec<FuelCalibrationSessionRow>> {
+    let sessions = sqlx::query_as!(
+        FuelCalibrationSessionRow,
+        r#"
+        SELECT
+            id,
+            profile_id,
+            status,
+            started_at,
+            completed_at,
+            starting_litres,
+            ending_litres,
+            anchor_cumulative_change_litres,
+            anchor_absolute_litres,
+            anchor_established_at,
+            created_at,
+            updated_at
+        FROM fuel_calibration_sessions
+        WHERE profile_id = $1
+        ORDER BY started_at ASC, created_at ASC
+        "#,
+        profile_id,
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    Ok(sessions)
 }
 
 pub async fn capture_fuel_calibration_point(
@@ -359,6 +432,73 @@ pub async fn resume_fuel_calibration_session(db_pool: &PgPool, session_id: Uuid)
     )
     .execute(db_pool)
     .await?;
+
+    Ok(())
+}
+
+pub async fn abandon_fuel_calibration_session(db_pool: &PgPool, session_id: Uuid) -> Result<()> {
+    /*
+     * Abandoning a guided calibration session means that the
+     * observations collected during that session must no longer
+     * contribute to verified calibration evidence.
+     *
+     * The session is retained for traceability rather than deleted.
+     *
+     * Only an unfinished session may be abandoned:
+     *
+     * - active;
+     * - paused.
+     *
+     * Completed calibration evidence is immutable through this
+     * operation.
+     */
+    let result = sqlx::query!(
+        r#"
+        UPDATE fuel_calibration_sessions
+        SET
+            status = 'abandoned',
+            updated_at = NOW()
+        WHERE id = $1
+          AND status IN ('active', 'paused')
+        "#,
+        session_id,
+    )
+    .execute(db_pool)
+    .await?;
+
+    /*
+     * An affected-row count of zero has two possible meanings:
+     *
+     * - the session does not exist;
+     * - the session exists but is no longer unfinished.
+     *
+     * Distinguish those cases so the service/API can return a useful
+     * error rather than silently reporting success.
+     */
+    if result.rows_affected() == 0 {
+        let existing_status = sqlx::query_scalar!(
+            r#"
+            SELECT status
+            FROM fuel_calibration_sessions
+            WHERE id = $1
+            "#,
+            session_id,
+        )
+        .fetch_optional(db_pool)
+        .await?;
+
+        match existing_status {
+            None => {
+                return Err(anyhow!("Fuel calibration session was not found."));
+            }
+
+            Some(_) => {
+                return Err(anyhow!(
+                    "Only an active or paused fuel calibration session can be abandoned."
+                ));
+            }
+        }
+    }
 
     Ok(())
 }
@@ -737,6 +877,44 @@ pub async fn complete_fuel_calibration_session(db_pool: &PgPool, session_id: Uui
     let new_verified_to_litres;
 
     if profile_has_existing_coverage {
+        /*
+         * The current database model stores calibration coverage as one
+         * continuous verified interval.
+         *
+         * Therefore a new completed session must touch or overlap the
+         * existing verified interval before those ranges may be merged.
+         *
+         * Examples:
+         *
+         * existing: 100 -> 140
+         * new:      140 -> 180
+         *
+         * valid because the ranges touch.
+         *
+         * existing: 100 -> 140
+         * new:      120 -> 160
+         *
+         * valid because the ranges overlap.
+         *
+         * existing: 100 -> 140
+         * new:      20 -> 40
+         *
+         * invalid because 40 -> 100 has not been verified.
+         */
+        const COVERAGE_TOLERANCE_LITRES: f64 = 0.000_001;
+
+        let session_ends_before_existing = session_verified_to_litres
+            < session_context.verified_from_litres - COVERAGE_TOLERANCE_LITRES;
+
+        let session_starts_after_existing = session_verified_from_litres
+            > session_context.verified_to_litres + COVERAGE_TOLERANCE_LITRES;
+
+        if session_ends_before_existing || session_starts_after_existing {
+            return Err(anyhow!(
+                "Completed calibration session does not connect to the profile's existing verified fuel range."
+            ));
+        }
+
         new_verified_from_litres = session_context
             .verified_from_litres
             .min(session_verified_from_litres);
@@ -745,6 +923,11 @@ pub async fn complete_fuel_calibration_session(db_pool: &PgPool, session_id: Uui
             .verified_to_litres
             .max(session_verified_to_litres);
     } else {
+        /*
+         * This is the first completed guided calibration session for the
+         * profile, so its verified interval establishes the initial
+         * coverage.
+         */
         new_verified_from_litres = session_verified_from_litres;
         new_verified_to_litres = session_verified_to_litres;
     }
