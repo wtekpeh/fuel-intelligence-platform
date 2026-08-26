@@ -198,6 +198,159 @@ Litres and Percentage
 ↓
 Fuel Intelligence
 
+
+## Guided Fuel Calibration and Runtime Measurement Policy
+
+ORBI now supports a guided, installation-specific fuel calibration workflow for
+provisioned FUEL sensors.
+
+The calibration workflow is intentionally separate from normal runtime
+telemetry processing.
+
+Guided calibration flow:
+
+```text
+Provisioned FUEL Sensor
+↓
+Create Fuel Calibration Profile
+↓
+Start Guided Calibration Session
+↓
+Capture Physical KUM Measurements
+↓
+Pause / Resume / Abandon When Required
+↓
+Apply Absolute Anchor When Required
+↓
+Complete Session
+↓
+Accumulate Verified Coverage Across Sessions
+↓
+Build Publishable Lookup Table
+↓
+Domain Validation
+↓
+Publish Active Runtime Calibration
+↓
+Runtime Fuel Interpolation
+```
+
+Guided calibration profiles track:
+
+- tank capacity
+- calibration status
+- confidence
+- verified fuel range
+- coverage percentage
+- published runtime calibration ID
+- complete calibration-session history
+
+Guided calibration sessions support:
+
+- active
+- paused
+- abandoned
+- completed
+
+Abandoned sessions remain available as historical evidence but do not
+contribute points to the publishable runtime calibration.
+
+Completed-session points are resolved into absolute litres and are sorted by
+resolved litres before runtime publication. This is important because a real
+calibration session may drain, refill, or revisit previously measured fuel
+quantities rather than progressing in capture-time order.
+
+### Runtime Fuel Measurement Policy
+
+Physical KUM testing confirmed different response characteristics for the
+three sensor outputs:
+
+```text
+Raw
+→ fastest low-level response
+→ retained for diagnostics and sensor validation
+
+Real-time
+→ fast response
+→ closely tracks raw measurements
+→ canonical input for live runtime fuel calibration
+
+Smooth
+→ deliberately filtered / slower response
+→ useful for diagnostics, stability checks, and trend confirmation
+→ not used as the live calibrated-fuel input
+```
+
+The runtime calibration path therefore uses:
+
+```text
+fuel_distance_realtime_cm
+↓
+Active FuelCalibration lookup table
+↓
+Piecewise linear interpolation
+↓
+CalibratedFuelTelemetry
+↓
+litres + percentage
+```
+
+The smooth and raw KUM channels remain preserved in canonical telemetry and
+the original raw payload.
+
+This decision was validated with real hardware. During a controlled liquid
+change, the KUM real-time and raw measurements moved immediately while the
+smooth measurement remained at the previous liquid level for several
+minutes. Using the smooth value for live calibration therefore delayed the
+reported fuel quantity.
+
+### Real KUM Guided Calibration Validation
+
+The guided workflow has been validated end-to-end with a physical KUM2500A
+sensor using a controlled 1.5 L liquid test.
+
+Verified reference points from the validation run were:
+
+```text
+0.25 L →  7.80 cm
+0.50 L → 12.18 cm
+0.75 L → 15.73 cm
+1.00 L → 19.97 cm
+1.25 L → 24.99 cm
+1.50 L → 29.48 cm
+```
+
+This established a verified range of:
+
+```text
+0.25 L → 1.50 L
+83.33% tank coverage
+```
+
+The true-empty condition was deliberately not fabricated as a calibration
+point because the raw ultrasonic echo disappeared at empty. The runtime
+engine therefore avoids extrapolating below the lowest verified point.
+
+The completed guided evidence was successfully:
+
+```text
+completed session points
+↓
+validated FuelCalibration domain model
+↓
+published sensor_calibrations record
+↓
+active runtime calibration
+↓
+live interpolation
+↓
+PostgreSQL calibrated fuel persistence
+```
+
+End-to-end runtime testing confirmed that a real-time KUM measurement of
+approximately 23.79 cm interpolated to approximately 1.19 L while the slow
+smooth channel was still reporting the previous full-tank level.
+
 ## Telemetry Processing Pipeline
 
 The platform processes telemetry using the following architecture:
@@ -252,8 +405,13 @@ Fuel Service
 Current responsibilities:
 
 - raw fuel telemetry acceptance
+- active installation-specific fuel calibration loading
+- real-time KUM measurement calibration
+- piecewise interpolation into litres and tank percentage
 - calibrated fuel persistence when a valid calibrated value exists
 - preservation of the original raw telemetry payload
+- preservation of smooth, real-time, and raw KUM channels
+- safe absence of calibrated litres below the verified calibration range
 - fuel event detection for calibrated fuel readings
 - leak detection
 - refill detection
@@ -1073,6 +1231,66 @@ This foundation will support future features such as:
 - device-specific operational dashboards
 
 WebSocket live alert filtering is also now device-aware at the frontend layer using `device_id` carried in alert payloads.
+
+---
+
+
+## Guided Fuel Calibration APIs
+
+Create or retrieve the current guided calibration profile for a provisioned
+FUEL sensor:
+
+```http
+POST /api/sensors/{sensor_id}/fuel-calibration
+GET  /api/sensors/{sensor_id}/fuel-calibration
+```
+
+Start a guided calibration session:
+
+```http
+POST /api/fuel-calibration/profiles/{profile_id}/sessions
+```
+
+Capture a physical calibration point:
+
+```http
+POST /api/fuel-calibration/sessions/{session_id}/points
+```
+
+Session lifecycle:
+
+```http
+POST /api/fuel-calibration/sessions/{session_id}/pause
+POST /api/fuel-calibration/sessions/{session_id}/resume
+POST /api/fuel-calibration/sessions/{session_id}/abandon
+POST /api/fuel-calibration/sessions/{session_id}/complete
+```
+
+Apply an absolute fuel anchor:
+
+```http
+POST /api/fuel-calibration/sessions/{session_id}/anchor
+```
+
+Publish validated guided evidence as the active runtime calibration:
+
+```http
+POST /api/fuel-calibration/profiles/{profile_id}/publish
+```
+
+Publication:
+
+- excludes active, paused, and abandoned sessions
+- uses resolved points from completed sessions only
+- orders points by resolved litres rather than capture time
+- validates the resulting `FuelCalibration`
+- deactivates any previous active calibration of the same type
+- creates the new active runtime `sensor_calibrations` record
+- links the guided profile through `published_calibration_id`
+- moves the guided profile to `validated`
+
+A validated profile is not automatically promoted to `production`.
+Production approval remains a separate lifecycle decision.
 
 ---
 
@@ -2093,6 +2311,24 @@ Implemented:
 - optional calibrated fuel values
 - compatibility support for legacy fuel payloads
 - safe skipping of calibrated fuel persistence when litres are unavailable
+- guided fuel calibration profiles
+- guided fuel calibration session lifecycle
+  - active
+  - paused
+  - abandoned
+  - completed
+- signed cumulative fuel-change capture
+- absolute anchor support
+- progressive verified-range accumulation
+- calibration coverage percentage tracking
+- publishable lookup-table construction from completed sessions only
+- completed-point sorting by resolved litres before publication
+- fuel calibration domain validation before runtime publication
+- guided-profile linkage to published runtime calibration
+- active runtime fuel-calibration publication
+- piecewise linear fuel interpolation
+- real-time KUM measurement as the live calibration input
+- real hardware end-to-end KUM calibration validation
 
 # Device & Hardware Management
 
@@ -2838,21 +3074,28 @@ Resolved Idle Vibration Threshold
 ↓
 Motion Classification
 
-The next validation will extend the same architecture to:
+The KUM fuel-sensor architecture has now been validated through:
 
 Provisioned KUM Fuel Sensor
 ↓
-KUM Sensor Profile
+Raw KUM Telemetry
 ↓
-Tank and Distance Calibration
+Guided Tank Calibration
 ↓
-Normalized Fuel Telemetry
+Validated Lookup Table
+↓
+Published Runtime Calibration
+↓
+Real-Time Measurement Interpolation
+↓
+Calibrated Fuel Persistence
 ↓
 Fuel Intelligence
 
-Future capabilities such as guided calibration sessions, sensor
-replacement workflows, deployment profiles and adapter-management
-interfaces will be introduced when required.
+Guided fuel calibration sessions are now implemented and validated with real
+hardware. Future capabilities such as sensor replacement workflows,
+deployment profiles, and adapter-management interfaces will be introduced
+when required.
 
 Locked Architectural Principles
 
@@ -3244,11 +3487,21 @@ Calibrated Fuel Persistence ✅
 ↓
 Real KUM Calibration Validation ✅
 ↓
-Guided Calibration Session API ← Current
+Guided Calibration Session API ✅
 ↓
-Progressive Calibration Workflow
+Progressive Calibration Workflow ✅
 ↓
-Guided Calibration Wizard
+Abandon / Supersede Calibration Lifecycle ✅
+↓
+Publishable Fuel Lookup Construction ✅
+↓
+Runtime Calibration Publication ✅
+↓
+Real-Time KUM Runtime Calibration Input ✅
+↓
+End-to-End Physical Fuel Interpolation Validation ✅
+↓
+Guided Calibration Wizard ← Current
 ↓
 Fuel Intelligence Validation
 ↓

@@ -2,12 +2,15 @@ use anyhow::{Result, anyhow};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::domain::calibration::FuelCalibrationAnchor;
+use crate::domain::calibration::{FuelCalibration, FuelCalibrationAnchor, FuelCalibrationPoint};
 use crate::fuel_calibration_repository;
 use crate::models::{
     FuelCalibrationProfileResponse, FuelCalibrationSessionPointResponse,
     FuelCalibrationSessionResponse,
 };
+use serde_json::to_value;
+
+use crate::models::CreateSensorCalibrationRequest;
 use crate::repository;
 
 pub async fn create_profile(
@@ -238,6 +241,121 @@ pub async fn apply_anchor(
 
 pub async fn complete_session(db_pool: &PgPool, session_id: Uuid) -> Result<()> {
     fuel_calibration_repository::complete_fuel_calibration_session(db_pool, session_id).await
+}
+
+pub async fn build_publishable_calibration(
+    db_pool: &PgPool,
+    profile_id: Uuid,
+) -> Result<FuelCalibration> {
+    /*
+     * Load the guided calibration profile.
+     *
+     * The profile owns the physical tank capacity and identifies
+     * the FUEL sensor that this calibration belongs to.
+     */
+    let profile =
+        fuel_calibration_repository::get_fuel_calibration_profile_by_id(db_pool, profile_id)
+            .await?;
+
+    let Some(profile) = profile else {
+        return Err(anyhow!("Fuel calibration profile not found."));
+    };
+
+    /*
+     * Only resolved points belonging to completed sessions are allowed
+     * to contribute to a runtime calibration.
+     *
+     * Active, paused and abandoned work is deliberately excluded by
+     * the repository.
+     */
+    let stored_points =
+        fuel_calibration_repository::list_publishable_fuel_calibration_points(db_pool, profile_id)
+            .await?;
+
+    if stored_points.len() < 2 {
+        return Err(anyhow!(
+            "At least two resolved calibration points from completed sessions are required."
+        ));
+    }
+
+    /*
+     * Convert persistence rows into the domain representation.
+     *
+     * The repository already returns these ordered by resolved litres.
+     */
+    let points = stored_points
+        .into_iter()
+        .map(|point| FuelCalibrationPoint {
+            level_cm: point.level_cm,
+            litres: point.resolved_litres,
+        })
+        .collect();
+
+    /*
+     * Construct the runtime calibration.
+     *
+     * Domain validation remains the final authority over whether this
+     * lookup table is physically valid and publishable.
+     */
+    let calibration = FuelCalibration {
+        tank_capacity_litres: profile.tank_capacity_litres,
+        points,
+    };
+
+    calibration.validate_lookup_table()?;
+
+    Ok(calibration)
+}
+
+pub async fn publish_profile(db_pool: &PgPool, profile_id: Uuid) -> Result<Uuid> {
+    /*
+     * Build and domain-validate the runtime lookup table from completed,
+     * resolved guided-calibration evidence.
+     */
+    let calibration = build_publishable_calibration(db_pool, profile_id).await?;
+
+    /*
+     * Reload the profile so we know which installed FUEL sensor owns
+     * this calibration.
+     */
+    let profile =
+        fuel_calibration_repository::get_fuel_calibration_profile_by_id(db_pool, profile_id)
+            .await?;
+
+    let Some(profile) = profile else {
+        return Err(anyhow!("Fuel calibration profile not found."));
+    };
+
+    if profile.status == "superseded" {
+        return Err(anyhow!(
+            "A superseded fuel calibration profile cannot be published."
+        ));
+    }
+
+    /*
+     * Persist the validated typed calibration using the normal runtime
+     * sensor-calibration pathway.
+     */
+    let request = CreateSensorCalibrationRequest {
+        calibration_type: "fuel".to_string(),
+        calibration_values: to_value(&calibration)?,
+    };
+
+    let calibration_id =
+        repository::create_sensor_calibration(db_pool, profile.sensor_id, &request).await?;
+
+    /*
+     * Link the guided calibration profile to the runtime calibration
+     * that was created from it.
+     */
+    fuel_calibration_repository::mark_fuel_calibration_profile_published(
+        db_pool,
+        profile_id,
+        calibration_id,
+    )
+    .await?;
+
+    Ok(calibration_id)
 }
 
 pub async fn get_profile(

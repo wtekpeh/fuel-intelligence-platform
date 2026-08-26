@@ -11,8 +11,9 @@ use crate::platform_handlers::{
     list_devices_handler, list_hardware_profile_sensors_handler, list_hardware_profiles_handler,
     list_orbi_inventory_devices_handler, list_sensor_calibrations_handler,
     pause_fuel_calibration_session_handler, provision_inventory_device_handler,
-    register_device_handler, resume_fuel_calibration_session_handler,
-    start_fuel_calibration_session_handler, start_operational_behaviour_learning_session_handler,
+    publish_fuel_calibration_profile_handler, register_device_handler,
+    resume_fuel_calibration_session_handler, start_fuel_calibration_session_handler,
+    start_operational_behaviour_learning_session_handler,
     supersede_fuel_calibration_profile_handler, update_asset_handler, update_device_handler,
     update_orbi_inventory_status_handler, update_organization_handler,
     verify_orbi_inventory_device_handler,
@@ -146,5 +147,9 @@ pub fn platform_routes() -> Router<AppState> {
         .route(
             "/api/fuel-calibration/profiles/:profile_id/supersede",
             post(supersede_fuel_calibration_profile_handler),
+        )
+        .route(
+            "/api/fuel-calibration/profiles/:profile_id/publish",
+            post(publish_fuel_calibration_profile_handler),
         )
 }

@@ -55,6 +55,12 @@ pub struct FuelCalibrationSessionPointRow {
     pub created_at: DateTime<Utc>,
 }
 
+#[derive(Debug)]
+pub struct StoredPublishableFuelCalibrationPoint {
+    pub level_cm: f64,
+    pub resolved_litres: f64,
+}
+
 pub async fn create_fuel_calibration_profile(
     db_pool: &PgPool,
     sensor_id: Uuid,
@@ -398,6 +404,86 @@ pub async fn list_fuel_calibration_session_points(
     .await?;
 
     Ok(points)
+}
+
+pub async fn list_publishable_fuel_calibration_points(
+    db_pool: &PgPool,
+    profile_id: Uuid,
+) -> Result<Vec<StoredPublishableFuelCalibrationPoint>> {
+    /*
+     * Runtime calibration must be constructed only from successfully
+     * completed guided sessions.
+     *
+     * This deliberately excludes:
+     *
+     * - active sessions;
+     * - paused sessions;
+     * - abandoned sessions.
+     *
+     * Only points with resolved absolute litre quantities are eligible.
+     *
+     * Points are ordered by litres rather than capture time because a
+     * calibration session may legitimately:
+     *
+     * - drain;
+     * - refill;
+     * - revisit a previously measured quantity.
+     */
+    let points = sqlx::query_as!(
+        StoredPublishableFuelCalibrationPoint,
+        r#"
+        SELECT
+            p.level_cm,
+            p.resolved_litres AS "resolved_litres!"
+        FROM fuel_calibration_session_points p
+
+        INNER JOIN fuel_calibration_sessions s
+            ON s.id = p.session_id
+
+        WHERE s.profile_id = $1
+          AND s.status = 'completed'
+          AND p.resolved_litres IS NOT NULL
+
+        ORDER BY
+            p.resolved_litres ASC,
+            p.captured_at ASC
+        "#,
+        profile_id,
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    Ok(points)
+}
+
+pub async fn mark_fuel_calibration_profile_published(
+    db_pool: &PgPool,
+    profile_id: Uuid,
+    calibration_id: Uuid,
+) -> Result<()> {
+    let result = sqlx::query!(
+        r#"
+        UPDATE fuel_calibration_profiles
+        SET
+            published_calibration_id = $2,
+            status = 'validated',
+            updated_at = NOW()
+        WHERE id = $1
+          AND status <> 'superseded'
+        "#,
+        profile_id,
+        calibration_id,
+    )
+    .execute(db_pool)
+    .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(anyhow!(
+            "Fuel calibration profile could not be marked as published."
+        ));
+    }
+
+    Ok(())
 }
 
 pub async fn pause_fuel_calibration_session(db_pool: &PgPool, session_id: Uuid) -> Result<()> {

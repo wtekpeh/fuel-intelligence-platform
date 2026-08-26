@@ -721,6 +721,67 @@ pub async fn supersede_fuel_calibration_profile_handler(
     }
 }
 
+pub async fn publish_fuel_calibration_profile_handler(
+    State(app_state): State<AppState>,
+    Path(profile_id): Path<Uuid>,
+) -> impl IntoResponse {
+    match crate::services::platform::fuel_calibration::publish_profile(
+        &app_state.db_pool,
+        profile_id,
+    )
+    .await
+    {
+        Ok(calibration_id) => (
+            StatusCode::OK,
+            Json(crate::models::FuelCalibrationProfileMutationResponse {
+                profile_id,
+                message: format!(
+                    "Fuel calibration profile published successfully as runtime calibration {}.",
+                    calibration_id
+                ),
+            }),
+        )
+            .into_response(),
+
+        Err(error) => {
+            let message = error.to_string();
+
+            if message.contains("profile not found") {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(crate::models::ApiErrorResponse { message }),
+                )
+                    .into_response();
+            }
+
+            if message.contains("superseded")
+                || message.contains("At least two resolved calibration points")
+                || message.contains("Calibration levels must")
+                || message.contains("final calibration point must")
+            {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(crate::models::ApiErrorResponse { message }),
+                )
+                    .into_response();
+            }
+
+            eprintln!(
+                "Failed to publish fuel calibration profile {}: {}",
+                profile_id, message
+            );
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to publish fuel calibration profile.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
 pub async fn start_fuel_calibration_session_handler(
     State(app_state): State<AppState>,
     Path(profile_id): Path<Uuid>,
