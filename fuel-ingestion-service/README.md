@@ -600,28 +600,101 @@ not guaranteed confirmation.
 
 ## Confidence Scoring
 
-Fuel events now include deterministic confidence scoring.
+Fuel events include deterministic confidence scoring.
 
 Current confidence levels:
 
-````text
+```text
 Low
 Medium
 High
 Critical
+```
 
-Confidence is based on:
+Current scoring evidence includes:
 
-event type
-device operational state
-telemetry outlier count
-candidate count
-suspicious fuel jump status
-delayed detection status
+- device operational state
+- whether the current reading is an IQR outlier
+- suspicious fuel-jump status
+- delayed-detection status
+
+Event type is not used as circular evidence for confidence, and candidate count is retained only as quality-window diagnostic metadata. Suspicious jumps remain eligible for event detection but reduce confidence; invalid jump inputs stop detection.
 
 The confidence value is stored separately on fuel events and exposed through the fuel events API.
 
 ---
+
+## Installation-Aware Fuel Intelligence Validation
+
+Fuel-event detection now derives operational thresholds from the active installation-specific fuel calibration rather than a global tank-capacity assumption.
+
+For an active tank capacity `C`:
+
+```text
+THEFT threshold  = C × FUEL_THEFT_THRESHOLD_FRACTION
+REFILL threshold = C × FUEL_REFILL_THRESHOLD_FRACTION
+LEAK threshold   = C × FUEL_LEAK_THRESHOLD_FRACTION
+Maximum normal jump = C × MAX_ALLOWED_FUEL_JUMP_FRACTION
+```
+
+With the current defaults, the physical 1.5 L validation installation therefore uses:
+
+```text
+THEFT  = 0.15 L
+REFILL = 0.15 L
+LEAK   = 0.075 L
+Maximum normal jump = 0.75 L
+```
+
+Both the previous and current calibrated readings are range-validated against the active installation capacity before event comparison. Invalid jump inputs stop detection. A valid but unusually large jump remains a candidate event and receives a confidence penalty rather than being silently discarded.
+
+Fuel-event impact severity is also capacity-relative:
+
+```text
+< 10%          → low
+10% to < 25%   → medium
+25% to < 50%   → high
+>= 50%         → critical
+```
+
+The rolling telemetry-quality baseline excludes the current reading, preserves chronological ordering, and uses the configured rolling-window size. IQR outlier analysis includes a 0.02 L minimum tolerance so a flat baseline does not classify normal KUM sensor noise as an anomaly merely because the statistical IQR is zero.
+
+Leak detection retains a five-reading consecutive-decrease requirement and uses a separate configurable quality baseline. At the current stage, leak reasoning proceeds only in stationary `PARKED` or `IDLE` context; gradual fuel decrease while moving is not classified as a leak without a fuel-consumption model. Physical leak validation remains deferred until a suitable larger tank / controlled continuous-outflow setup is available.
+
+### September 2026 Physical Fuel-Intelligence Validation
+
+The current Fuel Intelligence path has been validated with the real KUM installation and the published 1.5 L calibration.
+
+Regression validation:
+
+```text
+235 tests passed
+0 failed
+```
+
+Stable real-hardware telemetry remained approximately 1.186–1.195 L during an untouched smoke-test interval and produced no new fuel events or alerts.
+
+A controlled physical fuel removal produced a THEFT event:
+
+```text
+1.4989 L → 1.1962 L
+Drop ≈ 0.3027 L
+Confidence: High
+```
+
+A final controlled physical refill against the hardened detector produced:
+
+```text
+1.1843 L → 1.4788 L
+Increase ≈ 0.2946 L
+Event: REFILL
+Impact severity: medium
+Operational state: IDLE
+Confidence: High
+Correlation: Consistent
+```
+
+The stationary refill was persisted as an operational event but correctly produced no warning alert. An earlier refill classified while `MOVING` produced `Medium` confidence, `Conflicting` correlation, and a `Warning` alert. This validates the separation between event detection and operational escalation.
 
 # Offline-Safe Detection Philosophy
 
@@ -2156,8 +2229,10 @@ This README update is important because alerts now have operational state, not j
 Current configurable telemetry intelligence settings:
 
 ```env
-DEFAULT_TANK_CAPACITY_LITRES=200
-MAX_ALLOWED_FUEL_JUMP_LITRES=80
+FUEL_THEFT_THRESHOLD_FRACTION=0.10
+FUEL_REFILL_THRESHOLD_FRACTION=0.10
+FUEL_LEAK_THRESHOLD_FRACTION=0.05
+MAX_ALLOWED_FUEL_JUMP_FRACTION=0.50
 FUEL_ROLLING_WINDOW_SIZE=5
 FUEL_IQR_MULTIPLIER=1.5
 
@@ -2232,6 +2307,26 @@ Live Distribution Layer
 ├── In-Memory Alert Hub
 ├── WebSocket Alert Streaming
 └── Heartbeat Keepalive
+
+---
+
+## Firmware Live-Telemetry / Replay Concurrency Requirement
+
+Bench testing has identified an important cross-system firmware requirement: replaying queued SD-card telemetry must not block or starve current live telemetry.
+
+The production ORBI firmware should use its planned Rust `no_std` + Embassy asynchronous architecture to keep sensor acquisition and live publishing responsive while historical telemetry is drained incrementally in the background.
+
+Target policy:
+
+```text
+LIVE telemetry   → priority
+REPLAY telemetry → background / opportunistic
+SD queue         → durable offline fallback
+```
+
+The firmware design should separate sensor acquisition, live publishing, SD persistence, and replay responsibilities. Shared LTE/modem access must be coordinated so replay cannot monopolize network transmission. Exact task scheduling, channels/signals, replay batch sizing, backpressure, and modem arbitration remain firmware implementation and validation work and must also be documented in the ORBI firmware README.
+
+This backend README records the requirement because replay and current telemetry must remain distinguishable and concurrently deliverable to Operational Intelligence.
 
 ---
 
@@ -2329,6 +2424,16 @@ Implemented:
 - piecewise linear fuel interpolation
 - real-time KUM measurement as the live calibration input
 - real hardware end-to-end KUM calibration validation
+- installation-capacity-aware theft/refill/leak thresholds
+- capacity-relative impossible-jump threshold
+- previous/current calibrated fuel range validation
+- deterministic fuel-event impact severity
+- typed confidence/correlation-aware alert rules
+- stable-baseline KUM noise tolerance for IQR quality analysis
+- physical THEFT validation
+- physical REFILL validation
+- stable-telemetry false-positive smoke testing
+- legitimate stationary REFILL persistence without unnecessary alert escalation
 
 # Device & Hardware Management
 
@@ -3501,9 +3606,11 @@ Real-Time KUM Runtime Calibration Input ✅
 ↓
 End-to-End Physical Fuel Interpolation Validation ✅
 ↓
-Guided Calibration Wizard ← Current
+Guided Calibration Wizard
 ↓
-Fuel Intelligence Validation
+Fuel Intelligence Validation ✅
+↓
+Firmware Live-Telemetry / Replay Concurrency Validation ← Required Firmware Follow-Up
 ↓
 Sensor Adapter Layer
 ↓

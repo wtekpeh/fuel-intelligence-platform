@@ -11,6 +11,7 @@ pub mod device_state;
 pub mod fuel_calibration_service;
 pub mod fuel_detection;
 pub mod fuel_event_correlation;
+pub mod fuel_event_severity;
 pub mod inventory_lifecycle;
 pub mod operational_behaviour;
 pub mod operational_behaviour_learning;

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::domain::telemetry::telemetry_pipeline::TelemetryPipeline;
+
 use crate::handlers::{
     acknowledge_alert_handler, check_position_against_geofences_handler, create_geofence_handler,
     get_alert_trends_handler, get_device_health_trends_handler,
@@ -14,10 +15,13 @@ use crate::handlers::{
     list_telemetry_history, receive_heartbeat, refresh_device_health, resolve_alert_handler,
 };
 use crate::platform_routes::platform_routes;
+
 use crate::services::alert_hub::AlertHub;
 use crate::services::calibration_loader::CalibrationLoader;
+use crate::services::fuel_calibration_service::FuelCalibrationService;
 use crate::services::operational_behaviour_learning::OperationalBehaviourLearningService;
 use crate::services::telemetry::telemetry_enrichment_service::TelemetryEnrichmentService;
+
 use crate::ws::alerts_ws_handler;
 use axum::http::{Method, header};
 use axum::{
@@ -34,12 +38,16 @@ pub struct AppState {
     pub alert_hub: AlertHub,
     pub telemetry_pipeline: Arc<Mutex<TelemetryPipeline>>,
     pub calibration_loader: Arc<CalibrationLoader>,
+    pub fuel_calibration_service: Arc<FuelCalibrationService>,
     pub telemetry_enrichment: Arc<TelemetryEnrichmentService>,
     pub behaviour_learning: Arc<OperationalBehaviourLearningService>,
 }
 
 pub fn app_routes(db_pool: PgPool, config: AppConfig, alert_hub: AlertHub) -> Router {
     let calibration_loader = Arc::new(CalibrationLoader::new(db_pool.clone()));
+
+    let fuel_calibration_service =
+        Arc::new(FuelCalibrationService::new(calibration_loader.clone()));
 
     let telemetry_enrichment =
         Arc::new(TelemetryEnrichmentService::new(calibration_loader.clone()));
@@ -52,6 +60,7 @@ pub fn app_routes(db_pool: PgPool, config: AppConfig, alert_hub: AlertHub) -> Ro
         alert_hub,
         telemetry_pipeline: Arc::new(Mutex::new(TelemetryPipeline::new())),
         calibration_loader,
+        fuel_calibration_service,
         telemetry_enrichment,
         behaviour_learning,
     };

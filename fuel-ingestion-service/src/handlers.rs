@@ -172,6 +172,7 @@ pub async fn ingest_reading_batch(
                     db_pool,
                     &app_state.alert_hub,
                     &app_state.config,
+                    app_state.fuel_calibration_service.as_ref(),
                     device_id,
                     fuel_sensor_id,
                 )
@@ -181,6 +182,7 @@ pub async fn ingest_reading_batch(
                     db_pool,
                     &app_state.alert_hub,
                     &app_state.config,
+                    app_state.fuel_calibration_service.as_ref(),
                     device_id,
                     fuel_sensor_id,
                 )

@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::{
     domain::{
-        calibration::{CalibrationFactory, FuelCalibrationEngine},
+        calibration::{CalibrationFactory, FuelCalibration, FuelCalibrationEngine},
         telemetry::models::CalibratedFuelTelemetry,
     },
     services::{calibration_loader::CalibrationLoader, calibration_type::CalibrationType},
@@ -37,6 +37,23 @@ impl FuelCalibrationService {
         Self { calibration_loader }
     }
 
+    /// Loads the active typed fuel calibration for an installed sensor.
+    ///
+    /// Returns `Ok(None)` when the sensor has no active fuel calibration.
+    pub async fn get_active_calibration(&self, sensor_id: Uuid) -> Result<Option<FuelCalibration>> {
+        let Some(calibration_record) = self
+            .calibration_loader
+            .get_active(sensor_id, CalibrationType::Fuel.as_str())
+            .await?
+        else {
+            return Ok(None);
+        };
+
+        let calibration = CalibrationFactory::fuel(&calibration_record)?;
+
+        Ok(Some(calibration))
+    }
+
     /// Converts a KUM liquid-level measurement into litres and percentage.
     ///
     /// Returns `Ok(None)` when:
@@ -48,15 +65,9 @@ impl FuelCalibrationService {
         sensor_id: Uuid,
         measured_level_cm: f64,
     ) -> Result<Option<CalibratedFuelTelemetry>> {
-        let Some(calibration_record) = self
-            .calibration_loader
-            .get_active(sensor_id, CalibrationType::Fuel.as_str())
-            .await?
-        else {
+        let Some(calibration) = self.get_active_calibration(sensor_id).await? else {
             return Ok(None);
         };
-
-        let calibration = CalibrationFactory::fuel(&calibration_record)?;
 
         FuelCalibrationEngine::apply(measured_level_cm, &calibration)
     }

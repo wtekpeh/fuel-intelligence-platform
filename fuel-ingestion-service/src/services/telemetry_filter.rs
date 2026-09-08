@@ -1,3 +1,5 @@
+const MIN_FUEL_OUTLIER_TOLERANCE_LITRES: f64 = 0.02;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum TelemetryQualityStatus {
     Valid,
@@ -15,6 +17,26 @@ pub fn validate_fuel_range(
     fuel_level_litres: f64,
     tank_capacity_litres: f64,
 ) -> FuelTelemetryQualityResult {
+    if !fuel_level_litres.is_finite() {
+        return FuelTelemetryQualityResult {
+            status: TelemetryQualityStatus::Invalid,
+            reason: Some(format!(
+                "Fuel level {} is not a finite value.",
+                fuel_level_litres
+            )),
+        };
+    }
+
+    if !tank_capacity_litres.is_finite() || tank_capacity_litres <= 0.0 {
+        return FuelTelemetryQualityResult {
+            status: TelemetryQualityStatus::Invalid,
+            reason: Some(format!(
+                "Tank capacity {} is not a valid positive finite value.",
+                tank_capacity_litres
+            )),
+        };
+    }
+
     if fuel_level_litres < 0.0 {
         return FuelTelemetryQualityResult {
             status: TelemetryQualityStatus::Invalid,
@@ -40,6 +62,36 @@ pub fn detect_impossible_fuel_jump(
     current_fuel_litres: f64,
     max_allowed_jump_litres: f64,
 ) -> FuelTelemetryQualityResult {
+    if !previous_fuel_litres.is_finite() {
+        return FuelTelemetryQualityResult {
+            status: TelemetryQualityStatus::Invalid,
+            reason: Some(format!(
+                "Previous fuel level {} is not a finite value.",
+                previous_fuel_litres
+            )),
+        };
+    }
+
+    if !current_fuel_litres.is_finite() {
+        return FuelTelemetryQualityResult {
+            status: TelemetryQualityStatus::Invalid,
+            reason: Some(format!(
+                "Current fuel level {} is not a finite value.",
+                current_fuel_litres
+            )),
+        };
+    }
+
+    if !max_allowed_jump_litres.is_finite() || max_allowed_jump_litres <= 0.0 {
+        return FuelTelemetryQualityResult {
+            status: TelemetryQualityStatus::Invalid,
+            reason: Some(format!(
+                "Maximum allowed fuel jump {} is not a valid positive finite value.",
+                max_allowed_jump_litres
+            )),
+        };
+    }
+
     let jump = (current_fuel_litres - previous_fuel_litres).abs();
 
     if jump > max_allowed_jump_litres {
@@ -141,8 +193,12 @@ pub fn is_outlier_using_iqr(values: &[f64], candidate: f64, multiplier: f64) -> 
 
     let iqr = q3 - q1;
 
-    let lower_bound = q1 - multiplier * iqr;
-    let upper_bound = q3 + multiplier * iqr;
+    let statistical_tolerance = multiplier * iqr;
+
+    let effective_tolerance = statistical_tolerance.max(MIN_FUEL_OUTLIER_TOLERANCE_LITRES);
+
+    let lower_bound = q1 - effective_tolerance;
+    let upper_bound = q3 + effective_tolerance;
 
     candidate < lower_bound || candidate > upper_bound
 }
@@ -337,5 +393,81 @@ mod tests {
             result.reason,
             Some("Fuel level exceeds tank capacity.".to_string())
         );
+    }
+
+    #[test]
+    fn zero_iqr_baseline_accepts_small_sensor_noise() {
+        let baseline_values = vec![
+            1.2046812749003983,
+            1.2046812749003983,
+            1.2046812749003983,
+            1.2046812749003983,
+            1.2046812749003983,
+        ];
+
+        let candidate = 1.2006972111553786;
+
+        let is_outlier = is_outlier_using_iqr(&baseline_values, candidate, 1.5);
+
+        assert!(!is_outlier);
+    }
+
+    #[test]
+    fn zero_iqr_baseline_still_detects_large_fuel_change_as_outlier() {
+        let baseline_values = vec![
+            1.2046812749003983,
+            1.2046812749003983,
+            1.2046812749003983,
+            1.2046812749003983,
+            1.2046812749003983,
+        ];
+
+        let candidate = 1.150000;
+
+        let is_outlier = is_outlier_using_iqr(&baseline_values, candidate, 1.5);
+
+        assert!(is_outlier);
+    }
+
+    #[test]
+    fn rejects_nan_fuel_level() {
+        let result = validate_fuel_range(f64::NAN, 200.0);
+
+        assert_eq!(result.status, TelemetryQualityStatus::Invalid);
+    }
+
+    #[test]
+    fn rejects_infinite_fuel_level() {
+        let result = validate_fuel_range(f64::INFINITY, 200.0);
+
+        assert_eq!(result.status, TelemetryQualityStatus::Invalid);
+    }
+
+    #[test]
+    fn rejects_invalid_tank_capacity() {
+        let result = validate_fuel_range(100.0, f64::NAN);
+
+        assert_eq!(result.status, TelemetryQualityStatus::Invalid);
+    }
+
+    #[test]
+    fn rejects_nan_previous_value_in_jump_detection() {
+        let result = detect_impossible_fuel_jump(f64::NAN, 100.0, 50.0);
+
+        assert_eq!(result.status, TelemetryQualityStatus::Invalid);
+    }
+
+    #[test]
+    fn rejects_nan_current_value_in_jump_detection() {
+        let result = detect_impossible_fuel_jump(100.0, f64::NAN, 50.0);
+
+        assert_eq!(result.status, TelemetryQualityStatus::Invalid);
+    }
+
+    #[test]
+    fn rejects_invalid_max_allowed_jump() {
+        let result = detect_impossible_fuel_jump(100.0, 120.0, f64::NAN);
+
+        assert_eq!(result.status, TelemetryQualityStatus::Invalid);
     }
 }

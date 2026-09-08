@@ -10,9 +10,12 @@ pub struct AppConfig {
     pub device_offline_after_seconds: i64,
     pub device_health_refresh_interval_seconds: u64,
     pub default_tank_capacity_litres: f64,
-    pub max_allowed_fuel_jump_litres: f64,
+    pub max_allowed_fuel_jump_fraction: f64,
     pub fuel_rolling_window_size: usize,
     pub fuel_iqr_multiplier: f64,
+    pub fuel_theft_threshold_fraction: f64,
+    pub fuel_refill_threshold_fraction: f64,
+    pub fuel_leak_threshold_fraction: f64,
 }
 
 impl AppConfig {
@@ -48,10 +51,10 @@ impl AppConfig {
             .parse::<f64>()
             .context("DEFAULT_TANK_CAPACITY_LITRES must be a valid number")?;
 
-        let max_allowed_fuel_jump_litres = env::var("MAX_ALLOWED_FUEL_JUMP_LITRES")
-            .unwrap_or_else(|_| "80".to_string())
+        let max_allowed_fuel_jump_fraction = env::var("MAX_ALLOWED_FUEL_JUMP_FRACTION")
+            .unwrap_or_else(|_| "0.50".to_string())
             .parse::<f64>()
-            .context("MAX_ALLOWED_FUEL_JUMP_LITRES must be a valid number")?;
+            .context("MAX_ALLOWED_FUEL_JUMP_FRACTION must be a valid number")?;
 
         let fuel_rolling_window_size = env::var("FUEL_ROLLING_WINDOW_SIZE")
             .unwrap_or_else(|_| "5".to_string())
@@ -62,6 +65,20 @@ impl AppConfig {
             .unwrap_or_else(|_| "1.5".to_string())
             .parse::<f64>()
             .context("FUEL_IQR_MULTIPLIER must be a valid number")?;
+        let fuel_theft_threshold_fraction = env::var("FUEL_THEFT_THRESHOLD_FRACTION")
+            .unwrap_or_else(|_| "0.10".to_string())
+            .parse::<f64>()
+            .context("FUEL_THEFT_THRESHOLD_FRACTION must be a valid number")?;
+
+        let fuel_refill_threshold_fraction = env::var("FUEL_REFILL_THRESHOLD_FRACTION")
+            .unwrap_or_else(|_| "0.10".to_string())
+            .parse::<f64>()
+            .context("FUEL_REFILL_THRESHOLD_FRACTION must be a valid number")?;
+
+        let fuel_leak_threshold_fraction = env::var("FUEL_LEAK_THRESHOLD_FRACTION")
+            .unwrap_or_else(|_| "0.05".to_string())
+            .parse::<f64>()
+            .context("FUEL_LEAK_THRESHOLD_FRACTION must be a valid number")?;
 
         Ok(Self {
             database_url,
@@ -71,9 +88,12 @@ impl AppConfig {
             device_offline_after_seconds,
             device_health_refresh_interval_seconds,
             default_tank_capacity_litres,
-            max_allowed_fuel_jump_litres,
+            max_allowed_fuel_jump_fraction,
             fuel_rolling_window_size,
             fuel_iqr_multiplier,
+            fuel_theft_threshold_fraction,
+            fuel_refill_threshold_fraction,
+            fuel_leak_threshold_fraction,
         })
     }
 }

@@ -43,6 +43,16 @@ pub fn correlate_fuel_event(
             reason: "Fuel increase occurred while vehicle was moving.".to_string(),
         },
 
+        ("LEAK", "PARKED", false) => FuelEventCorrelationResult {
+            status: CorrelationStatus::Consistent,
+            reason: "Gradual fuel loss aligns with a stationary leak pattern.".to_string(),
+        },
+
+        ("LEAK", "IDLE", false) => FuelEventCorrelationResult {
+            status: CorrelationStatus::Consistent,
+            reason: "Gradual fuel loss aligns with an idle stationary leak pattern.".to_string(),
+        },
+
         _ => FuelEventCorrelationResult {
             status: CorrelationStatus::Unknown,
             reason: "Insufficient operational context for correlation.".to_string(),
@@ -78,6 +88,20 @@ mod tests {
     #[test]
     fn refill_while_idle_is_consistent() {
         let result = correlate_fuel_event("REFILL", "IDLE", false);
+
+        assert_eq!(result.status, CorrelationStatus::Consistent);
+    }
+
+    #[test]
+    fn leak_while_parked_is_consistent() {
+        let result = correlate_fuel_event("LEAK", "PARKED", false);
+
+        assert_eq!(result.status, CorrelationStatus::Consistent);
+    }
+
+    #[test]
+    fn leak_while_idle_is_consistent() {
+        let result = correlate_fuel_event("LEAK", "IDLE", false);
 
         assert_eq!(result.status, CorrelationStatus::Consistent);
     }
