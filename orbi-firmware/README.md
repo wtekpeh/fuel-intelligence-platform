@@ -23,9 +23,9 @@ Current firmware capabilities include:
   - Accelerometer (X, Y, Z)
   - Gyroscope (X, Y, Z)
   - IMU temperature
-  - Verified RS485 / Modbus communication
-  - Verified KUM ultrasonic fuel sensor communication
-  - Raw KUM Modbus measurement acquisition
+- Verified RS485 / Modbus communication
+- Verified KUM ultrasonic fuel sensor communication
+- Raw KUM Modbus measurement acquisition
 - SensorSnapshot abstraction layer
 - Measurement-first telemetry model
 - Raw fuel telemetry generation
@@ -152,6 +152,76 @@ Publisher
 ORBI Platform
 
 This architecture allows new sensors to be integrated without redesigning storage, replay, networking, or scheduling.
+
+## Live Telemetry and Replay Concurrency Requirement
+
+Physical hardware testing has identified an important production-runtime
+requirement: replaying historical telemetry from the SD queue must not block
+or starve acquisition and delivery of current telemetry.
+
+The current firmware replay path is reliable and preserves queued telemetry,
+but replay and live operation are still coordinated sequentially in parts of
+the runtime. During a significant backlog, this can delay current readings
+until replay processing has progressed or completed.
+
+The production firmware must therefore evolve toward cooperative asynchronous
+execution using the existing Embassy-based `no_std` runtime architecture.
+
+Target responsibility separation:
+
+```text
+                         ORBI Firmware
+                              │
+        ┌─────────────────────┼─────────────────────┐
+        │                     │                     │
+        ▼                     ▼                     ▼
+Sensor Acquisition       SD Persistence       Network Publisher
+        │                     │                     │
+        ▼                     │          ┌──────────┴──────────┐
+Current Telemetry ────────────┼─────────►│                     │
+                              │          ▼                     ▼
+                              │     Live Telemetry        Replay Batches
+                              │        Priority             Background
+                              │          │                     │
+                              └──────────┴──────────┬──────────┘
+                                                   ▼
+                                                LTE Modem
+```
+
+The intended runtime policy is:
+
+```text
+LIVE telemetry   = priority
+REPLAY telemetry = incremental / background
+SD queue         = durable source of pending delivery
+```
+
+Replay must therefore drain the historical queue opportunistically rather
+than monopolising the modem while new telemetry waits.
+
+The detailed implementation remains a firmware milestone and must include:
+
+- Embassy tasks for independent long-lived runtime responsibilities
+- continued sensor acquisition while replay is active
+- continued persistence of newly acquired telemetry
+- priority for current/live telemetry when it becomes due
+- bounded replay batches rather than unbounded queue draining
+- coordinated ownership of the LTE modem / HTTP transport
+- channels, signals, or another explicit synchronization mechanism between
+  producers and the network publisher
+- backpressure so replay cannot overwhelm memory, storage, or networking
+- preservation of at-least-once delivery semantics
+- preservation of original timestamps and device identity during replay
+- validation under long offline backlogs and intermittent connectivity
+
+Embassy concurrency alone is not sufficient if multiple tasks contend
+directly for the modem. The preferred design is a coordinated network
+publishing path that arbitrates live and replay traffic while preserving
+live-telemetry priority.
+
+This requirement is intentionally documented before implementation so that
+future replay work does not regress the firmware into a blocking
+`replay-entire-backlog-before-live-operation` design.
 
 ## Project Goals
 
@@ -947,7 +1017,15 @@ Board-level resources are initialized before any hardware drivers begin operatio
 
 The firmware mounts persistent storage before modem initialization so that offline telemetry can be safely recovered as early as possible during startup.
 
-Normal telemetry collection does not begin until the replay stage has completed. This guarantees that previously stored telemetry is transmitted before new telemetry is generated, preserving chronological ordering and maintaining the firmware's at-least-once delivery guarantees.
+The current implementation has validated boot-time replay and FIFO recovery,
+but physical testing has shown that a large replay must not become a blocking
+startup/runtime stage that prevents current telemetry from progressing.
+
+The target runtime therefore preserves historical ordering *within replay*
+while allowing new measurements to continue being acquired and persisted.
+Live telemetry should receive network priority when due, and historical
+records should be drained in bounded background batches. At-least-once
+delivery remains mandatory for both paths.
 
 ---
 
@@ -1208,36 +1286,60 @@ The complete queue is retried automatically once connectivity has been restored.
 
 During startup, the firmware checks whether queued telemetry exists.
 
-If queued records are found, they are processed before live telemetry begins.
+The existing implementation has successfully validated recovery of historical
+records from the SD queue. Earlier runtime sequencing processed the pending
+queue before normal live operation.
 
+That behaviour is now treated as an implementation limitation rather than the
+final production scheduling model because a large backlog can delay current
+telemetry.
+
+Current validated recovery semantics remain:
+
+```text
 Boot
 │
 ▼
-Read Pending Queue
+Discover Pending Queue
 │
 ▼
-Build Telemetry Batch
+Build Replay Batch
 │
 ▼
 Upload Batch
 │
 ▼
 HTTP 2xx?
-│
-┌──┴─────────────┐
-│ │
-NO YES
-│ │
-▼ ▼
-Stop Replay ACK Accepted Records
-│
-▼
-Remove Acknowledged Records
-│
-▼
-Continue Until Queue Empty
+├── NO  → keep records for retry
+└── YES → ACK accepted records
+          ↓
+          remove acknowledged records
+```
 
-This prevents telemetry generated during previous offline periods from being lost.
+The production target is:
+
+```text
+Boot
+│
+▼
+Discover Pending Queue
+│
+▼
+Start Operational Runtime
+│
+├── Acquire + persist current telemetry continuously
+│
+├── Publish live telemetry when due
+│
+└── Drain historical queue incrementally in background
+```
+
+Historical replay remains FIFO, but FIFO replay ordering must not be
+interpreted as requiring all historical data to be transmitted before any
+current reading can be delivered.
+
+This preserves offline recovery while preventing replay from hiding the
+device's present operational state from the backend.
 
 ---
 
@@ -1287,9 +1389,14 @@ Acknowledged Records Removed
 Queue Empty
 │
 ▼
-Normal Live Publishing Resumes
+Historical Backlog Fully Recovered
 
 This behaviour has been successfully verified during hardware testing and confirms the firmware's persistent-first, at-least-once delivery model.
+
+A separate scheduling observation from physical testing remains open:
+historical replay can interfere with timely current telemetry. The reliability
+mechanism is therefore validated, while concurrent live/replay scheduling is
+a required production improvement.
 
 ## Delivery Guarantee
 
@@ -1874,19 +1981,24 @@ This milestone confirms that the firmware can reliably communicate with the KUM 
 
 ---
 
-## Remaining Integration Work
+## Current Integration Status and Remaining Work
 
-The remaining Phase 3 work includes:
+The KUM path has progressed beyond communication bring-up. Real hardware has
+now validated raw KUM measurement acquisition, decoding, SensorSnapshot
+integration, unified telemetry generation, SD persistence, LTE batch upload,
+and backend measurement-first ingestion.
+
+Tank calibration and fuel intelligence intentionally remain backend
+responsibilities rather than firmware responsibilities.
+
+Remaining firmware-side generalization includes:
 
 - Generic RS485 transport abstraction
 - Generic Modbus client
-- Fuel measurement decoding
-- Sensor abstraction integration
-- Fuel telemetry generation
-- Telemetry Builder integration
-- Tank calibration support
+- Sensor abstraction integration/generalization
 - Sensor diagnostics
 - Multi-vendor register mapping
+- production replay/live concurrency
 
 The implementation will follow the established firmware architecture:
 
@@ -1905,6 +2017,46 @@ Normalized Fuel Measurement
 Telemetry Builder
 
 The objective is to support additional Modbus-based sensors in the future without changing the telemetry pipeline.
+
+---
+
+# Replay / Live Telemetry Concurrency — Required Firmware Milestone
+
+Before production deployment, the runtime must be refactored so historical
+SD-card replay cannot starve current telemetry.
+
+Planned implementation direction:
+
+- Embassy-based cooperative tasks
+- independent sensor acquisition and persistence
+- dedicated/coordinated network publishing
+- live telemetry priority
+- bounded replay batches
+- explicit modem ownership/arbitration
+- backpressure and retry handling
+- physical validation with a large SD backlog while current telemetry
+  continues to reach the backend
+
+Completion criteria:
+
+```text
+Large historical backlog exists
++
+Current sensors continue producing measurements
++
+New records continue reaching persistent storage
++
+Current telemetry continues reaching the backend on schedule
++
+Historical records continue draining
++
+No acknowledged record is lost
+=
+Replay / Live Concurrency Validated
+```
+
+This milestone preserves the existing persistent-first and at-least-once
+delivery guarantees while removing replay as a blocking operational mode.
 
 ---
 
