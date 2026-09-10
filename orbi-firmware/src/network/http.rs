@@ -1,3 +1,4 @@
+use embassy_time::{Duration, Timer};
 use esp_hal::delay::Delay;
 use esp_println::println;
 
@@ -55,9 +56,8 @@ fn extract_http_status(response: &[u8]) -> Option<u16> {
     Some(status)
 }
 
-fn collect_http_action_response(
-    modem: &mut Modem,
-    delay: &Delay,
+async fn collect_http_action_response(
+    modem: &mut Modem<'_>,
     action_label: &str,
 ) -> Option<([u8; HTTP_ACTION_BUFFER_SIZE], usize)> {
     if !modem.send_command(b"AT+HTTPACTION=1\r\n", action_label) {
@@ -70,7 +70,7 @@ fn collect_http_action_response(
     let mut total_bytes_read = 0usize;
 
     for poll_number in 1..=HTTP_ACTION_MAX_POLLS {
-        delay.delay_millis(HTTP_ACTION_POLL_INTERVAL_MS);
+        Timer::after(Duration::from_millis(HTTP_ACTION_POLL_INTERVAL_MS as u64)).await;
 
         let Some((response_buffer, bytes_read)) = modem.read_response() else {
             continue;
@@ -120,8 +120,8 @@ fn collect_http_action_response(
     }
 }
 
-fn post_json<const N: usize>(
-    modem: &mut Modem,
+async fn post_json<const N: usize>(
+    modem: &mut Modem<'_>,
     delay: &Delay,
     url_command: &[u8],
     url_label: &str,
@@ -135,25 +135,32 @@ fn post_json<const N: usize>(
      * Ensure a stale HTTP session does not interfere with the
      * new transaction.
      */
-    modem.send_command_and_print_response(b"AT+HTTPTERM\r\n", "AT+HTTPTERM", delay);
+    modem
+        .send_command_and_print_response_async(b"AT+HTTPTERM\r\n", "AT+HTTPTERM")
+        .await;
 
-    delay.delay_millis(COMMAND_SETTLE_DELAY_MS);
+    Timer::after(Duration::from_millis(COMMAND_SETTLE_DELAY_MS as u64)).await;
 
-    modem.send_command_and_print_response(b"AT+HTTPINIT\r\n", "AT+HTTPINIT", delay);
+    modem
+        .send_command_and_print_response_async(b"AT+HTTPINIT\r\n", "AT+HTTPINIT")
+        .await;
 
-    delay.delay_millis(COMMAND_SETTLE_DELAY_MS);
+    Timer::after(Duration::from_millis(COMMAND_SETTLE_DELAY_MS as u64)).await;
 
-    modem.send_command_and_print_response(url_command, url_label, delay);
+    modem
+        .send_command_and_print_response_async(url_command, url_label)
+        .await;
 
-    delay.delay_millis(COMMAND_SETTLE_DELAY_MS);
+    Timer::after(Duration::from_millis(COMMAND_SETTLE_DELAY_MS as u64)).await;
 
-    modem.send_command_and_print_response(
-        b"AT+HTTPPARA=\"CONTENT\",\"application/json\"\r\n",
-        "AT+HTTPPARA CONTENT",
-        delay,
-    );
+    modem
+        .send_command_and_print_response_async(
+            b"AT+HTTPPARA=\"CONTENT\",\"application/json\"\r\n",
+            "AT+HTTPPARA CONTENT",
+        )
+        .await;
 
-    delay.delay_millis(COMMAND_SETTLE_DELAY_MS);
+    Timer::after(Duration::from_millis(COMMAND_SETTLE_DELAY_MS as u64)).await;
 
     let mut data_command = heapless::String::<64>::new();
 
@@ -170,9 +177,11 @@ fn post_json<const N: usize>(
         return false;
     }
 
-    modem.send_command_and_print_response(data_command.as_bytes(), data_label, delay);
+    modem
+        .send_command_and_print_response_async(data_command.as_bytes(), data_label)
+        .await;
 
-    delay.delay_millis(COMMAND_SETTLE_DELAY_MS);
+    Timer::after(Duration::from_millis(COMMAND_SETTLE_DELAY_MS as u64)).await;
 
     /*
      * Keep the existing paced UART payload transmission for now.
@@ -186,12 +195,19 @@ fn post_json<const N: usize>(
         if modem.uart.write(&[*byte]).is_err() {
             println!("Failed while writing HTTP payload to modem.");
 
-            modem.send_command_and_print_response(b"AT+HTTPTERM\r\n", "AT+HTTPTERM", delay);
+            modem
+                .send_command_and_print_response_async(b"AT+HTTPTERM\r\n", "AT+HTTPTERM")
+                .await;
 
             return false;
         }
 
-        delay.delay_millis(1);
+        /*
+         * Preserve the existing one-millisecond UART pacing,
+         * but make that wait cooperative so Embassy can schedule
+         * other ready tasks while the payload is being transmitted.
+         */
+        Timer::after(Duration::from_millis(1)).await;
     }
 
     println!("{}", sent_message);
@@ -202,9 +218,10 @@ fn post_json<const N: usize>(
      * HTTPACTION already has a response-driven polling loop, so only
      * a short settling delay is required before polling begins.
      */
-    delay.delay_millis(PAYLOAD_SETTLE_DELAY_MS);
 
-    let action_response = collect_http_action_response(modem, delay, action_label);
+    Timer::after(Duration::from_millis(PAYLOAD_SETTLE_DELAY_MS as u64)).await;
+
+    let action_response = collect_http_action_response(modem, action_label).await;
 
     let upload_succeeded = if let Some((response_buffer, bytes_read)) = action_response {
         let response = &response_buffer[..bytes_read];
@@ -236,21 +253,25 @@ fn post_json<const N: usize>(
         false
     };
 
-    delay.delay_millis(CLEANUP_SETTLE_DELAY_MS);
+    Timer::after(Duration::from_millis(CLEANUP_SETTLE_DELAY_MS as u64)).await;
 
-    modem.send_command_and_print_response(b"AT+HTTPREAD\r\n", read_label, delay);
+    modem
+        .send_command_and_print_response_async(b"AT+HTTPREAD\r\n", read_label)
+        .await;
 
-    delay.delay_millis(CLEANUP_SETTLE_DELAY_MS);
+    Timer::after(Duration::from_millis(CLEANUP_SETTLE_DELAY_MS as u64)).await;
 
-    modem.send_command_and_print_response(b"AT+HTTPTERM\r\n", "AT+HTTPTERM", delay);
+    modem
+        .send_command_and_print_response_async(b"AT+HTTPTERM\r\n", "AT+HTTPTERM")
+        .await;
 
-    delay.delay_millis(CLEANUP_SETTLE_DELAY_MS);
+    Timer::after(Duration::from_millis(CLEANUP_SETTLE_DELAY_MS as u64)).await;
 
     upload_succeeded
 }
 
-pub fn send_payload<const N: usize>(
-    modem: &mut Modem,
+pub async fn send_payload<const N: usize>(
+    modem: &mut Modem<'_>,
     delay: &Delay,
     payload: &heapless::String<N>,
 ) -> bool {
@@ -265,9 +286,14 @@ pub fn send_payload<const N: usize>(
         "AT+HTTPREAD",
         "Sent HTTP JSON PAYLOAD",
     )
+    .await
 }
 
-pub fn send_heartbeat(modem: &mut Modem, delay: &Delay, payload: &heapless::String<256>) -> bool {
+pub async fn send_heartbeat(
+    modem: &mut Modem<'_>,
+    delay: &Delay,
+    payload: &heapless::String<256>,
+) -> bool {
     println!("========================");
     println!("SENDING ORBI HEARTBEAT");
     println!("========================");
@@ -284,4 +310,5 @@ pub fn send_heartbeat(modem: &mut Modem, delay: &Delay, payload: &heapless::Stri
         "AT+HTTPREAD HEARTBEAT",
         "Heartbeat JSON sent to modem.",
     )
+    .await
 }

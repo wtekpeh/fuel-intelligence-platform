@@ -81,20 +81,147 @@ where
     removed
 }
 
-/*
- * Flush queued telemetry through the normal telemetry HTTP endpoint.
- *
- * ORBIQ.LOG remains the source of truth:
- *
- * 1. Read records from the persistent queue.
- * 2. Build one batch payload directly from those queued JSON records.
- * 3. Upload the batch.
- * 4. Persist an ACK for every uploaded record.
- * 5. Remove the acknowledged records from the front of the queue.
- *
- * Records are never removed before the upload and ACK stages complete.
- */
-pub fn flush_queue<S>(modem: &mut Modem, delay: &Delay, mut storage: Option<&mut S>) -> bool
+pub(crate) enum QueueBatchOutcome {
+    NoPendingRecords,
+
+    Uploaded {
+        removed_records: usize,
+        expected_records: usize,
+    },
+
+    Failed,
+}
+
+pub(crate) async fn flush_one_queue_batch<S>(
+    modem: &mut Modem<'_>,
+    delay: &Delay,
+    storage: &mut S,
+) -> QueueBatchOutcome
+where
+    S: RecordStorage,
+{
+    /*
+     * Recover records that were already uploaded and acknowledged,
+     * but whose removal from ORBIQ.LOG was interrupted.
+     */
+    let recovered_records = cleanup_acknowledged_queue_front(storage);
+
+    if recovered_records > 0 {
+        println!(
+            "Removed {} previously acknowledged queued record(s).",
+            recovered_records
+        );
+    }
+
+    /*
+     * Read one bounded batch only.
+     *
+     * This remains intentionally limited to QUEUE_BATCH_SIZE records.
+     * The limit protects RAM usage and, later, gives the async replay
+     * task a natural scheduling boundary.
+     */
+    let queued_records = storage.read_first_records::<QUEUE_BATCH_SIZE>(QUEUE_BATCH_SIZE);
+
+    if queued_records.is_empty() {
+        return QueueBatchOutcome::NoPendingRecords;
+    }
+
+    let batch_record_count = queued_records.len();
+
+    let batch_payload = match payload::build_queue_batch_payload(&queued_records) {
+        Some(payload) => payload,
+
+        None => {
+            println!("Failed to build telemetry queue batch payload.");
+            println!("Queue remains unchanged.");
+
+            return QueueBatchOutcome::Failed;
+        }
+    };
+
+    println!("========================");
+    println!("QUEUED TELEMETRY BATCH");
+    println!("========================");
+    println!("Records: {}", batch_record_count);
+    println!("{}", batch_payload);
+
+    if !http::send_payload(modem, delay, &batch_payload).await {
+        println!("Queued telemetry upload failed.");
+        println!("Queue remains unchanged.");
+
+        return QueueBatchOutcome::Failed;
+    }
+
+    /*
+     * Persist every ACK before removing queue entries.
+     */
+    let mut all_acks_persisted = true;
+
+    for queued_record in queued_records.iter() {
+        let (device_id, timestamp) = match payload::extract_replay_identity(queued_record.as_str())
+        {
+            Some(identity) => identity,
+
+            None => {
+                println!("Unable to extract identity from uploaded record.");
+
+                all_acks_persisted = false;
+
+                break;
+            }
+        };
+
+        if !storage.append_ack(device_id, timestamp) {
+            println!("Failed to persist telemetry batch ACK.");
+
+            all_acks_persisted = false;
+
+            break;
+        }
+    }
+
+    if !all_acks_persisted {
+        println!("Batch upload succeeded, but ACK persistence was incomplete.");
+        println!("Queue records have not been removed.");
+
+        return QueueBatchOutcome::Failed;
+    }
+
+    let mut removed_records = 0usize;
+
+    for _ in 0..batch_record_count {
+        if !storage.remove_first_record() {
+            println!("Failed while removing acknowledged queue records.");
+
+            break;
+        }
+
+        removed_records += 1;
+    }
+
+    println!(
+        "Published and removed {} queued telemetry record(s).",
+        removed_records
+    );
+
+    if removed_records != batch_record_count {
+        println!(
+            "Only {} of {} acknowledged record(s) were removed.",
+            removed_records, batch_record_count
+        );
+    }
+
+    QueueBatchOutcome::Uploaded {
+        removed_records,
+        expected_records: batch_record_count,
+    }
+}
+
+pub async fn flush_queue<S>(
+    modem: &mut Modem<'_>,
+    delay: &Delay,
+    mut storage: Option<&mut S>,
+) -> bool
 where
     S: RecordStorage,
 {
@@ -112,127 +239,41 @@ where
         }
     };
 
-    let recovered_records = cleanup_acknowledged_queue_front(storage);
-
-    if recovered_records > 0 {
-        println!(
-            "Removed {} previously acknowledged queued record(s).",
-            recovered_records
-        );
-    }
-
     let mut published_records = 0usize;
     let mut uploaded_any_batch = false;
 
     while published_records < MAX_RECORDS_PER_FLUSH {
-        let remaining_capacity = MAX_RECORDS_PER_FLUSH - published_records;
-        let requested_records = core::cmp::min(QUEUE_BATCH_SIZE, remaining_capacity);
-
-        let queued_records = storage.read_first_records::<QUEUE_BATCH_SIZE>(requested_records);
-
-        if queued_records.is_empty() {
-            if !uploaded_any_batch {
-                println!("No pending telemetry records found.");
-            }
-
-            break;
-        }
-
-        let batch_record_count = queued_records.len();
-
-        let batch_payload = match payload::build_queue_batch_payload(&queued_records) {
-            Some(payload) => payload,
-
-            None => {
-                println!("Failed to build telemetry queue batch payload.");
-                println!("Queue remains unchanged.");
-
-                break;
-            }
-        };
-
-        println!("========================");
-        println!("QUEUED TELEMETRY BATCH");
-        println!("========================");
-        println!("Records: {}", batch_record_count);
-        println!("{}", batch_payload);
-
-        if !http::send_payload(modem, delay, &batch_payload) {
-            println!("Queued telemetry upload failed.");
-            println!("Queue remains unchanged.");
-
-            break;
-        }
-
-        /*
-         * Persist every ACK before removing any queue entry.
-         *
-         * If ACK persistence stops partway through, no records are removed
-         * here. On the next flush, cleanup_acknowledged_queue_front() will
-         * safely remove only the records whose ACKs were persisted.
-         */
-        let mut all_acks_persisted = true;
-
-        for queued_record in queued_records.iter() {
-            let (device_id, timestamp) =
-                match payload::extract_replay_identity(queued_record.as_str()) {
-                    Some(identity) => identity,
-
-                    None => {
-                        println!("Unable to extract identity from uploaded record.");
-                        all_acks_persisted = false;
-
-                        break;
-                    }
-                };
-
-            if !storage.append_ack(device_id, timestamp) {
-                println!("Failed to persist telemetry batch ACK.");
-                all_acks_persisted = false;
-
-                break;
-            }
-        }
-
-        if !all_acks_persisted {
-            println!("Batch upload succeeded, but ACK persistence was incomplete.");
-            println!("Queue records have not been removed.");
-
-            break;
-        }
-
-        let mut removed_records = 0usize;
-
-        for _ in 0..batch_record_count {
-            if !storage.remove_first_record() {
-                println!("Failed while removing acknowledged queue records.");
+        match flush_one_queue_batch(modem, delay, storage).await {
+            QueueBatchOutcome::NoPendingRecords => {
+                if !uploaded_any_batch {
+                    println!("No pending telemetry records found.");
+                }
 
                 break;
             }
 
-            removed_records += 1;
-        }
+            QueueBatchOutcome::Uploaded {
+                removed_records,
+                expected_records,
+            } => {
+                published_records += removed_records;
+                uploaded_any_batch = true;
 
-        published_records += removed_records;
-        uploaded_any_batch = true;
+                /*
+                 * If some acknowledged records could not be removed,
+                 * stop this flush.
+                 *
+                 * Their ACKs remain persisted and the next flush will
+                 * recover them safely from the queue front.
+                 */
+                if removed_records != expected_records {
+                    break;
+                }
+            }
 
-        println!(
-            "Published and removed {} queued telemetry record(s).",
-            removed_records
-        );
-
-        if removed_records != batch_record_count {
-            println!(
-                "Only {} of {} acknowledged record(s) were removed.",
-                removed_records, batch_record_count
-            );
-
-            /*
-             * Remaining records already have ACK entries. They will be
-             * recovered safely by cleanup_acknowledged_queue_front() during
-             * the next queue flush.
-             */
-            break;
+            QueueBatchOutcome::Failed => {
+                break;
+            }
         }
     }
 
@@ -251,8 +292,8 @@ where
     uploaded_any_batch
 }
 
-pub fn publish_live_fix<S>(
-    modem: &mut Modem,
+pub async fn publish_live_fix<S>(
+    modem: &mut Modem<'_>,
     delay: &Delay,
     device_code: &str,
     snapshot: &SensorSnapshot<'_>,
@@ -411,7 +452,7 @@ where
     };
 
     let telemetry_upload_success = if telemetry_persisted {
-        flush_queue(modem, delay, storage.as_deref_mut())
+        flush_queue(modem, delay, storage.as_deref_mut()).await
     } else {
         println!("========================");
         println!("DIRECT LIVE TELEMETRY FALLBACK");
@@ -421,7 +462,7 @@ where
 
         let live_payload = payload::build_telemetry_payload(&live_reading);
 
-        http::send_payload(modem, delay, &live_payload)
+        http::send_payload(modem, delay, &live_payload).await
     };
 
     telemetry_upload_success

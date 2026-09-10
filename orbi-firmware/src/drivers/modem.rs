@@ -1,3 +1,4 @@
+use embassy_time::{Duration, Timer};
 use esp_hal::delay::Delay;
 use esp_hal::gpio::Output;
 use esp_hal::peripherals::{GPIO26, GPIO27, UART1};
@@ -113,6 +114,37 @@ impl<'d> Modem<'d> {
         match self.collect_response(command, label, delay) {
             Some((buffer, bytes_read)) => {
                 println!("Read {} byte(s):", bytes_read);
+                Self::print_response(&buffer, bytes_read);
+            }
+
+            None => {
+                println!("No response yet.");
+            }
+        }
+    }
+
+    pub async fn send_command_and_print_response_async(&mut self, command: &[u8], label: &str) {
+        /*
+         * Send the command exactly as the existing blocking helper does.
+         *
+         * The important difference is that the one-second response wait
+         * is performed with Embassy Timer rather than Delay::delay_millis().
+         *
+         * This gives the executor an opportunity to run other ready tasks
+         * while the modem is preparing its response.
+         */
+        if !self.send_command(command, label) {
+            println!("No response yet.");
+
+            return;
+        }
+
+        Timer::after(Duration::from_secs(1)).await;
+
+        match self.read_response() {
+            Some((buffer, bytes_read)) => {
+                println!("Read {} byte(s):", bytes_read);
+
                 Self::print_response(&buffer, bytes_read);
             }
 

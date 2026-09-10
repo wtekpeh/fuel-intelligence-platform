@@ -11,10 +11,13 @@ mod telemetry;
 
 use board::BoardPins;
 use drivers::{kum::KumSensor, Modem};
+use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
 use esp_hal::i2c::master::{Config as I2cConfig, I2c};
-use esp_hal::main;
-use esp_hal::{delay::Delay, time::Instant};
+use esp_hal::{
+    delay::Delay, interrupt::software::SoftwareInterruptControl, time::Instant,
+    timer::timg::TimerGroup,
+};
 
 use device::{load_runtime_identity, FIRMWARE_IDENTITY};
 use esp_println::println;
@@ -25,9 +28,27 @@ use telemetry::record::TelemetryRecord;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-#[main]
-fn main() -> ! {
+#[embassy_executor::task]
+async fn embassy_heartbeat_task() {
+    loop {
+        println!("Embassy background task is alive.");
+
+        Timer::after(Duration::from_secs(5)).await;
+    }
+}
+
+#[esp_rtos::main]
+async fn main(spawner: embassy_executor::Spawner) {
     let peripherals = esp_hal::init(esp_hal::Config::default());
+
+    let timer_group = TimerGroup::new(peripherals.TIMG0);
+
+    let software_interrupt = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
+
+    esp_rtos::start(timer_group.timer0, software_interrupt.software_interrupt0);
+
+    spawner.spawn(embassy_heartbeat_task().expect("failed to create Embassy heartbeat task"));
+
     let delay = Delay::new();
 
     let runtime_identity = device::storage::load_runtime_identity_from_flash(peripherals.FLASH)
@@ -183,11 +204,12 @@ fn main() -> ! {
 
         println!("Network not ready yet. Waiting 5 seconds...");
 
-        delay.delay_millis(5_000);
+        Timer::after(Duration::from_secs(5)).await;
     }
 
     if network_ready {
-        telemetry::replay::replay_pending_records(&mut modem, &delay, persistent_storage.as_mut());
+        telemetry::replay::replay_pending_records(&mut modem, &delay, persistent_storage.as_mut())
+            .await;
     } else {
         println!("Network did not become ready. Replay skipped for this boot.");
     }
@@ -273,7 +295,7 @@ fn main() -> ! {
             heartbeat_attempted_once = true;
             last_heartbeat_attempt = Instant::now();
 
-            if heartbeat_succeeded {
+            if heartbeat_succeeded.await {
                 println!("Independent heartbeat succeeded.");
             } else {
                 println!("Independent heartbeat failed.");
@@ -461,7 +483,7 @@ fn main() -> ! {
                  */
                 last_report_time = Instant::now();
 
-                if cloud_contact_succeeded {
+                if cloud_contact_succeeded.await {
                     println!("Cloud telemetry publish succeeded.");
                 } else {
                     println!("========================");
@@ -500,6 +522,6 @@ fn main() -> ! {
             GNSS_SAMPLE_INTERVAL_MS / 1_000
         );
 
-        delay.delay_millis(GNSS_SAMPLE_INTERVAL_MS);
+        Timer::after(Duration::from_millis(GNSS_SAMPLE_INTERVAL_MS as u64)).await;
     }
 }
