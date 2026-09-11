@@ -1,307 +1,14 @@
-use esp_hal::delay::Delay;
 use esp_println::println;
 
 use crate::{
-    drivers::Modem,
-    network::http,
-    storage::RecordStorage,
+    storage::{
+        owned_record::{OwnedAckRecord, OwnedTelemetryRecord},
+        owner as storage_owner,
+    },
     telemetry::{payload, record::TelemetryRecord, snapshot::SensorSnapshot},
 };
 
-/*
- * Maximum number of queued records included in one HTTP request.
- *
- * Four records keep memory usage bounded and leave room inside the
- * 4096-byte payload buffer used by build_queue_batch_payload().
- */
-const QUEUE_BATCH_SIZE: usize = 4;
-
-/*
- * Prevent one publishing operation from occupying the modem indefinitely.
- *
- * With a batch size of four, this permits up to 100 queued records to be
- * processed during one flush operation.
- */
-const MAX_RECORDS_PER_FLUSH: usize = 100;
-
-/*
- * Remove acknowledged records from the front of the persistent queue.
- *
- * This handles cases where:
- *
- * - an earlier upload succeeded;
- * - one or more ACK entries were persisted;
- * - queue removal was interrupted by power loss or another storage failure.
- *
- * Because ORBIQ.LOG is FIFO, cleanup stops immediately when the first
- * unacknowledged record is encountered.
- */
-fn cleanup_acknowledged_queue_front<S>(storage: &mut S) -> usize
-where
-    S: RecordStorage,
-{
-    let mut removed = 0;
-
-    loop {
-        let queued_record = match storage.read_first_record() {
-            Some(record) => record,
-
-            None => {
-                break;
-            }
-        };
-
-        let (device_id, timestamp) = match payload::extract_replay_identity(queued_record.as_str())
-        {
-            Some(identity) => identity,
-
-            None => {
-                println!("Invalid record found at the front of ORBIQ.LOG.");
-                println!("Acknowledged queue cleanup stopped.");
-
-                break;
-            }
-        };
-
-        if !storage.is_acknowledged(device_id, timestamp) {
-            break;
-        }
-
-        println!("Removing previously acknowledged queued record.");
-
-        if !storage.remove_first_record() {
-            println!("Failed to remove previously acknowledged queued record.");
-
-            break;
-        }
-
-        removed += 1;
-    }
-
-    removed
-}
-
-pub(crate) enum QueueBatchOutcome {
-    NoPendingRecords,
-
-    Uploaded {
-        removed_records: usize,
-        expected_records: usize,
-    },
-
-    Failed,
-}
-
-pub(crate) async fn flush_one_queue_batch<S>(
-    modem: &mut Modem<'_>,
-    delay: &Delay,
-    storage: &mut S,
-) -> QueueBatchOutcome
-where
-    S: RecordStorage,
-{
-    /*
-     * Recover records that were already uploaded and acknowledged,
-     * but whose removal from ORBIQ.LOG was interrupted.
-     */
-    let recovered_records = cleanup_acknowledged_queue_front(storage);
-
-    if recovered_records > 0 {
-        println!(
-            "Removed {} previously acknowledged queued record(s).",
-            recovered_records
-        );
-    }
-
-    /*
-     * Read one bounded batch only.
-     *
-     * This remains intentionally limited to QUEUE_BATCH_SIZE records.
-     * The limit protects RAM usage and, later, gives the async replay
-     * task a natural scheduling boundary.
-     */
-    let queued_records = storage.read_first_records::<QUEUE_BATCH_SIZE>(QUEUE_BATCH_SIZE);
-
-    if queued_records.is_empty() {
-        return QueueBatchOutcome::NoPendingRecords;
-    }
-
-    let batch_record_count = queued_records.len();
-
-    let batch_payload = match payload::build_queue_batch_payload(&queued_records) {
-        Some(payload) => payload,
-
-        None => {
-            println!("Failed to build telemetry queue batch payload.");
-            println!("Queue remains unchanged.");
-
-            return QueueBatchOutcome::Failed;
-        }
-    };
-
-    println!("========================");
-    println!("QUEUED TELEMETRY BATCH");
-    println!("========================");
-    println!("Records: {}", batch_record_count);
-    println!("{}", batch_payload);
-
-    if !http::send_payload(modem, delay, &batch_payload).await {
-        println!("Queued telemetry upload failed.");
-        println!("Queue remains unchanged.");
-
-        return QueueBatchOutcome::Failed;
-    }
-
-    /*
-     * Persist every ACK before removing queue entries.
-     */
-    let mut all_acks_persisted = true;
-
-    for queued_record in queued_records.iter() {
-        let (device_id, timestamp) = match payload::extract_replay_identity(queued_record.as_str())
-        {
-            Some(identity) => identity,
-
-            None => {
-                println!("Unable to extract identity from uploaded record.");
-
-                all_acks_persisted = false;
-
-                break;
-            }
-        };
-
-        if !storage.append_ack(device_id, timestamp) {
-            println!("Failed to persist telemetry batch ACK.");
-
-            all_acks_persisted = false;
-
-            break;
-        }
-    }
-
-    if !all_acks_persisted {
-        println!("Batch upload succeeded, but ACK persistence was incomplete.");
-        println!("Queue records have not been removed.");
-
-        return QueueBatchOutcome::Failed;
-    }
-
-    let mut removed_records = 0usize;
-
-    for _ in 0..batch_record_count {
-        if !storage.remove_first_record() {
-            println!("Failed while removing acknowledged queue records.");
-
-            break;
-        }
-
-        removed_records += 1;
-    }
-
-    println!(
-        "Published and removed {} queued telemetry record(s).",
-        removed_records
-    );
-
-    if removed_records != batch_record_count {
-        println!(
-            "Only {} of {} acknowledged record(s) were removed.",
-            removed_records, batch_record_count
-        );
-    }
-
-    QueueBatchOutcome::Uploaded {
-        removed_records,
-        expected_records: batch_record_count,
-    }
-}
-
-pub async fn flush_queue<S>(
-    modem: &mut Modem<'_>,
-    delay: &Delay,
-    mut storage: Option<&mut S>,
-) -> bool
-where
-    S: RecordStorage,
-{
-    println!("========================");
-    println!("ORBI QUEUE PUBLISHER");
-    println!("========================");
-
-    let storage = match storage.as_deref_mut() {
-        Some(storage) => storage,
-
-        None => {
-            println!("SD storage unavailable. Queue publishing skipped.");
-
-            return false;
-        }
-    };
-
-    let mut published_records = 0usize;
-    let mut uploaded_any_batch = false;
-
-    while published_records < MAX_RECORDS_PER_FLUSH {
-        match flush_one_queue_batch(modem, delay, storage).await {
-            QueueBatchOutcome::NoPendingRecords => {
-                if !uploaded_any_batch {
-                    println!("No pending telemetry records found.");
-                }
-
-                break;
-            }
-
-            QueueBatchOutcome::Uploaded {
-                removed_records,
-                expected_records,
-            } => {
-                published_records += removed_records;
-                uploaded_any_batch = true;
-
-                /*
-                 * If some acknowledged records could not be removed,
-                 * stop this flush.
-                 *
-                 * Their ACKs remain persisted and the next flush will
-                 * recover them safely from the queue front.
-                 */
-                if removed_records != expected_records {
-                    break;
-                }
-            }
-
-            QueueBatchOutcome::Failed => {
-                break;
-            }
-        }
-    }
-
-    if published_records >= MAX_RECORDS_PER_FLUSH {
-        println!(
-            "Queue flush limit reached after {} record(s).",
-            published_records
-        );
-    }
-
-    println!(
-        "Queue publishing completed. {} record(s) processed.",
-        published_records
-    );
-
-    uploaded_any_batch
-}
-
-pub async fn publish_live_fix<S>(
-    modem: &mut Modem<'_>,
-    delay: &Delay,
-    device_code: &str,
-    snapshot: &SensorSnapshot<'_>,
-    mut storage: Option<&mut S>,
-) -> bool
-where
-    S: RecordStorage,
-{
+pub async fn publish_live_fix(device_code: &str, snapshot: &SensorSnapshot<'_>) -> bool {
     let gps_info = snapshot.gps;
     let imu_data = snapshot.imu;
 
@@ -431,28 +138,72 @@ where
      * is attempted. HTTP publishing reads from the queue rather than directly
      * from the in-memory TelemetryRecord.
      */
-    let telemetry_persisted = match storage.as_deref_mut() {
-        Some(storage) => {
-            if storage.append_record(&live_reading) {
+    let telemetry_persisted = match OwnedTelemetryRecord::from_borrowed(&live_reading) {
+        Some(owned_record) => {
+            if storage_owner::request_live_telemetry_persistence(owned_record).await {
                 true
             } else {
                 println!("Telemetry SD append failed.");
-                println!("Live telemetry will not be uploaded from volatile memory.");
+
+                println!("Live telemetry was not persisted.");
 
                 false
             }
         }
 
         None => {
-            println!("SD storage unavailable.");
-            println!("Live telemetry cannot enter the persistent queue.");
+            println!("Unable to create owned telemetry record.");
+
+            println!("Live telemetry was not persisted.");
 
             false
         }
     };
 
+    let live_payload = payload::build_telemetry_payload(&live_reading);
+
     let telemetry_upload_success = if telemetry_persisted {
-        flush_queue(modem, delay, storage.as_deref_mut()).await
+        println!("========================");
+        println!("DIRECT LIVE TELEMETRY");
+        println!("========================");
+        println!("Uploading newest live telemetry ahead of queued backlog.");
+
+        let upload_succeeded =
+            crate::network::modem_owner::request_live_telemetry(live_payload).await;
+
+        if upload_succeeded {
+            println!("Live telemetry upload succeeded.");
+
+            /*
+             * Persist the ACK for this exact live record.
+             *
+             * The physical record remains in ORBIQ.LOG if older records are
+             * still ahead of it. Later replay will eventually reach this record,
+             * see that it is already acknowledged, and remove it without
+             * uploading it again.
+             */
+            match OwnedAckRecord::new(live_reading.device_id, live_reading.timestamp) {
+                Some(ack) => {
+                    if storage_owner::request_live_ack(ack).await {
+                        println!("Live telemetry ACK persisted.");
+                    } else {
+                        println!("Live telemetry upload succeeded, but ACK persistence failed.");
+
+                        println!("The record remains queued and may be uploaded again later.");
+                    }
+                }
+
+                None => {
+                    println!(
+                        "Live telemetry upload succeeded, but ACK ownership conversion failed."
+                    );
+
+                    println!("The record remains queued and may be uploaded again later.");
+                }
+            }
+        }
+
+        upload_succeeded
     } else {
         println!("========================");
         println!("DIRECT LIVE TELEMETRY FALLBACK");
@@ -460,9 +211,7 @@ where
         println!("SD persistence unavailable.");
         println!("Attempting direct telemetry upload.");
 
-        let live_payload = payload::build_telemetry_payload(&live_reading);
-
-        http::send_payload(modem, delay, &live_payload).await
+        crate::network::modem_owner::request_live_telemetry(live_payload).await
     };
 
     telemetry_upload_success

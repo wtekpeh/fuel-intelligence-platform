@@ -1,5 +1,4 @@
 use embassy_time::{Duration, Timer};
-use esp_hal::delay::Delay;
 use esp_println::println;
 
 use crate::drivers::Modem;
@@ -122,7 +121,6 @@ async fn collect_http_action_response(
 
 async fn post_json<const N: usize>(
     modem: &mut Modem<'_>,
-    delay: &Delay,
     url_command: &[u8],
     url_label: &str,
     payload: &heapless::String<N>,
@@ -172,7 +170,9 @@ async fn post_json<const N: usize>(
     {
         println!("Failed to build AT+HTTPDATA command.");
 
-        modem.send_command_and_print_response(b"AT+HTTPTERM\r\n", "AT+HTTPTERM", delay);
+        modem
+            .send_command_and_print_response_async(b"AT+HTTPTERM\r\n", "AT+HTTPTERM")
+            .await;
 
         return false;
     }
@@ -272,12 +272,10 @@ async fn post_json<const N: usize>(
 
 pub async fn send_payload<const N: usize>(
     modem: &mut Modem<'_>,
-    delay: &Delay,
     payload: &heapless::String<N>,
 ) -> bool {
     post_json(
         modem,
-        delay,
         b"AT+HTTPPARA=\"URL\",\"http://rust-api.williamtekpeh.com/api/fuel-readings/batch\"\r\n",
         "AT+HTTPPARA URL",
         payload,
@@ -289,11 +287,7 @@ pub async fn send_payload<const N: usize>(
     .await
 }
 
-pub async fn send_heartbeat(
-    modem: &mut Modem<'_>,
-    delay: &Delay,
-    payload: &heapless::String<256>,
-) -> bool {
+pub async fn send_heartbeat(modem: &mut Modem<'_>, payload: &heapless::String<256>) -> bool {
     println!("========================");
     println!("SENDING ORBI HEARTBEAT");
     println!("========================");
@@ -301,7 +295,6 @@ pub async fn send_heartbeat(
 
     post_json(
         modem,
-        delay,
         b"AT+HTTPPARA=\"URL\",\"http://rust-api.williamtekpeh.com/api/heartbeat\"\r\n",
         "AT+HTTPPARA HEARTBEAT URL",
         payload,

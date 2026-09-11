@@ -1111,6 +1111,7 @@ name = "orbi-firmware"
 version = "0.2.0"
 dependencies = [
  "embassy-executor",
+ "embassy-sync 0.8.0",
  "embassy-time",
  "embedded-hal-bus",
  "embedded-sdmmc",

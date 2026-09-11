@@ -45,7 +45,7 @@ pub fn initialize(modem: &mut Modem, delay: &Delay) {
     println!("GNSS initialization commands completed.");
 }
 
-pub fn get_live_fix(modem: &mut Modem, delay: &Delay) -> Option<GpsInfo> {
+pub async fn get_live_fix(modem: &mut Modem<'_>) -> Option<GpsInfo> {
     /*
      * AT+CGNSSINFO provides:
      *
@@ -58,8 +58,9 @@ pub fn get_live_fix(modem: &mut Modem, delay: &Delay) -> Option<GpsInfo> {
      * - course over ground in degrees
      * - PDOP, HDOP and VDOP
      */
-    let (response_buffer, bytes_read) =
-        modem.send_command_and_collect_response(b"AT+CGNSSINFO\r\n", "AT+CGNSSINFO", delay)?;
+    let (response_buffer, bytes_read) = modem
+        .send_command_and_collect_response_async(b"AT+CGNSSINFO\r\n", "AT+CGNSSINFO")
+        .await?;
 
     println!("========================");
     println!("RAW GNSS RESPONSE");

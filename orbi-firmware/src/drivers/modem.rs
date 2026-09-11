@@ -172,4 +172,36 @@ impl<'d> Modem<'d> {
             }
         }
     }
+
+    pub async fn send_command_and_collect_response_async(
+        &mut self,
+        command: &[u8],
+        label: &str,
+    ) -> Option<([u8; RESPONSE_BUFFER_SIZE], usize)> {
+        if !self.send_command(command, label) {
+            println!("No response received.");
+            return None;
+        }
+
+        /*
+         * Preserve the existing one-second modem response wait,
+         * but yield cooperatively to Embassy instead of blocking
+         * the whole executor.
+         */
+        Timer::after(Duration::from_secs(1)).await;
+
+        match self.read_response() {
+            Some((buffer, bytes_read)) => {
+                println!("Collected {} byte(s)", bytes_read);
+
+                Some((buffer, bytes_read))
+            }
+
+            None => {
+                println!("No response received.");
+
+                None
+            }
+        }
+    }
 }

@@ -23,7 +23,6 @@ use device::{load_runtime_identity, FIRMWARE_IDENTITY};
 use esp_println::println;
 use scheduler::reporting::{knots_to_kmh, MotionState};
 use storage::record::GnssDiagnosticRecord;
-use storage::service::RecordStorage;
 use telemetry::record::TelemetryRecord;
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -85,14 +84,26 @@ async fn main(spawner: embassy_executor::Spawner) {
      */
     board_pins.enable_peripheral_power(&delay);
 
-    let mut persistent_storage = storage::sdcard::initialize(
-        peripherals.SPI2,
-        peripherals.GPIO2,
-        peripherals.GPIO15,
-        peripherals.GPIO14,
-        peripherals.GPIO13,
+    /*
+     * Transfer permanent ownership of the microSD hardware to the
+     * dedicated Embassy storage-owner task.
+     *
+     * From this point onward, main and all other tasks must access
+     * persistent storage only through storage::owner request functions.
+     *
+     * The storage owner initializes the SD card internally and becomes
+     * the single owner of SPI2 and the SD GPIO pins.
+     */
+    spawner.spawn(
+        storage::owner::storage_owner_task(
+            peripherals.SPI2,
+            peripherals.GPIO2,
+            peripherals.GPIO15,
+            peripherals.GPIO14,
+            peripherals.GPIO13,
+        )
+        .expect("failed to create storage owner task"),
     );
-
     Modem::power_on(
         &mut board_pins.modem_power_on,
         &mut board_pins.modem_reset,
@@ -192,7 +203,7 @@ async fn main(spawner: embassy_executor::Spawner) {
     for attempt in 1..=6 {
         println!("Network readiness attempt {}/6", attempt);
 
-        let state = network::state::read_network_state(&mut modem, &delay);
+        let state = network::state::read_network_state(&mut modem).await;
 
         if state.is_ready() {
             network_ready = true;
@@ -207,9 +218,25 @@ async fn main(spawner: embassy_executor::Spawner) {
         Timer::after(Duration::from_secs(5)).await;
     }
 
+    /*
+     * Startup modem configuration is now complete.
+     *
+     * Transfer permanent runtime ownership of the A7670 modem to the
+     * dedicated Embassy modem-owner task.
+     *
+     * From this point onward, main and all other tasks must access the
+     * modem only through network::modem_owner request functions.
+     */
+    spawner.spawn(
+        network::modem_owner::modem_owner_task(modem).expect("failed to create modem owner task"),
+    );
+
     if network_ready {
-        telemetry::replay::replay_pending_records(&mut modem, &delay, persistent_storage.as_mut())
-            .await;
+        spawner.spawn(
+            telemetry::replay::replay_task().expect("failed to create telemetry replay task"),
+        );
+
+        println!("Background telemetry replay task started.");
     } else {
         println!("Network did not become ready. Replay skipped for this boot.");
     }
@@ -284,7 +311,7 @@ async fn main(spawner: embassy_executor::Spawner) {
                 network::heartbeat::build_heartbeat_payload(runtime_identity.device_code());
 
             let heartbeat_succeeded =
-                network::http::send_heartbeat(&mut modem, &delay, &heartbeat_payload);
+                network::modem_owner::request_heartbeat(heartbeat_payload).await;
 
             /*
              * Record the attempt regardless of success.
@@ -295,7 +322,7 @@ async fn main(spawner: embassy_executor::Spawner) {
             heartbeat_attempted_once = true;
             last_heartbeat_attempt = Instant::now();
 
-            if heartbeat_succeeded.await {
+            if heartbeat_succeeded {
                 println!("Independent heartbeat succeeded.");
             } else {
                 println!("Independent heartbeat failed.");
@@ -321,7 +348,7 @@ async fn main(spawner: embassy_executor::Spawner) {
             println!("PERIODIC NETWORK DIAGNOSTICS");
             println!("========================");
 
-            network::diagnostics::run_network_diagnostics(&mut modem, &delay);
+            network::modem_owner::request_diagnostics().await;
 
             last_network_diagnostics = Instant::now();
         }
@@ -330,7 +357,7 @@ async fn main(spawner: embassy_executor::Spawner) {
          * GNSS is queried every 5 seconds regardless of whether the
          * vehicle is moving, idle or parked.
          */
-        if let Some(gps_info) = drivers::gnss::get_live_fix(&mut modem, &delay) {
+        if let Some(gps_info) = network::modem_owner::request_gnss_fix().await {
             let speed_kmh = knots_to_kmh(gps_info.speed);
 
             let new_motion_state = reporting_policy.classify_speed_knots(gps_info.speed);
@@ -388,16 +415,21 @@ async fn main(spawner: embassy_executor::Spawner) {
                 reporting_interval_seconds,
             };
 
-            if persistent_storage.is_none() {
-                println!("ERROR: Persistent storage is NONE.");
-            } else {
-                println!("Persistent storage is AVAILABLE.");
+            match storage::owned_record::OwnedGnssDiagnosticRecord::from_borrowed(
+                &diagnostic_record,
+            ) {
+                Some(owned_record) => {
+                    let diagnostic_saved =
+                        storage::owner::request_gnss_diagnostic(owned_record).await;
 
-                let storage = persistent_storage.as_mut().unwrap();
+                    println!("GNSS diagnostic persistence returned: {}", diagnostic_saved);
+                }
 
-                let diagnostic_saved = storage.append_gnss_diagnostic(&diagnostic_record);
+                None => {
+                    println!("Failed to create owned GNSS diagnostic record.");
 
-                println!("append_gnss_diagnostic() returned: {}", diagnostic_saved);
+                    println!("GNSS diagnostic was not persisted.");
+                }
             }
 
             /*
@@ -467,12 +499,10 @@ async fn main(spawner: embassy_executor::Spawner) {
                 };
 
                 let cloud_contact_succeeded = telemetry::publisher::publish_live_fix(
-                    &mut modem,
-                    &delay,
                     runtime_identity.device_code(),
                     &sensor_snapshot,
-                    persistent_storage.as_mut(),
-                );
+                )
+                .await;
 
                 /*
                  * Record the attempt time whether the live upload
@@ -483,7 +513,7 @@ async fn main(spawner: embassy_executor::Spawner) {
                  */
                 last_report_time = Instant::now();
 
-                if cloud_contact_succeeded.await {
+                if cloud_contact_succeeded {
                     println!("Cloud telemetry publish succeeded.");
                 } else {
                     println!("========================");
@@ -491,7 +521,7 @@ async fn main(spawner: embassy_executor::Spawner) {
                     println!("Running immediate network diagnostics...");
                     println!("========================");
 
-                    network::diagnostics::run_network_diagnostics(&mut modem, &delay);
+                    network::modem_owner::request_diagnostics().await;
 
                     last_network_diagnostics = Instant::now();
                 }

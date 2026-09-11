@@ -1,4 +1,4 @@
-use esp_hal::delay::Delay;
+use embassy_time::{Duration, Timer};
 use esp_println::println;
 
 use crate::drivers::Modem;
@@ -48,27 +48,30 @@ fn has_assigned_ip(response: &[u8]) -> bool {
     !address.is_empty() && address.iter().any(|byte| *byte == b'.') && address != b"0.0.0.0"
 }
 
-fn collect_command(
-    modem: &mut Modem,
-    delay: &Delay,
+async fn collect_command(
+    modem: &mut Modem<'_>,
     command: &[u8],
     label: &str,
 ) -> Option<([u8; 256], usize)> {
-    modem.send_command_and_collect_response(command, label, delay)
+    modem
+        .send_command_and_collect_response_async(command, label)
+        .await
 }
 
-pub fn read_network_state(modem: &mut Modem, delay: &Delay) -> NetworkState {
+pub async fn read_network_state(modem: &mut Modem<'_>) -> NetworkState {
     println!("========================");
     println!("ORBI NETWORK STATE");
     println!("========================");
 
-    let sim_ready = collect_command(modem, delay, b"AT+CPIN?\r\n", "AT+CPIN?")
+    let sim_ready = collect_command(modem, b"AT+CPIN?\r\n", "AT+CPIN?")
+        .await
         .map(|(buffer, bytes_read)| response_contains(&buffer[..bytes_read], b"+CPIN: READY"))
         .unwrap_or(false);
 
-    delay.delay_millis(1000);
+    Timer::after(Duration::from_secs(1)).await;
 
-    let registered = collect_command(modem, delay, b"AT+CEREG?\r\n", "AT+CEREG?")
+    let registered = collect_command(modem, b"AT+CEREG?\r\n", "AT+CEREG?")
+        .await
         .map(|(buffer, bytes_read)| {
             let response = &buffer[..bytes_read];
 
@@ -79,15 +82,17 @@ pub fn read_network_state(modem: &mut Modem, delay: &Delay) -> NetworkState {
         })
         .unwrap_or(false);
 
-    delay.delay_millis(1000);
+    Timer::after(Duration::from_secs(1)).await;
 
-    let attached = collect_command(modem, delay, b"AT+CGATT?\r\n", "AT+CGATT?")
+    let attached = collect_command(modem, b"AT+CGATT?\r\n", "AT+CGATT?")
+        .await
         .map(|(buffer, bytes_read)| response_contains(&buffer[..bytes_read], b"+CGATT: 1"))
         .unwrap_or(false);
 
-    delay.delay_millis(1000);
+    Timer::after(Duration::from_secs(1)).await;
 
-    let has_ip = collect_command(modem, delay, b"AT+CGPADDR\r\n", "AT+CGPADDR")
+    let has_ip = collect_command(modem, b"AT+CGPADDR\r\n", "AT+CGPADDR")
+        .await
         .map(|(buffer, bytes_read)| has_assigned_ip(&buffer[..bytes_read]))
         .unwrap_or(false);
 
