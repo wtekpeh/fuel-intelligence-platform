@@ -161,5 +161,35 @@ pub async fn replay_pending_records() {
 
 #[embassy_executor::task]
 pub async fn replay_task() {
-    replay_pending_records().await;
+    loop {
+        /*
+         * Run one replay pass.
+         *
+         * A pass may finish because:
+         *
+         * - the queue is empty;
+         * - SD storage is temporarily unavailable;
+         * - payload construction fails;
+         * - queue finalization is incomplete.
+         *
+         * The Embassy task itself must remain alive.
+         *
+         * New telemetry may be persisted to ORBIQ.LOG later if live
+         * cloud publishing fails, so replay must periodically return
+         * and inspect the persistent queue again.
+         */
+        replay_pending_records().await;
+
+        println!("Replay pass finished.");
+        println!("Waiting 10 seconds before checking ORBIQ.LOG again.");
+
+        /*
+         * Avoid continuously polling the SD card when no backlog exists.
+         *
+         * Foreground live telemetry retains modem priority, while the
+         * background replay service periodically checks whether new
+         * queued telemetry has appeared.
+         */
+        Timer::after(Duration::from_secs(10)).await;
+    }
 }

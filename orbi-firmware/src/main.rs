@@ -231,14 +231,26 @@ async fn main(spawner: embassy_executor::Spawner) {
         network::modem_owner::modem_owner_task(modem).expect("failed to create modem owner task"),
     );
 
-    if network_ready {
-        spawner.spawn(
-            telemetry::replay::replay_task().expect("failed to create telemetry replay task"),
-        );
+    /*
+     * The replay service must remain available for the entire firmware lifetime.
+     *
+     * It is intentionally started even when the network was not ready during
+     * the startup readiness window.
+     *
+     * If connectivity is unavailable, replay attempts will fail safely, leave
+     * ORBIQ.LOG unchanged, and retry later.
+     *
+     * This allows ORBI to recover queued telemetry automatically when network
+     * or backend availability returns, without requiring a device reboot.
+     */
+    spawner
+        .spawn(telemetry::replay::replay_task().expect("failed to create telemetry replay task"));
 
-        println!("Background telemetry replay task started.");
+    if network_ready {
+        println!("Background telemetry replay task started with network ready.");
     } else {
-        println!("Network did not become ready. Replay skipped for this boot.");
+        println!("Background telemetry replay task started while network is unavailable.");
+        println!("Replay will continue checking for recovery in the background.");
     }
 
     /*
