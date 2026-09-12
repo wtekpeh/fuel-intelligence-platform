@@ -668,7 +668,7 @@ The current Fuel Intelligence path has been validated with the real KUM installa
 Regression validation:
 
 ```text
-235 tests passed
+245 tests passed
 0 failed
 ```
 
@@ -1834,6 +1834,88 @@ Validation included:
 This validation confirms that adaptive behaviour learning functions
 correctly using production telemetry rather than simulated datasets.
 
+### September 2026 Operational-State Hardening Validation
+
+The operational-state pipeline has now been hardened and revalidated against
+real ORBI bench telemetry after stationary GNSS drift exposed weaknesses in the
+previous movement decision path.
+
+GPS-confirmed movement now requires both meaningful displacement and meaningful
+derived speed. The current movement gate requires at least 10 metres of
+displacement and at least 5 km/h derived speed before GPS independently confirms
+`MOVING`. This prevents low-speed GNSS position drift from overriding stationary
+IMU evidence. It is not intended to be a complete GNSS outlier detector.
+
+The authoritative classification hierarchy is now:
+
+```text
+OFFLINE
+  ↓
+Meaningful GPS displacement + speed?
+  ├── Yes → MOVING (GPS authoritative)
+  └── No
+       ↓
+Complete valid PARKED / IDLE / MOVING profiles available?
+  ├── Yes → Adaptive Behaviour Classification
+  └── No  → Rule-Based Fallback
+       ↓
+Operational State Confirmation Engine
+```
+
+Adaptive profile matching now compares three learned physical metrics:
+
+- average vibration score
+- average gravity deviation
+- average gyroscope-vector magnitude
+
+These metrics use shared normalisation scales derived from the complete set of
+learned behaviour profiles. A profile therefore cannot gain an artificial
+classification advantage merely because its own standard deviation is broader.
+This specifically prevents a high-variance `MOVING` profile from attracting
+stationary observations.
+
+Adaptive eligibility also validates the vibration statistics used by the
+classifier in addition to gravity-deviation and rotation statistics. Complete
+`PARKED`, `IDLE`, and `MOVING` profiles with the required sample count remain
+mandatory before adaptive classification is enabled.
+
+Operational-state confirmation continues to require three supporting
+observations before a transition is persisted. When the currently confirmed
+state is `MOVING`, `IDLE` and `PARKED` are treated as members of the same
+stationary transition family for confirmation purposes. This allows a quiet
+vehicle whose stationary classification legitimately alternates between
+`IDLE` and `PARKED` to leave `MOVING` instead of remaining stuck there. The most
+recent stationary classification becomes the confirmed stationary subtype when
+the transition is confirmed.
+
+This special treatment applies only while leaving `MOVING`. Normal `IDLE` ↔
+`PARKED` transitions still require the standard exact-state confirmation
+behaviour.
+
+Real bench telemetry validated the hardened path. A stationary ORBI device
+produced more than 10 metres of apparent GNSS displacement while derived speed
+remained close to zero. The legacy coordinate-only comparison classified this as
+`MOVING`, while the authoritative classifier correctly rejected the low-speed
+drift and selected a learned stationary profile. After three supporting
+observations, the confirmed operational state transitioned successfully from
+`MOVING` to `IDLE`. Subsequent stationary observations remained outside the
+`MOVING` state even when GNSS drift continued.
+
+`PARKED` versus `IDLE` behaviour was not further threshold-hardened from this
+bench run because the test environment itself contained external vibration from
+a running laptop and keyboard activity. Final stationary-subtype validation
+remains an installation-level real-vehicle check: engine running while
+stationary should resolve to `IDLE`, while engine off and stationary should
+resolve to `PARKED` when the learned installation profiles provide sufficient
+physical separation.
+
+Final backend regression checkpoint after this hardening:
+
+```text
+245 tests passed
+0 failed
+```
+
 ---
 
 ## Future Enhancements
@@ -2354,6 +2436,13 @@ Implemented:
 - rolling MotionEvidence generation
 - per-device rolling motion tracking
 - motion-aware device-state validation
+- meaningful GPS movement qualification using displacement plus derived speed
+- low-speed stationary GNSS-drift rejection
+- adaptive profile matching across vibration, gravity deviation, and rotation magnitude
+- shared adaptive normalisation scales across learned behaviour profiles
+- protection against broad MOVING profiles attracting stationary evidence
+- three-observation operational-state transition confirmation
+- stationary-family confirmation support when leaving MOVING
 - device-state integration using interpreted IMU measurements
 - operational event generation
 - leak/theft/refill detection
@@ -3609,6 +3698,10 @@ End-to-End Physical Fuel Interpolation Validation ✅
 Guided Calibration Wizard
 ↓
 Fuel Intelligence Validation ✅
+↓
+Operational-State Classification Hardening ✅
+↓
+245-Test Backend Regression Validation ✅
 ↓
 Firmware Live-Telemetry / Replay Concurrency Validation ← Required Firmware Follow-Up
 ↓

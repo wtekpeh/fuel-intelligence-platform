@@ -11,8 +11,7 @@ use crate::{
     services::{
         adaptive_behaviour_classifier::classify_from_learned_profiles,
         device_state::{
-            DeviceOperationalState, classify_device_state_from_motion,
-            has_meaningful_gps_displacement,
+            DeviceOperationalState, classify_device_state_from_motion, has_meaningful_gps_movement,
         },
     },
 };
@@ -67,10 +66,8 @@ impl AdaptiveBehaviourService {
         sensor_id: Uuid,
         device_status: Option<&str>,
         motion_evidence: Option<&MotionEvidence>,
-        previous_latitude: Option<f64>,
-        previous_longitude: Option<f64>,
-        current_latitude: Option<f64>,
-        current_longitude: Option<f64>,
+        distance_meters: Option<f64>,
+        speed_kmh: Option<f64>,
     ) -> Result<BehaviourClassificationDecision> {
         if matches!(device_status, Some("OFFLINE")) {
             return Ok(BehaviourClassificationDecision {
@@ -81,12 +78,7 @@ impl AdaptiveBehaviourService {
             });
         }
 
-        if has_meaningful_gps_displacement(
-            previous_latitude,
-            previous_longitude,
-            current_latitude,
-            current_longitude,
-        ) {
+        if has_meaningful_gps_movement(distance_meters, speed_kmh) {
             return Ok(BehaviourClassificationDecision {
                 state: DeviceOperationalState::Moving,
                 source: BehaviourClassificationSource::Gps,
@@ -125,10 +117,8 @@ impl AdaptiveBehaviourService {
         let state = classify_device_state_from_motion(
             device_status,
             Some(motion_evidence),
-            previous_latitude,
-            previous_longitude,
-            current_latitude,
-            current_longitude,
+            distance_meters,
+            speed_kmh,
         );
 
         Ok(BehaviourClassificationDecision {
@@ -162,13 +152,20 @@ fn profile_is_valid(profile: &BehaviourProfile) -> bool {
     let statistics = &profile.statistics;
 
     statistics.sample_count >= REQUIRED_PROFILE_SAMPLE_COUNT
+        && statistics.average_vibration_score.is_finite()
+        && statistics.vibration_standard_deviation.is_finite()
         && statistics.average_gravity_deviation_g.is_finite()
         && statistics.gravity_deviation_standard_deviation.is_finite()
         && statistics.average_rotation_magnitude_dps.is_finite()
         && statistics.rotation_magnitude_standard_deviation.is_finite()
+        && statistics.average_vibration_score >= 0.0
+        && statistics.vibration_standard_deviation >= 0.0
         && statistics.average_gravity_deviation_g >= 0.0
+        && statistics.gravity_deviation_standard_deviation >= 0.0
         && statistics.average_rotation_magnitude_dps >= 0.0
-        && (statistics.average_gravity_deviation_g > 0.0
+        && statistics.rotation_magnitude_standard_deviation >= 0.0
+        && (statistics.average_vibration_score > 0.0
+            || statistics.average_gravity_deviation_g > 0.0
             || statistics.average_rotation_magnitude_dps > 0.0)
 }
 

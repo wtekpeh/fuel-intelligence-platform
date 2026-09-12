@@ -80,10 +80,8 @@ pub async fn process_motion_intelligence(
             vibration_sensor_id,
             Some("ONLINE"),
             motion_evidence,
-            previous_latitude,
-            previous_longitude,
-            Some(reading.latitude),
-            Some(reading.longitude),
+            distance_meters,
+            speed_kmh,
         )
         .await?;
 

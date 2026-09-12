@@ -7,6 +7,14 @@ use crate::domain::telemetry::motion_buffer::MotionEvidence;
 /// It should later be calibrated using real vehicle telemetry.
 const GPS_MOVEMENT_THRESHOLD_METERS: f64 = 10.0;
 
+/// Minimum GPS-derived speed required before displacement is treated as
+/// meaningful vehicle travel.
+///
+/// This matches the operational behaviour learning definition of
+/// meaningful GPS movement. Requiring both displacement and speed reduces
+/// false MOVING classifications caused by low-speed GNSS position drift.
+const GPS_MOVEMENT_SPEED_THRESHOLD_KMH: f64 = 5.0;
+
 /// Rolling vibration level that indicates stationary operational activity.
 ///
 /// For a vehicle, this can represent engine vibration while the vehicle
@@ -51,7 +59,7 @@ impl DeviceOperationalState {
 /// Classification priority:
 ///
 /// 1. OFFLINE remains the highest-priority state.
-/// 2. Meaningful GPS displacement confirms that the asset is MOVING.
+/// 2. Meaningful GPS displacement and speed confirm that the asset is MOVING.
 /// 3. Sustained rolling IMU motion also confirms MOVING.
 /// 4. Non-sustained vibration indicates IDLE.
 /// 5. Low vibration with no GPS movement indicates PARKED.
@@ -61,12 +69,8 @@ impl DeviceOperationalState {
 pub fn classify_device_state_from_motion(
     device_status: Option<&str>,
     motion_evidence: Option<&MotionEvidence>,
-
-    previous_latitude: Option<f64>,
-    previous_longitude: Option<f64>,
-
-    current_latitude: Option<f64>,
-    current_longitude: Option<f64>,
+    distance_meters: Option<f64>,
+    speed_kmh: Option<f64>,
 ) -> DeviceOperationalState {
     if matches!(device_status, Some("OFFLINE")) {
         return DeviceOperationalState::Offline;
@@ -76,12 +80,7 @@ pub fn classify_device_state_from_motion(
         return DeviceOperationalState::Unknown;
     };
 
-    let gps_moved = has_meaningful_gps_displacement(
-        previous_latitude,
-        previous_longitude,
-        current_latitude,
-        current_longitude,
-    );
+    let gps_moved = has_meaningful_gps_movement(distance_meters, speed_kmh);
 
     if gps_moved {
         DeviceOperationalState::Moving
@@ -158,6 +157,29 @@ pub fn has_meaningful_gps_displacement(
             let distance_meters = calculate_distance_meters(prev_lat, prev_lon, curr_lat, curr_lon);
 
             distance_meters >= GPS_MOVEMENT_THRESHOLD_METERS
+        }
+        _ => false,
+    }
+}
+
+/// Determines whether the already-calculated GPS movement represents
+/// meaningful vehicle travel.
+///
+/// Distance alone is not sufficient because a stationary GNSS receiver can
+/// accumulate position drift. Requiring both meaningful displacement and
+/// meaningful speed rejects low-speed displacement noise.
+///
+/// This is not a complete GNSS outlier detector; an unusually large position
+/// jump over a short interval can still produce an apparently meaningful
+/// derived speed.
+///
+/// `None` means that movement could not be calculated, for example when no
+/// previous telemetry position exists.
+pub fn has_meaningful_gps_movement(distance_meters: Option<f64>, speed_kmh: Option<f64>) -> bool {
+    match (distance_meters, speed_kmh) {
+        (Some(distance_meters), Some(speed_kmh)) => {
+            distance_meters >= GPS_MOVEMENT_THRESHOLD_METERS
+                && speed_kmh >= GPS_MOVEMENT_SPEED_THRESHOLD_KMH
         }
         _ => false,
     }
@@ -245,56 +267,75 @@ mod tests {
     }
 
     #[test]
+    fn meaningful_gps_movement_requires_distance_and_speed() {
+        assert!(has_meaningful_gps_movement(Some(12.0), Some(8.0),));
+    }
+
+    #[test]
+    fn gps_position_jump_without_meaningful_speed_is_not_movement() {
+        assert!(!has_meaningful_gps_movement(Some(12.0), Some(0.8),));
+    }
+
+    #[test]
+    fn meaningful_speed_without_enough_distance_is_not_movement() {
+        assert!(!has_meaningful_gps_movement(Some(5.0), Some(20.0),));
+    }
+
+    #[test]
+    fn missing_gps_movement_values_do_not_confirm_movement() {
+        assert!(!has_meaningful_gps_movement(None, Some(20.0)));
+        assert!(!has_meaningful_gps_movement(Some(20.0), None));
+    }
+
+    #[test]
     fn motion_classifier_preserves_offline_state() {
         let evidence = moving_motion_evidence();
 
-        let state = classify_device_state_from_motion(
-            Some("OFFLINE"),
-            Some(&evidence),
-            None,
-            None,
-            None,
-            None,
-        );
+        let state = classify_device_state_from_motion(Some("OFFLINE"), Some(&evidence), None, None);
 
         assert_eq!(state, DeviceOperationalState::Offline);
     }
 
     #[test]
     fn motion_classifier_returns_unknown_without_motion_evidence() {
-        let state = classify_device_state_from_motion(Some("ONLINE"), None, None, None, None, None);
+        let state = classify_device_state_from_motion(Some("ONLINE"), None, None, None);
 
         assert_eq!(state, DeviceOperationalState::Unknown);
     }
 
     #[test]
-    fn motion_classifier_classifies_gps_displacement_as_moving() {
+    fn motion_classifier_classifies_meaningful_gps_movement_as_moving() {
         let evidence = parked_motion_evidence();
 
         let state = classify_device_state_from_motion(
             Some("ONLINE"),
             Some(&evidence),
-            Some(51.8773689),
-            Some(-0.4309177),
-            Some(51.8767586),
-            Some(-0.4311118),
+            Some(15.0),
+            Some(8.0),
         );
 
         assert_eq!(state, DeviceOperationalState::Moving);
     }
 
     #[test]
-    fn motion_classifier_classifies_sustained_motion_as_moving() {
-        let evidence = moving_motion_evidence();
+    fn motion_classifier_does_not_treat_slow_gps_displacement_as_moving() {
+        let evidence = parked_motion_evidence();
 
         let state = classify_device_state_from_motion(
             Some("ONLINE"),
             Some(&evidence),
-            None,
-            None,
-            None,
-            None,
+            Some(15.0),
+            Some(0.8),
         );
+
+        assert_eq!(state, DeviceOperationalState::Parked);
+    }
+
+    #[test]
+    fn motion_classifier_classifies_sustained_motion_as_moving() {
+        let evidence = moving_motion_evidence();
+
+        let state = classify_device_state_from_motion(Some("ONLINE"), Some(&evidence), None, None);
 
         assert_eq!(state, DeviceOperationalState::Moving);
     }
@@ -303,14 +344,7 @@ mod tests {
     fn motion_classifier_classifies_non_sustained_vibration_as_idle() {
         let evidence = idle_motion_evidence();
 
-        let state = classify_device_state_from_motion(
-            Some("ONLINE"),
-            Some(&evidence),
-            None,
-            None,
-            None,
-            None,
-        );
+        let state = classify_device_state_from_motion(Some("ONLINE"), Some(&evidence), None, None);
 
         assert_eq!(state, DeviceOperationalState::Idle);
     }
@@ -319,29 +353,20 @@ mod tests {
     fn motion_classifier_classifies_low_vibration_as_parked() {
         let evidence = parked_motion_evidence();
 
-        let state = classify_device_state_from_motion(
-            Some("ONLINE"),
-            Some(&evidence),
-            None,
-            None,
-            None,
-            None,
-        );
+        let state = classify_device_state_from_motion(Some("ONLINE"), Some(&evidence), None, None);
 
         assert_eq!(state, DeviceOperationalState::Parked);
     }
 
     #[test]
-    fn motion_classifier_ignores_small_gps_displacement() {
+    fn motion_classifier_ignores_insufficient_gps_displacement() {
         let evidence = parked_motion_evidence();
 
         let state = classify_device_state_from_motion(
             Some("ONLINE"),
             Some(&evidence),
-            Some(51.8776000),
-            Some(-0.4292000),
-            Some(51.8776050),
-            Some(-0.4292050),
+            Some(5.0),
+            Some(20.0),
         );
 
         assert_eq!(state, DeviceOperationalState::Parked);

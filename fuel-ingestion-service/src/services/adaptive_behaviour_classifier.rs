@@ -3,12 +3,19 @@ use crate::{
     services::device_state::DeviceOperationalState,
 };
 
-/// Lowest standard deviation allowed when normalising a metric.
+/// Lowest learned scale allowed when normalising a physical metric.
 ///
-/// Learned profiles can sometimes have extremely small or zero variance.
-/// Applying this floor prevents division by zero and prevents one nearly
-/// constant metric from dominating the complete similarity score.
-const MINIMUM_STANDARD_DEVIATION: f64 = 0.000_001;
+/// Some behaviour profiles can be extremely stable, particularly PARKED.
+/// A small floor protects the calculation when every learned profile has
+/// zero or near-zero variance for a metric.
+const MINIMUM_NORMALISATION_SCALE: f64 = 0.000_001;
+
+#[derive(Debug, Clone, Copy)]
+struct AdaptiveNormalisationScales {
+    vibration: f64,
+    gravity_deviation: f64,
+    rotation_magnitude: f64,
+}
 
 /// Result produced when live motion evidence is compared against one
 /// or more learned operational behaviour profiles.
@@ -35,12 +42,15 @@ pub fn classify_from_learned_profiles(
     motion_evidence: &MotionEvidence,
     profiles: &[BehaviourProfile],
 ) -> Option<AdaptiveBehaviourClassification> {
+    let normalisation_scales = calculate_normalisation_scales(profiles);
+
     profiles
         .iter()
         .filter_map(|profile| {
             let classified_state = behaviour_profile_state(profile)?;
 
-            let distance = calculate_profile_distance(motion_evidence, profile);
+            let distance =
+                calculate_profile_distance(motion_evidence, profile, &normalisation_scales);
 
             Some(AdaptiveBehaviourClassification {
                 classified_state,
@@ -54,35 +64,65 @@ pub fn classify_from_learned_profiles(
 /// Calculates a normalised Euclidean distance between current motion
 /// evidence and one learned behaviour profile.
 ///
-/// The first adaptive classifier deliberately uses the two pre-deadband
-/// physical metrics that have now been validated with real hardware:
+/// The adaptive classifier compares three learned physical metrics:
 ///
+/// - vibration score
 /// - gravity deviation
 /// - gyroscope-vector magnitude
 ///
-/// Vibration score and motion ratio remain available to the fallback
-/// classifier while PARKED, IDLE, and MOVING physical profiles are
-/// collected and validated.
-fn calculate_profile_distance(motion_evidence: &MotionEvidence, profile: &BehaviourProfile) -> f64 {
+/// Each metric uses a shared normalisation scale derived from the complete
+/// set of learned behaviour profiles. This prevents a high-variance profile
+/// from gaining an artificial advantage simply because its own standard
+/// deviation is larger.
+///
+/// Motion ratio and sustained-motion evidence remain available to the
+/// rule-based fallback classifier.
+fn calculate_profile_distance(
+    motion_evidence: &MotionEvidence,
+    profile: &BehaviourProfile,
+    normalisation_scales: &AdaptiveNormalisationScales,
+) -> f64 {
     let statistics = &profile.statistics;
 
-    let gravity_standard_deviation = statistics
-        .gravity_deviation_standard_deviation
-        .max(MINIMUM_STANDARD_DEVIATION);
-
-    let rotation_standard_deviation = statistics
-        .rotation_magnitude_standard_deviation
-        .max(MINIMUM_STANDARD_DEVIATION);
+    let vibration_distance = (motion_evidence.average_vibration_score
+        - statistics.average_vibration_score)
+        / normalisation_scales.vibration;
 
     let gravity_distance = (motion_evidence.average_gravity_deviation_g
         - statistics.average_gravity_deviation_g)
-        / gravity_standard_deviation;
+        / normalisation_scales.gravity_deviation;
 
     let rotation_distance = (motion_evidence.average_rotation_magnitude_dps
         - statistics.average_rotation_magnitude_dps)
-        / rotation_standard_deviation;
+        / normalisation_scales.rotation_magnitude;
 
-    (gravity_distance.powi(2) + rotation_distance.powi(2)).sqrt()
+    (vibration_distance.powi(2) + gravity_distance.powi(2) + rotation_distance.powi(2)).sqrt()
+}
+
+fn calculate_normalisation_scales(profiles: &[BehaviourProfile]) -> AdaptiveNormalisationScales {
+    let vibration = profiles
+        .iter()
+        .map(|profile| profile.statistics.vibration_standard_deviation)
+        .fold(0.0_f64, f64::max)
+        .max(MINIMUM_NORMALISATION_SCALE);
+
+    let gravity_deviation = profiles
+        .iter()
+        .map(|profile| profile.statistics.gravity_deviation_standard_deviation)
+        .fold(0.0_f64, f64::max)
+        .max(MINIMUM_NORMALISATION_SCALE);
+
+    let rotation_magnitude = profiles
+        .iter()
+        .map(|profile| profile.statistics.rotation_magnitude_standard_deviation)
+        .fold(0.0_f64, f64::max)
+        .max(MINIMUM_NORMALISATION_SCALE);
+
+    AdaptiveNormalisationScales {
+        vibration,
+        gravity_deviation,
+        rotation_magnitude,
+    }
 }
 
 fn behaviour_profile_state(profile: &BehaviourProfile) -> Option<DeviceOperationalState> {
@@ -242,5 +282,48 @@ mod tests {
 
         assert!(result.distance.is_finite());
         assert_eq!(result.distance, 0.0);
+    }
+
+    #[test]
+    fn broad_moving_variance_does_not_attract_stationary_evidence() {
+        let mut parked = profile(BehaviourType::Parked, 0.06895, 2.6457);
+        parked.statistics.average_vibration_score = 0.0;
+        parked.statistics.vibration_standard_deviation = 0.0;
+        parked.statistics.gravity_deviation_standard_deviation = 0.000365;
+        parked.statistics.rotation_magnitude_standard_deviation = 0.00814;
+
+        let mut idle = profile(BehaviourType::Idle, 0.07370, 2.6374);
+        idle.statistics.average_vibration_score = 0.0100;
+        idle.statistics.vibration_standard_deviation = 0.00834;
+        idle.statistics.gravity_deviation_standard_deviation = 0.00272;
+        idle.statistics.rotation_magnitude_standard_deviation = 0.0711;
+
+        let mut moving = profile(BehaviourType::Moving, 0.08499, 4.7682);
+        moving.statistics.average_vibration_score = 0.4900;
+        moving.statistics.vibration_standard_deviation = 0.2943;
+        moving.statistics.gravity_deviation_standard_deviation = 0.01430;
+        moving.statistics.rotation_magnitude_standard_deviation = 1.6995;
+
+        // This represents quiet stationary evidence that has drifted somewhat
+        // away from the extremely narrow PARKED profile.
+        //
+        // Under per-profile normalisation, MOVING could become artificially
+        // attractive because its learned variance is much wider.
+        let evidence = MotionEvidence {
+            average_vibration_score: 0.005,
+            average_gravity_deviation_g: 0.072,
+            average_rotation_magnitude_dps: 2.66,
+            motion_ratio: 0.0,
+            average_confidence: 0.0,
+            sustained_motion: false,
+            sample_count: 5,
+        };
+
+        let result = classify_from_learned_profiles(&evidence, &[parked, idle.clone(), moving])
+            .expect("profiles should produce a classification");
+
+        assert_eq!(result.classified_state, DeviceOperationalState::Idle);
+
+        assert_eq!(result.matched_profile_id, idle.id);
     }
 }
