@@ -6,15 +6,15 @@ export interface FuelEvent {
   fuel_before: number;
   fuel_after: number;
   fuel_difference: number;
-  duration_seconds: number | null;
+  duration_seconds: number;
   latitude: number | null;
   longitude: number | null;
   is_delayed_detection: boolean;
   sync_delay_seconds: number;
   severity: string;
-  confidence: string;
-  correlation_status: string;
-  correlation_reason: string;
+  confidence: string | null;
+  correlation_status: string | null;
+  correlation_reason: string | null;
   message: string;
 }
 
@@ -34,7 +34,7 @@ export interface SensorHealthEvent {
   event_type: string;
   severity: string;
   reason: string;
-  first_seen_at: string;
-  last_seen_at: string;
+  first_seen_at: string | null;
+  last_seen_at: string | null;
   detected_at: string;
 }

@@ -16,6 +16,11 @@ function FuelEventDetails({ event }: { event: FuelEvent }) {
   const clockDifferenceMinutes = Math.abs(
     Math.round((telemetryTime.getTime() - detectionTime.getTime()) / 60000),
   );
+
+  const confidence = event.confidence ?? "Unknown";
+  const correlationStatus = event.correlation_status ?? "Unknown";
+  const correlationReason =
+    event.correlation_reason ?? "No operational correlation context available.";
   return (
     <div className="investigation-detail__grid">
       <div>
@@ -37,20 +42,20 @@ function FuelEventDetails({ event }: { event: FuelEvent }) {
         <label>Confidence</label>
 
         <strong
-          className={`investigation-confidence investigation-confidence--${event.confidence.toLowerCase()}`}
+          className={`investigation-confidence investigation-confidence--${confidence.toLowerCase()}`}
         >
-          {event.confidence}
+          {confidence}
         </strong>
       </div>
 
       <div>
         <label>Correlation Status</label>
-        <strong>{event.correlation_status}</strong>
+        <strong>{correlationStatus}</strong>
       </div>
 
       <div>
         <label>Operational Context</label>
-        <strong>{event.correlation_reason}</strong>
+        <strong>{correlationReason}</strong>
       </div>
 
       <div>
@@ -97,7 +102,13 @@ function DeviceStateDetails({ event }: { event: DeviceStateEvent }) {
 
       <div>
         <label>Motion</label>
-        <strong>{event.motion_detected ? "Detected" : "Not detected"}</strong>
+        <strong>
+          {event.motion_detected === null
+            ? "Unknown"
+            : event.motion_detected
+              ? "Detected"
+              : "Not detected"}
+        </strong>
       </div>
 
       <div>
@@ -108,7 +119,7 @@ function DeviceStateDetails({ event }: { event: DeviceStateEvent }) {
       <div>
         <label>GPS</label>
         <strong>
-          {event.latitude && event.longitude
+          {event.latitude !== null && event.longitude !== null
             ? `${event.latitude}, ${event.longitude}`
             : "N/A"}
         </strong>
@@ -132,12 +143,20 @@ function SensorHealthDetails({ event }: { event: SensorHealthEvent }) {
 
       <div>
         <label>First Seen</label>
-        <strong>{new Date(event.first_seen_at).toLocaleString()}</strong>
+        <strong>
+          {event.first_seen_at
+            ? new Date(event.first_seen_at).toLocaleString()
+            : "N/A"}
+        </strong>
       </div>
 
       <div>
         <label>Last Seen</label>
-        <strong>{new Date(event.last_seen_at).toLocaleString()}</strong>
+        <strong>
+          {event.last_seen_at
+            ? new Date(event.last_seen_at).toLocaleString()
+            : "N/A"}
+        </strong>
       </div>
 
       <div>

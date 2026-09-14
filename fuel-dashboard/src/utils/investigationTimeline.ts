@@ -39,9 +39,9 @@ export function buildInvestigationTimeline(params: {
       title: event.event_type,
       subtitle: buildFuelEventSubtitle(event),
       severity:
-        event.confidence === "Critical" || event.severity === "critical"
+        event.severity === "critical" || event.severity === "high"
           ? "danger"
-          : event.confidence === "High"
+          : event.severity === "medium"
             ? "warning"
             : "neutral",
       raw: event,
@@ -54,9 +54,12 @@ export function buildInvestigationTimeline(params: {
       type: "device_state",
       timestamp: event.recorded_at,
       title: event.state,
-      subtitle: event.motion_detected
-        ? "Motion detected"
-        : "No motion detected",
+      subtitle:
+        event.motion_detected === null
+          ? "Motion status unavailable"
+          : event.motion_detected
+            ? "Motion detected"
+            : "No motion detected",
       severity:
         event.state === "MOVING"
           ? "good"
@@ -106,17 +109,18 @@ export function buildInvestigationTimeline(params: {
 
 function buildFuelEventSubtitle(event: FuelEvent) {
   const fuelChange = Math.abs(event.fuel_difference).toFixed(2);
+  const correlationStatus = event.correlation_status ?? "Unknown";
 
   if (event.event_type === "REFILL") {
-    return `${fuelChange}L fuel increase detected. Correlation: ${event.correlation_status}.`;
+    return `${fuelChange}L fuel increase detected. Correlation: ${correlationStatus}.`;
   }
 
   if (event.event_type === "THEFT") {
-    return `${fuelChange}L fuel drop detected. Correlation: ${event.correlation_status}.`;
+    return `${fuelChange}L fuel drop detected. Correlation: ${correlationStatus}.`;
   }
 
   if (event.event_type === "LEAK") {
-    return `${fuelChange}L gradual fuel loss detected. Correlation: ${event.correlation_status}.`;
+    return `${fuelChange}L gradual fuel loss detected. Correlation: ${correlationStatus}.`;
   }
 
   return event.message;

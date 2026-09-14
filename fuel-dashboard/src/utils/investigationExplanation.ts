@@ -37,16 +37,17 @@ export function explainInvestigationCluster(
 
   if (theftEvents.length > 0 && stateEvents.length > 0) {
     return (
-      "Fuel theft behavior appears operationally " +
-      "consistent with surrounding movement and " +
-      "device state telemetry."
+      "Fuel theft activity occurred alongside " +
+      "device state telemetry within this " +
+      "investigation window."
     );
   }
 
   if (refillEvents.length > 0 && stateEvents.length > 0) {
     return (
-      "Fuel refill activity was correlated with " +
-      "device movement and operational telemetry."
+      "Fuel refill activity occurred alongside " +
+      "device state telemetry within this " +
+      "investigation window."
     );
   }
 

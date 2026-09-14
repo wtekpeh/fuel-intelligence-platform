@@ -180,7 +180,11 @@ function FuelEventMarker({
             Detection Time: {new Date(event.detected_at).toLocaleString()}
           </div>
 
-          <div>Context: {event.correlation_reason}</div>
+          <div>
+            Context:{" "}
+            {event.correlation_reason ??
+              "No operational correlation context available."}
+          </div>
         </div>
       </Popup>
     </CircleMarker>
