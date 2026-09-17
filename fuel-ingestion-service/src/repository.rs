@@ -1854,19 +1854,53 @@ pub async fn get_recent_telemetry_stream(
     let rows = sqlx::query!(
         r#"
         SELECT
-            device_id,
-            value AS fuel_level_litres,
-            latitude,
-            longitude,
-            vibration_level,
-            motion_detected,
-            recorded_at,
-            received_at
-        FROM sensor_readings
+            fuel_reading.device_id,
+
+            fuel_reading.value AS fuel_level_litres,
+
+            gps_reading.latitude,
+            gps_reading.longitude,
+
+            vibration_reading.vibration_level,
+            vibration_reading.motion_detected,
+
+            fuel_reading.recorded_at,
+
+            GREATEST(
+                fuel_reading.received_at,
+                COALESCE(gps_reading.received_at, fuel_reading.received_at),
+                COALESCE(vibration_reading.received_at, fuel_reading.received_at)
+            ) AS "received_at!"
+
+        FROM sensor_readings fuel_reading
+
+        INNER JOIN sensors fuel_sensor
+            ON fuel_sensor.id = fuel_reading.sensor_id
+            AND fuel_sensor.sensor_type = 'FUEL'
+
+        LEFT JOIN (
+            sensor_readings gps_reading
+            INNER JOIN sensors gps_sensor
+                ON gps_sensor.id = gps_reading.sensor_id
+                AND gps_sensor.sensor_type = 'GPS'
+        )
+            ON gps_reading.device_id = fuel_reading.device_id
+            AND gps_reading.recorded_at = fuel_reading.recorded_at
+
+        LEFT JOIN (
+            sensor_readings vibration_reading
+            INNER JOIN sensors vibration_sensor
+                ON vibration_sensor.id = vibration_reading.sensor_id
+                AND vibration_sensor.sensor_type = 'VIBRATION'
+        )
+            ON vibration_reading.device_id = fuel_reading.device_id
+            AND vibration_reading.recorded_at = fuel_reading.recorded_at
+
         WHERE
-            $1::uuid IS NULL
-            OR device_id = $1
-        ORDER BY received_at DESC
+            ($1::uuid IS NULL OR fuel_reading.device_id = $1)
+
+        ORDER BY fuel_reading.recorded_at DESC
+
         LIMIT 10
         "#,
         device_id
@@ -2649,21 +2683,54 @@ pub async fn get_telemetry_history(
         TelemetryStreamResponse,
         r#"
         SELECT
-            s.device_id,
-            sr.recorded_at,
-            sr.received_at,
-            sr.value AS fuel_level_litres,
-            sr.latitude,
-            sr.longitude,
-            sr.vibration_level,
-            sr.motion_detected
-        FROM sensor_readings sr
-        JOIN sensors s ON s.id = sr.sensor_id
+            fuel_reading.device_id,
+
+            fuel_reading.value AS fuel_level_litres,
+
+            gps_reading.latitude,
+            gps_reading.longitude,
+
+            vibration_reading.vibration_level,
+            vibration_reading.motion_detected,
+
+            fuel_reading.recorded_at,
+
+            GREATEST(
+                fuel_reading.received_at,
+                COALESCE(gps_reading.received_at, fuel_reading.received_at),
+                COALESCE(vibration_reading.received_at, fuel_reading.received_at)
+            ) AS "received_at!"
+
+        FROM sensor_readings fuel_reading
+
+        INNER JOIN sensors fuel_sensor
+            ON fuel_sensor.id = fuel_reading.sensor_id
+            AND fuel_sensor.sensor_type = 'FUEL'
+
+        LEFT JOIN (
+            sensor_readings gps_reading
+            INNER JOIN sensors gps_sensor
+                ON gps_sensor.id = gps_reading.sensor_id
+                AND gps_sensor.sensor_type = 'GPS'
+        )
+            ON gps_reading.device_id = fuel_reading.device_id
+            AND gps_reading.recorded_at = fuel_reading.recorded_at
+
+        LEFT JOIN (
+            sensor_readings vibration_reading
+            INNER JOIN sensors vibration_sensor
+                ON vibration_sensor.id = vibration_reading.sensor_id
+                AND vibration_sensor.sensor_type = 'VIBRATION'
+        )
+            ON vibration_reading.device_id = fuel_reading.device_id
+            AND vibration_reading.recorded_at = fuel_reading.recorded_at
+
         WHERE
-            s.device_id = $1
-            AND sr.recorded_at >= $2
-            AND sr.recorded_at <= $3
-        ORDER BY sr.recorded_at ASC
+            fuel_reading.device_id = $1
+            AND fuel_reading.recorded_at >= $2
+            AND fuel_reading.recorded_at <= $3
+
+        ORDER BY fuel_reading.recorded_at ASC
         "#,
         device_id,
         start_time,

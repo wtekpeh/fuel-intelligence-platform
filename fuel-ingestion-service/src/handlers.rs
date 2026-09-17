@@ -2,8 +2,10 @@ use crate::{
     routes::AppState,
     services::telemetry::{
         fuel_service::persist_fuel_reading, motion_service::process_motion_intelligence,
+        vibration_service::persist_vibration_reading,
     },
 };
+
 use axum::{
     extract::{Json, Path, Query, State},
     http::StatusCode,
@@ -120,6 +122,22 @@ pub async fn ingest_reading_batch(
             if let (Some(vibration_sensor_id), Some(processed)) =
                 (context.vibration_sensor_id, processed)
             {
+                // Preserve the continuous physical vibration observation for this
+                // telemetry reading.
+                //
+                // This is intentionally persisted against the dedicated VIBRATION
+                // sensor rather than being embedded into the FUEL sensor reading.
+                persist_vibration_reading(
+                    db_pool,
+                    device_id,
+                    vibration_sensor_id,
+                    reading,
+                    &processed.imu_interpretation,
+                )
+                .await?;
+
+                // Use the same interpreted IMU observation as evidence for operational
+                // motion intelligence.
                 process_motion_intelligence(
                     db_pool,
                     app_state.behaviour_learning.as_ref(),
