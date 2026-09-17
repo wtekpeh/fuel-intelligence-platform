@@ -115,7 +115,7 @@ function mapFuelEventSeverityToTimelineSeverity(
   }
 
   if (normalizedSeverity === "low") {
-    return "good";
+    return "neutral";
   }
 
   return "neutral";

@@ -31,9 +31,12 @@ interface AnalyticsStore {
 
   fetchGeofenceUtilization: (days?: number) => Promise<void>;
 
-  fetchGeofenceActivityTrends: (days?: number) => Promise<void>;
+  fetchGeofenceActivityTrends: (
+    days?: number,
+    deviceId?: string,
+  ) => Promise<void>;
 
-  fetchAlertTrends: (days?: number) => Promise<void>;
+  fetchAlertTrends: (days?: number, deviceId?: string) => Promise<void>;
 
   fetchDeviceHealthTrends: (days?: number) => Promise<void>;
 }
@@ -59,14 +62,14 @@ export const useAnalyticsStore = create<AnalyticsStore>((set) => ({
     });
   },
 
-  fetchAlertTrends: async (days: number = 30) => {
+  fetchAlertTrends: async (days: number = 30, deviceId?: string) => {
     set({
       loadingAlertTrends: true,
       alertTrendsError: null,
     });
 
     try {
-      const data = await getAlertTrends(days);
+      const data = await getAlertTrends(days, deviceId);
 
       set({
         alertTrends: data,
@@ -82,14 +85,14 @@ export const useAnalyticsStore = create<AnalyticsStore>((set) => ({
     }
   },
 
-  fetchGeofenceActivityTrends: async (days: number = 30) => {
+  fetchGeofenceActivityTrends: async (days: number = 30, deviceId?: string) => {
     set({
       loadingGeofenceActivityTrends: true,
       geofenceActivityTrendsError: null,
     });
 
     try {
-      const data = await getGeofenceActivityTrends(days);
+      const data = await getGeofenceActivityTrends(days, deviceId);
 
       set({
         geofenceActivityTrends: data,

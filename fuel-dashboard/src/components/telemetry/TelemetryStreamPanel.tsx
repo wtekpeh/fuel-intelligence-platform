@@ -68,7 +68,13 @@ export function TelemetryStreamPanel() {
                 <div>
                   <label>Motion</label>
 
-                  <strong>{reading.motion_detected ? "ACTIVE" : "IDLE"}</strong>
+                  <strong>
+                    {reading.motion_detected === null
+                      ? "UNKNOWN"
+                      : reading.motion_detected
+                        ? "DETECTED"
+                        : "NOT DETECTED"}
+                  </strong>
                 </div>
               </div>
 

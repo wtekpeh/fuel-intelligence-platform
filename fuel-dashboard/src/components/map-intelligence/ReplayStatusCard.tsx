@@ -148,7 +148,11 @@ function ReplayStatusCard() {
             ? "🚗 Moving"
             : event.state === "IDLE"
               ? "🟡 Idle"
-              : "🅿️ Parked",
+              : event.state === "PARKED"
+                ? "🅿️ Parked"
+                : event.state === "OFFLINE"
+                  ? "🔴 Offline"
+                  : "⚪ Unknown",
       })),
   ]
     .sort(
@@ -229,7 +233,11 @@ function ReplayStatusCard() {
             ? "🚗 Moving"
             : activeDeviceStateEvent.state === "IDLE"
               ? "🟡 Idle"
-              : "🅿️ Parked"}
+              : activeDeviceStateEvent.state === "PARKED"
+                ? "🅿️ Parked"
+                : activeDeviceStateEvent.state === "OFFLINE"
+                  ? "🔴 Offline"
+                  : "⚪ Unknown"}
         </span>
       )}
 

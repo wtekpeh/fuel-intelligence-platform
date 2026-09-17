@@ -1,37 +1,43 @@
-# Fuel Dashboard
+# ORBI Sensor Intelligence Dashboard
 
 ## Overview
 
-The Fuel Dashboard is the React + TypeScript frontend for the Sensor Intelligence Platform.
+The ORBI Sensor Intelligence Dashboard is the React + TypeScript operational
+frontend for the ORBI Sensor Intelligence Platform.
 
-The frontend is divided into two major application domains:
+The application has evolved beyond its original fuel-monitoring scope into a
+device-aware operational intelligence system designed to consume telemetry from
+physical ORBI hardware.
 
-- Platform Administration
-- Operational Intelligence
+The platform separates two major concerns:
 
-Platform Administration manages organizations, assets, device inventory,
-device provisioning, and lifecycle management.
+```text
+Platform Administration
+        ↓
+Physical ORBI Devices
+        ↓
+Operational Intelligence
+```
 
-Operational Intelligence provides live telemetry, investigation,
-mapping, analytics, and operational decision support.
+Platform Administration manages the business and hardware relationships required
+to deploy ORBI devices.
 
-It provides a professional operational interface for:
+Operational Intelligence consumes telemetry from provisioned devices and provides
+live monitoring, investigation, spatial intelligence, replay, analytics, and
+operational decision support.
 
-- live fuel telemetry visibility
-- operational alert monitoring
-- incident acknowledgment
-- incident resolution
-- device health monitoring
-- mobile-friendly field usage
-
-The dashboard is designed to support both:
+The frontend is designed for:
 
 - desktop operations centres
-- mobile field supervisors through future Capacitor Android/iOS packaging
+- tablet-based operational review
+- mobile field supervision
+- future Capacitor Android/iOS packaging
 
 ---
 
-# Current Stack
+# Technology Stack
+
+Current frontend stack:
 
 - React
 - TypeScript
@@ -39,165 +45,812 @@ The dashboard is designed to support both:
 - Zustand
 - Axios
 - WebSocket
+- Leaflet
+- Turf.js
 - CSS
+
+Backend integration:
+
+- Rust
+- Axum
+- Tokio
+- SQLx
+- PostgreSQL
+- PostGIS
 
 ---
 
-# Current Features
+# Application Architecture
 
-## Live Operations Dashboard
+The operational application follows the hierarchy:
 
-The main dashboard provides:
+```text
+Landing Page
+        ↓
+Organization Overview
+        ↓
+Fleet Overview
+        ↓
+Device Selection
+        ↓
+Device-Specific Operational Dashboard
+```
+
+Operational data is scoped to the selected physical device.
+
+This prevents telemetry, alerts, health events, and investigation data from
+different devices from being mixed together in the same operational context.
+
+Current device-aware operational feeds include:
+
+```text
+telemetry
+alerts
+device health
+fuel events
+device state events
+sensor health events
+geofence transitions
+live WebSocket alerts
+analytics where device filtering is supported
+```
+
+---
+
+# Shared Operational State Architecture
+
+The frontend uses application-scoped Zustand state and shared orchestration for:
+
+```text
+selected operational device
+telemetry
+alerts
+investigation intelligence
+analytics intelligence
+selected analytics period
+map/replay state
+```
+
+This prevents individual dashboard components from creating competing copies of
+the same operational data.
+
+Shared operational state is consumed across surfaces such as:
+
+```text
+Operations
+Fleet Overview
+Investigation
+Map Intelligence
+Replay Intelligence
+Analytics
+```
+
+---
+
+# Telemetry Architecture
+
+ORBI telemetry is capability-aware.
+
+Physical devices can contain multiple sensor capabilities including:
+
+```text
+GPS
+FUEL
+VIBRATION
+KILL_SWITCH
+```
+
+The operational telemetry read model composes the sensor observations required
+by the dashboard into a single device observation.
+
+For the Fuel Intelligence Kit, the current operational composition is:
+
+```text
+FUEL observation
+      +
+GPS observation
+      +
+VIBRATION observation
+      ↓
+TelemetryStreamReading
+```
+
+The frontend telemetry contract includes:
+
+```text
+device_id
+fuel_level_litres
+latitude
+longitude
+vibration_level
+motion_detected
+recorded_at
+received_at
+```
+
+## Live Telemetry
+
+Live telemetry uses:
+
+```http
+GET /api/fuel-readings/recent?device_id={device_id}
+```
+
+The dashboard currently polls telemetry every:
+
+```text
+5 seconds
+```
+
+Recent telemetry is ordered by physical observation time so delayed telemetry
+replayed from device storage does not redefine the chronology of the live
+physical state.
+
+## Historical Telemetry
+
+Replay Intelligence uses:
+
+```http
+GET /api/fuel-readings/history
+```
+
+Historical telemetry is composed into one operational replay observation per
+physical telemetry timestamp.
+
+This prevents individual GPS, FUEL, and VIBRATION sensor rows from becoming
+separate replay frames.
+
+Historical observations created before continuous vibration persistence can
+legitimately contain:
+
+```text
+vibration_level = null
+motion_detected = null
+```
+
+The frontend preserves these values as unknown rather than fabricating sensor
+measurements.
+
+---
+
+# Vibration and Motion Semantics
+
+Raw vibration telemetry and operational device state are intentionally separate
+concepts.
+
+Raw telemetry provides:
+
+```text
+vibration_level
+motion_detected
+```
+
+Raw motion is interpreted as:
+
+```text
+true  → motion detected
+false → motion not detected
+null  → unknown
+```
+
+It must not be interpreted directly as:
+
+```text
+MOVING
+IDLE
+PARKED
+```
+
+Those states belong to the separate operational-state intelligence layer.
+
+Current operational states are:
+
+```text
+MOVING
+IDLE
+PARKED
+OFFLINE
+UNKNOWN
+```
+
+Operational state is derived by backend intelligence using telemetry evidence
+rather than directly exposing the raw `motion_detected` boolean.
+
+---
+
+# Operational Dashboard
+
+Current operational sections include:
+
+```text
+Operations
+Device Health
+Investigation
+Map Intelligence
+Replay Intelligence
+Analytics
+```
+
+The dashboard also integrates operational telemetry into Fleet Overview.
+
+---
+
+# Operations
+
+The Operations surface provides:
 
 - connection status
 - open alert count
 - critical alert count
 - resolved alert count
 - live telemetry preview
-- operational alert list
-- incident detail panel
+- operational alert monitoring
+- incident detail review
+- alert acknowledgement
+- alert resolution
+- navigation into Investigation Intelligence
 
-## Multi-Organization Operational Flow
+## Alert Lifecycle
 
-The frontend is now transitioning from a single global operational dashboard into a multi-organization operational intelligence platform.
-
-Current frontend hierarchy:
-
-```text
-Landing Page
-→ Organization Overview
-→ Fleet Overview
-→ Device Selection
-→ Device-Specific Operational Dashboard
-```
-
-The operational dashboard is now device-aware.
-
-This means dashboard operational data is scoped to the selected physical device instead of globally aggregating all telemetry.
-
-Current device-scoped frontend feeds:
+The current backend alert lifecycle is:
 
 ```text
-alerts
-telemetry
-device health
-live WebSocket alerts
+OPEN
+  ↓
+ACKNOWLEDGED
+  ↓
+RESOLVED
 ```
 
-The frontend now passes `device_id` into backend operational APIs.
-
-Current filtered backend endpoints:
+Supported actions:
 
 ```http
-GET /api/alerts?device_id={device_id}
+PATCH /api/alerts/{alert_id}/acknowledge
+PATCH /api/alerts/{alert_id}/resolve
+```
 
-GET /api/fuel-readings/recent?device_id={device_id}
+## Live Alert Streaming
 
+The frontend connects to:
+
+```text
+/ws/alerts
+```
+
+Current WebSocket message types include:
+
+```text
+live_alert
+recovery_alert
+alert_acknowledged
+heartbeat
+```
+
+WebSocket alerts are device-aware.
+
+The frontend automatically reconnects following temporary network or backend
+interruptions.
+
+---
+
+# Device Health
+
+Device health is available as a dedicated operational surface.
+
+Current device health states are:
+
+```text
+ONLINE
+STALE
+OFFLINE
+UNKNOWN
+```
+
+Device health events are retrieved using:
+
+```http
 GET /api/device-health-events?device_id={device_id}
+```
 
+Device health intelligence is also incorporated into Investigation and Replay
+workflows.
+
+---
+
+# Investigation Intelligence
+
+Investigation Intelligence reconstructs operational events around a selected
+physical device.
+
+Current investigation feeds include:
+
+```text
+fuel events
+device state events
+sensor health events
+geofence transition events
+```
+
+Current APIs:
+
+```http
 GET /api/fuel-events?device_id={device_id}
 
 GET /api/device-state-events?device_id={device_id}
 
 GET /api/sensor-health-events?device_id={device_id}
+
+GET /api/geofence-transition-events?device_id={device_id}
 ```
 
-This architecture prevents operational conflicts where:
+## Investigation Timeline
 
-- telemetry from multiple devices mixes together
-- alerts from unrelated devices appear in the selected dashboard
-- device health becomes operationally ambiguous
+Operational events are combined into an investigation timeline.
 
-WebSocket live alerts are also now filtered using `device_id` so dashboards only receive operational alerts relevant to the selected device context.
+Current capabilities include:
 
-This architecture provides the frontend foundation for future features such as:
+- fuel event investigation
+- device state event investigation
+- sensor health investigation
+- geofence transition investigation
+- clustered event grouping
+- operational risk scoring
+- investigation detail review
+- telemetry integrity interpretation
+- operational context explanation
+- mobile investigation modal behavior
+- alert-to-investigation navigation
+- investigation-to-map navigation
 
-- investigation timeline replay
-- operational reconstruction
-- route replay
-- device diagnostics
-- predictive maintenance
-- sensor analytics
-- operational heatmaps
-- forensic operational investigation
+## Investigation Clusters
+
+Related operational events can be grouped into investigation clusters.
+
+Current cluster risk classifications are:
+
+```text
+LOW
+MEDIUM
+HIGH
+CRITICAL
+```
+
+Cluster analysis can consider:
+
+- fuel events
+- device state activity
+- sensor health anomalies
+- geofence activity
+- operational severity
+- correlated telemetry activity
+
+## Fuel Event Intelligence
+
+Fuel event details can expose:
+
+```text
+fuel before
+fuel after
+fuel difference
+duration
+event time
+detection time
+severity
+confidence
+correlation status
+correlation reason
+delayed detection status
+synchronization delay
+location
+```
+
+Fuel-event severity, confidence, correlation, and alert severity are separate
+backend concepts and must not be conflated by the frontend.
+
+## Investigation Navigation
+
+Current workflow:
+
+```text
+Operations Alert
+        ↓
+View Investigation
+        ↓
+Investigation Timeline
+        ↓
+Cluster Prioritization
+        ↓
+Investigation Detail
+        ↓
+Operational Context Review
+```
+
+Where spatial information is available:
+
+```text
+Investigation Detail
+        ↓
+View on Map
+        ↓
+Map Intelligence
+```
+
+---
+
+# Map Intelligence
+
+Map Intelligence provides the spatial operational surface for selected-device
+telemetry and investigation data.
+
+Current capabilities include:
+
+- selected-device live positioning
+- telemetry-driven map positioning
+- investigation event overlays
+- geofence transition overlays
+- investigation-to-map synchronization
+- map-to-investigation synchronization
+- geofence-to-investigation synchronization
+- live fuel telemetry
+- vibration telemetry visibility
+- operational telemetry side intelligence
+- geofence rendering
+- operational polygon drawing
+- responsive map workspace
+
+Current map components include:
+
+```text
+src/components/map-intelligence/
+├── MapIntelligencePanel.tsx
+├── OperationalMap.tsx
+├── DeviceMarkerLayer.tsx
+├── InvestigationEventLayer.tsx
+├── GeofenceTransitionLayer.tsx
+├── MapFocusController.tsx
+├── GeofenceLayer.tsx
+├── GeofenceDrawControl.tsx
+└── GeofenceCreationCard.tsx
+```
+
+## Investigation Spatial Synchronization
+
+Current workflow:
+
+```text
+Investigation Selection
+        ↓
+selectedTimelineItem
+        ↓
+MapFocusController
+        ↓
+Map Fly-To
+        ↓
+Focused Marker
+        ↓
+Automatic Popup
+```
+
+---
+
+# Geofence Intelligence
+
+Geofences are persisted using PostgreSQL/PostGIS.
+
+Current spatial capabilities include:
+
+- polygon drawing
+- GeoJSON extraction
+- backend geofence persistence
+- PostGIS geometry storage
+- `ST_Contains` position checks
+- operational zone overlays
+- device-aware geofence filtering
+- ENTERED_ZONE transitions
+- EXITED_ZONE transitions
+- geofence transition polling
+- investigation integration
+- replay integration
+- geofence utilization analytics
+- zone visit frequency
+- most active zone intelligence
+- zone concentration classification
+
+Current architecture:
+
+```text
+Leaflet Draw
+      ↓
+GeoJSON
+      ↓
+Zustand Draw Orchestration
+      ↓
+Rust Geofence APIs
+      ↓
+PostgreSQL + PostGIS
+      ↓
+Spatial Intelligence
+      ↓
+Operational Investigation
+```
+
+Important coordinate rule:
+
+```text
+Leaflet  → latitude, longitude
+PostGIS  → longitude, latitude
+```
+
+Potential future geofence intelligence includes:
+
+- depot zones
+- fueling station zones
+- restricted operational zones
+- safe corridors
+- dwell-zone detection
+- theft outside safe zones
+- refill inside fueling zones
+- restricted-zone alerts
+- route corridor violations
+- route-risk analysis
+- unauthorized fueling detection
+
+---
+
+# Replay Intelligence
+
+Replay Intelligence reconstructs historical device operation from telemetry.
+
+Current replay components include:
+
+```text
+ReplayControls.tsx
+ReplayStatusCard.tsx
+ReplayMarkerLayer.tsx
+ReplayPlaybackController.tsx
+ReplayCameraController.tsx
+```
+
+Current capabilities include:
+
+- historical telemetry loading
+- today replay
+- yesterday replay
+- last 7 days replay
+- custom date-range replay
+- playback controls
+- replay speed control
+- scrubbing
+- camera follow
+- telemetry trail progression
+- breadcrumb intelligence
+- investigation replay
+- geofence correlation
+- fuel event correlation
+- device state correlation
+- alert correlation
+- device health correlation
+- replay event feed
+- automatic pause on correlated events
+- forensic reconstruction
+- investigation synchronization
+
+Current workflow:
+
+```text
+Investigation Event
+        ↓
+View on Map
+        ↓
+Investigation Replay
+        ↓
+Historical Telemetry
+        ↓
+Replay Reconstruction
+```
+
+Replay reconstruction can correlate:
+
+```text
+Telemetry Position
+        ↓
+Geofence Context
+
+Telemetry Position
+        ↓
+Fuel Event Context
+
+Telemetry Position
+        ↓
+Device State Context
+
+Telemetry Position
+        ↓
+Alert Context
+
+Telemetry Position
+        ↓
+Device Health Context
+```
+
+---
+
+# Journey Intelligence
+
+Journey Intelligence derives operational movement summaries from historical
+telemetry and spatial context.
+
+Current capabilities include:
+
+- journey distance calculation
+- journey duration calculation
+- replay point counting
+- visited-zone detection
+- zone visit frequency
+- last destination reporting
+
+Current outputs include:
+
+```text
+Distance Travelled
+Journey Duration
+Replay Points
+Visited Zones
+Zone Visit Counts
+Last Destination
+```
+
+Spatial distance calculations use Turf.js and GeoJSON LineStrings.
+
+Journey Intelligence is device-scoped and replay-aware.
+
+---
+
+# Analytics Intelligence
+
+Analytics is intentionally separated from raw operational event feeds.
+
+Operational endpoints provide:
+
+```text
+raw events
+telemetry
+investigation evidence
+```
+
+Analytics endpoints provide:
+
+```text
+aggregated intelligence
+trend analysis
+operational summaries
+```
+
+Current analytics capabilities include:
+
+- Alert Trends
+- Geofence Activity Trends
+- Device Health Trends
+- Geofence Utilization
+
+Current endpoints:
+
+```http
+GET /api/analytics/alert-trends
+
+GET /api/analytics/geofence-activity
+
+GET /api/analytics/device-health-trends
+
+GET /api/analytics/geofence-utilization
+```
+
+Shared analytics periods:
+
+```text
+Last 7 Days
+Last 30 Days
+Last 90 Days
+```
+
+## Analytics Scope
+
+Not every analytics endpoint has the same scope.
+
+Currently:
+
+```text
+Alert Trends
+→ optionally device-scoped
+
+Geofence Activity
+→ optionally device-scoped
+
+Device Health Trends
+→ fleet-wide
+
+Geofence Utilization
+→ fleet-wide
+```
+
+The frontend preserves these backend scope semantics rather than pretending
+every analytics surface is selected-device-specific.
 
 ---
 
 # Platform Administration
 
-The frontend now includes a dedicated Platform Administration workspace
-that is independent from the Operational Intelligence dashboard.
+Platform Administration is conceptually separate from Operational Intelligence.
 
-Current capabilities:
+Its responsibilities include:
 
-Organization Management
-Asset Management
-ORBI Product Catalogue
-Hardware Profile Catalogue
-ORBI Device Inventory
-Device Verification
-Lifecycle-aware Provisioning
-Device Onboarding Wizard
-
-Current onboarding workflow:
-
-Platform Administration
-↓
+```text
 Organizations
-↓
 Assets
-↓
-Select Device Model
-↓
-Automatic Hardware Profile Selection
-↓
-Review Provisioning
-↓
-Provision Device
+ORBI Product Catalogue
+Hardware Profiles
+Device Inventory
+Device Verification
+Provisioning
+Device Lifecycle
+Provisioned Devices
+```
 
-The onboarding wizard intentionally separates business
-relationships from telemetry processing.
+The existing `orbi-provision` application contains provisioning and
+device-management capabilities.
 
-Operational dashboards only become available after a device
-has been provisioned.
+A future integration phase will establish a coherent ORBI Administration
+experience so administrators can move between platform administration and
+operational intelligence without treating them as unrelated products.
 
-## ORBI Product Catalogue
+This integration must preserve the architectural separation between:
 
-Current ORBI products:
+```text
+Administration
+→ manages platform and deployment relationships
 
-| Product                    | Capabilities                                                           |
-| -------------------------- | ---------------------------------------------------------------------- |
-| ORBI GPS Lite              | GPS Tracking                                                           |
-| ORBI GPS Control Kit       | GPS Tracking, Remote Kill Switch                                       |
-| ORBI Fuel Intelligence Kit | Fuel Monitoring, GPS Tracking, Vibration Detection                     |
+Operational Intelligence
+→ monitors and investigates deployed physical devices
+```
+
+---
+
+# ORBI Product Catalogue
+
+Current product direction includes:
+
+| Product | Capabilities |
+| --- | --- |
+| ORBI GPS Lite | GPS Tracking |
+| ORBI GPS Control Kit | GPS Tracking, Remote Kill Switch |
+| ORBI Fuel Intelligence Kit | Fuel Monitoring, GPS Tracking, Vibration Detection |
 | ORBI Full Intelligence Kit | Fuel Monitoring, GPS Tracking, Vibration Detection, Remote Kill Switch |
 
-# ORBI Device Inventory
+---
 
-The platform now follows an inventory-first provisioning workflow.
+# Device Inventory and Provisioning
 
-Manufactured ORBI devices are created in inventory before deployment and
-progress through a controlled manufacturing lifecycle.
+ORBI follows an inventory-first provisioning model.
 
-Current lifecycle:
+Physical devices progress through a controlled lifecycle:
 
 ```text
 ASSEMBLED
-        ↓
+    ↓
 PROGRAMMED
-        ↓
+    ↓
 TESTED
-        ↓
+    ↓
 READY_FOR_DEPLOYMENT
-        ↓
+    ↓
 PROVISIONED
-        ↓
+    ↓
 RETIRED
 ```
 
-Only devices in the `READY_FOR_DEPLOYMENT` state can be provisioned.
+Only eligible devices can proceed into provisioning.
 
-Inventory records include:
+Inventory records can contain:
 
 - ORBI Device Code
 - Serial Number
@@ -209,796 +862,327 @@ Inventory records include:
 - Manufacturing Status
 - Quality Test Status
 
-Provisioning workflow:
+Conceptual deployment workflow:
 
-Platform Administration
-↓
-Select Organization
-↓
-Select Asset
-↓
-Verify ORBI Device
-↓
-Validate Manufacturing Status
-↓
-Provision Device
-↓
+```text
+Device Inventory
+        ↓
+Device Verification
+        ↓
+Organization
+        ↓
+Asset
+        ↓
+Provisioning
+        ↓
 Operational Intelligence
-
-# Shared Operational State Architecture
-
-The frontend now uses application-scoped operational orchestration for:
-
-```text
-telemetry
-investigation intelligence
-alerts
-selected operational device
-analytics intelligence
-selected analytics period
 ```
-
-This prevents duplicated polling and ensures all operational surfaces share synchronized live state.
-
-Current shared operational surfaces:
-
-```text
-Dashboard
-Fleet Overview
-Map Intelligence
-Investigation
-```
-
-This architecture enables:
-
-- synchronized operational investigation workflows
-- future route replay
-- future telemetry replay
-- fleet-wide operational intelligence
-- spatial investigation workflows
-- future geofence intelligence
-- future operational heatmaps
 
 ---
 
-## Alert Workflow
+# Fuel Calibration
 
-The dashboard supports the current backend alert lifecycle:
+The backend now contains a physical fuel calibration domain used by ORBI Fuel
+Intelligence devices.
 
-`````text
-OPEN
-→ ACKNOWLEDGED
-→ RESOLVED
+Runtime fuel telemetry can be converted from physical KUM ultrasonic sensor
+measurements into calibrated fuel quantities.
 
-Supported actions:
-
-PATCH /api/alerts/{alert_id}/acknowledge
-PATCH /api/alerts/{alert_id}/resolve
-WebSocket Alert Streaming
-
-The dashboard connects to:
-
-/ws/alerts
-
-Supported WebSocket message types:
-
-live_alert
-recovery_alert
-alert_acknowledged
-heartbeat
-
-The frontend automatically reconnects if the backend or network drops.
-
-Live Telemetry Stream
-
-The telemetry stream is read-only and uses polling:
-
-GET /api/fuel-readings/recent
-
-Current polling interval:
-
-5 seconds
-
-Telemetry is collapsed by default to keep the dashboard clean.
-
-Device Health
-
-Device health is available as a separate dashboard tab.
-
-It uses:
-
-GET /api/device-health-events
-
-Current statuses:
-
-ONLINE
-STALE
-OFFLINE
-UNKNOWN
-Dashboard Sections
-
-## Investigation Intelligence
-
-The Investigation tab has evolved from a simple event list into an operational investigation and telemetry intelligence workflow.
-
-Current investigation capabilities include:
-
-- fuel event investigation timeline
-- clustered operational event grouping
-- operational risk scoring
-- correlated telemetry interpretation
-- investigation detail side panel
-- mobile investigation modal behavior
-- telemetry integrity interpretation
-- operational context explanation
-- alert-to-investigation navigation flow
-
-Current investigation feeds:
+The calibration backend supports concepts including:
 
 ```text
-fuel events
-device state events
-sensor health events
-geofence transition events
+fuel calibration profiles
+calibration sessions
+calibration points
+physical sensor measurements
+resolved litre quantities
+calibration validation
+coverage
+confidence
+runtime calibration
+```
 
-Current investigation APIs:
+## Fuel Calibration Frontend Status
 
-GET /api/fuel-events?device_id={device_id}
+A complete fuel-calibration administration workflow has **not yet been
+implemented in the frontend**.
 
-GET /api/device-state-events?device_id={device_id}
+This is the next major frontend development milestone.
 
-GET /api/sensor-health-events?device_id={device_id}
+The future frontend workflow should allow an authorized ORBI installer or
+administrator to perform physical calibration without relying on direct database
+operations or manual API calls.
 
-GET /api/geofence-transition-events?device_id={device_id}
+The UI will be designed against the existing backend calibration contracts
+rather than duplicating calibration logic in the browser.
 
-The investigation system now groups operational telemetry into correlated investigation clusters.
-
-Examples:
-
-theft patterns during idle periods
-suspicious refill activity during movement
-sensor integrity anomalies during fuel events
-correlated operational movement patterns
-telemetry clock drift interpretation
-
-Current investigation intelligence features:
-
-Cluster Risk Scoring
-
-Clusters are currently classified as:
-
-LOW
-MEDIUM
-HIGH
-CRITICAL
-
-based on:
-
-fuel theft patterns
-refill patterns
-sensor health anomalies
-operational severity
-correlated telemetry activity
-Cluster Explanation Engine
-
-The dashboard now generates operator-friendly explanations for investigation clusters.
-
-Examples:
-
-Fuel theft behavior appears operationally consistent with surrounding movement telemetry.
-Sensor integrity anomalies detected during suspicious fuel activity.
-Potential conflicting fuel activity detected within the same operational window.
-Investigation Detail Panel
-
-The investigation detail panel now exposes:
-
-fuel before/after values
-fuel delta
-confidence scoring
-correlation status
-operational context
-telemetry timestamps
-intelligence detection timestamps
-delayed synchronization indicators
-telemetry clock drift warnings
-Cross-Dashboard Navigation
-geofence transition details
-geofence name/type
-geofence entry/exit coordinates
-geofence occurred/detected timestamps
-
-Operations alerts now support direct navigation into Investigation workflows.
-
-Operational flow:
-
-Operations Alert
-→ View Investigation
-→ Investigation Tab
-→ Cluster Prioritization
-→ Highlighted Investigation Event
-→ Operational Context Review
-
-This creates a connected operational intelligence workflow instead of isolated dashboard sections
-
-Current sections:
-
-Operations
-Device Health
-Investigation
-Analytics
-
-Current Analytics Capabilities:
-
-- Alert Trends
-- Geofence Activity Trends
-- Most Unreliable Devices
-- Geofence Utilization
-
-Shared Analytics Filters:
-
-- Last 7 Days
-- Last 30 Days
-- Last 90 Days
-
-Implemented Dashboard Sections:
-
-- Operations
-- Device Health
-- Investigation
-- Map Intelligence
-- Replay Intelligence
-- Fleet Overview Operational Telemetry
-
-Planned Phase 2 Features:
-
-- investigation hotspot clustering
-- operational heatmaps
-- theft hotspot intelligence
-- refill hotspot intelligence
-- alert hotspot intelligence
-- theft corridor analysis
-- multi-device fleet rendering
-- advanced investigation filtering
-- analytics charts and trends
-- predictive operational scoring
-- geofence utilization intelligence
-- investigation report export
-- sensor adapter visualization
-
-Responsive Design
-
-# Analytics Intelligence
-
-The Analytics dashboard provides aggregated operational intelligence
-separate from raw operational event streams.
-
-Operational Endpoints
-
-→ raw events
-→ investigations
-→ telemetry review
-
-Examples:
-
-GET /api/device-health-events
-GET /api/geofence-transition-events
-
-Analytics Endpoints
-
-→ aggregated intelligence
-→ trend analysis
-→ operational scoring
-
-Examples:
-
-GET /api/analytics/alert-trends
-GET /api/analytics/geofence-activity
-GET /api/analytics/device-health-trends
-GET /api/analytics/geofence-utilization
-
-All analytics surfaces are controlled by a shared analytics period selector:
-
-Last 7 Days
-Last 30 Days
-Last 90 Days
+The exact frontend workflow will be determined by inspecting the authoritative
+backend calibration APIs and domain model before implementation.
 
 ---
 
-# Map Intelligence Phase 1
+# Vibration Intelligence
 
-The platform now includes a dedicated Map Intelligence operational surface.
+Continuous vibration observations are now persisted under the dedicated
+VIBRATION sensor capability and exposed through the composed telemetry read
+model.
 
-The Map Intelligence system is integrated directly into the operational dashboard architecture and shares the same device-scoped telemetry and investigation state used across the platform.
+This provides the frontend foundation for vibration visibility.
 
-Current Map Intelligence capabilities include:
+Current frontend behavior supports raw vibration telemetry.
 
-- live selected-device spatial rendering
-- telemetry-driven device positioning
-- investigation event spatial overlays
-- geofence transition spatial overlays
-- investigation-to-map synchronization
-- map-to-investigation synchronization
-- geofence-to-investigation synchronization
-- live fuel telemetry gauge
-- operational telemetry side intelligence panel
-- responsive operational map workspace
+Further frontend work may refine how vibration information is presented so that
+operators receive useful operational context rather than an unexplained raw
+number.
 
-Current map intelligence workflow:
-
-Operations Alert
-→ View Investigation
-→ Investigation Detail
-→ View on Map
-→ Map Intelligence
-→ Automatic Fly-To Investigation Event
-→ Focused Event Popup
-
-Geofence Transition
-→ Investigation Timeline
-→ Geofence Detail Panel
-→ View on Map
-→ Map Intelligence
-→ Automatic Fly-To Transition Marker
-
-## Current Map Intelligence Features
-
-### Operational Map Surface
-
-The operational map currently supports:
-
-- OpenStreetMap rendering
-- selected device tracking
-- investigation event overlays
-- investigation event focus synchronization
-- telemetry-driven operational positioning
-- live operational telemetry side panel
-
-### Investigation Spatial Synchronization
-
-Current synchronization behavior:
+Any future vibration intelligence UI must preserve the distinction between:
 
 ```text
-Investigation Selection
-→ selectedTimelineItem updates
-→ MapFocusController reacts
-→ map flies to event
-→ focused marker enlarges
-→ popup opens automatically
+raw physical vibration
+        ↓
+motion evidence
+        ↓
+operational-state intelligence
 ```
 
-### Reusable Telemetry Widgets
-
-Reusable telemetry widgets are now shared across:
-
-```text
-Fleet Overview
-Map Intelligence
-```
-
-Current reusable telemetry widgets:
-
-- FuelLevelGauge
-
-### Current Frontend Map Structure
-
-src/components/map-intelligence/
-├── MapIntelligencePanel.tsx
-├── OperationalMap.tsx
-├── DeviceMarkerLayer.tsx
-├── InvestigationEventLayer.tsx
-├── GeofenceTransitionLayer.tsx
-├── MapFocusController.tsx
-├── GeofenceLayer.tsx
-├── GeofenceDrawControl.tsx
-├── GeofenceCreationCard.tsx
-
-Shared telemetry widget structure:
-
-```text
-src/components/shared/
-└── FuelLevelGauge.tsx
-````md
-Replay intelligence structure:
-
-```text
-src/components/map-intelligence/
-├── ReplayControls.tsx
-├── ReplayStatusCard.tsx
-├── ReplayMarkerLayer.tsx
-├── ReplayPlaybackController.tsx
-├── ReplayCameraController.tsx
-
-Current replay intelligence capabilities:
-
-replay playback controls
-replay speed control
-replay scrubbing
-replay camera follow
-replay telemetry trail progression
-replay breadcrumb intelligence
-
-today replay loading
-yesterday replay loading
-last 7 days replay loading
-
-custom date range replay loading
-
-investigation replay workflow
-
-replay geofence correlation
-replay fuel event correlation
-replay device state correlation
-replay alert correlation
-replay device health correlation
-
-replay event feed timeline
-
-automatic replay pause on correlated events
-
-replay forensic reconstruction workflow
-
-replay investigation synchronization
-
-geofence-aware replay context
-
-````
-
-### Replay Intelligence Workflow
-
-Current replay workflow:
-
-Investigation Event
-→ View On Map
-→ Investigation Replay
-→ Historical Telemetry Load
-→ Replay Reconstruction
-
-Replay reconstruction currently correlates:
-
-Telemetry Position
-→ Geofence Context
-
-Telemetry Position
-→ Fuel Event Context
-
-Telemetry Position
-→ Device State Context
-
-Telemetry Position
-→ Alert Context
-
-Telemetry Position
-→ Device Health Context
-
-Telemetry Position
-→ Replay Event Feed Timeline
-
-## Journey Intelligence
-
-Journey Intelligence provides operational movement summaries derived from replay telemetry and geofence intelligence.
-
-Current Journey Intelligence capabilities:
-
-- journey distance calculation
-- journey duration calculation
-- replay point counting
-- last destination reporting
-- visited zone detection
-- zone visit frequency analysis
-
-Current workflow:
-
-Historical Telemetry
-→ Replay Reconstruction
-→ Journey Intelligence
-
-Journey Intelligence currently provides:
-
-- Distance Travelled (km)
-- Journey Duration
-- Replay Points
-- Visited Zones
-- Zone Visit Counts
-- Last Destination Coordinates
-
-Spatial calculations use:
-
-Turf.js
-→ GeoJSON LineString generation
-→ Journey Distance Calculation
-
-Current implementation is device-scoped and replay-aware.
-
-
-### Spatial Intelligence & Geofence Operations
-
-Current spatial intelligence capabilities:
-
-- PostGIS-backed geofence persistence
-- operational polygon drawing tools
-- draw-to-save geofence workflow
-- backend GeoJSON delivery
-- replay-aware geofence intelligence
-- telemetry-aware geofence status
-- live PostGIS ST_Contains spatial checks
-- operational zone overlays
-- geofence transition markers
-- ENTERED_ZONE and EXITED_ZONE visualization
-- geofence transition polling every 5 seconds
-- geofence transition detail panel integration
-- device-aware geofence assignment foundation
-- replay spatial synchronization
-- operational map workspace controls
-- geofence utilization intelligence
-- zone transition frequency tracking
-- most active zone identification
-- zone concentration classification
-
-Current spatial intelligence architecture:
-
-Leaflet Draw Tools
-→ GeoJSON extraction
-→ Zustand draw orchestration
-→ Rust geofence APIs
-→ PostgreSQL + PostGIS persistence
-→ backend ST_Contains intelligence
-→ device-aware geofence filtering
-→ replay-aware spatial intelligence
-→ operational investigation workflows
-
-````md
-### Current Operational Geofence Workflow
-
-```text
-draw operational zone
-→ modal metadata workflow
-→ backend persistence
-→ PostGIS geometry storage
-→ telemetry position checks
-→ replay-aware zone intelligence
-→ operational geofence status
-
-Planned geofence intelligence capabilities:
-
-- depot zones
-- fueling station zones
-- restricted operational zones
-- safe corridors
-- route-risk analysis
-- dwell-zone detection
-- theft outside safe-zone detection
-- refill-inside-fueling-zone intelligence
-- restricted-zone alerts
-- dwell detection
-- route corridor violations
-- operational hotspot analysis
-- replay spatial investigations
-- unauthorized fueling detection
-
-Important coordinate rule:
-
-```text
-Leaflet uses latitude, longitude
-PostGIS uses longitude, latitude
-```
 ---
-
-Operational draw behavior:
-
-```text
-drawing mode
-→ replay pauses
-→ camera follow pauses
-→ map focus synchronization pauses
-→ operational workspace stabilizes
-```
 
 # Responsive Design
 
-The dashboard is designed for:
+The dashboard supports:
 
-desktop monitoring
-tablet review
-mobile field usage
-future Capacitor packaging
+- desktop monitoring
+- tablet review
+- mobile field usage
+- future Capacitor packaging
 
-Mobile behavior includes:
+Current responsive behavior includes:
 
-horizontal dashboard tabs
-horizontal status cards
-mobile alert cards instead of wide tables
-incident detail bottom-sheet panel
-collapsible telemetry section
-Environment Variables
+- horizontally scrollable dashboard tabs
+- responsive status cards
+- mobile alert cards
+- incident detail bottom sheet
+- mobile investigation modal behavior
+- collapsible telemetry
+- responsive map workspace
 
-Example:
+---
 
+# Environment Variables
+
+Production-style example:
+
+```env
 VITE_API_BASE_URL=https://rust-api.williamtekpeh.com
 VITE_WS_BASE_URL=wss://rust-api.williamtekpeh.com
+```
 
-Local development example:
+Local development:
 
+```env
 VITE_API_BASE_URL=http://127.0.0.1:9000
 VITE_WS_BASE_URL=ws://127.0.0.1:9000
-Current Development Status
+```
+
+---
+
+# Current Development Status
+
+## Operational Frontend
 
 Implemented:
 
-React + TypeScript setup
-shared API client
-alert API module
-telemetry API module
-device health API module
-Zustand alert store
-Zustand telemetry store
-Zustand device health store
-WebSocket alert manager
-automatic WebSocket reconnect
-live operations dashboard
-responsive tabs/menu
-telemetry polling
-alert table
-mobile alert cards
-alert detail panel
-acknowledge/resolve actions
-device health tab
-map intelligence operational workspace
-telemetry route rendering
-breadcrumb telemetry progression
-replay playback engine
-replay scrubbing
-today replay loading
-yesterday replay loading
-last 7 days replay loading
-custom date range replay loading
-investigation replay workflow
-replay geofence correlation
-replay fuel event correlation
-replay device state correlation
-replay alert correlation
-replay device health correlation
-replay event feed timeline
-replay forensic reconstruction workflow
-replay investigation correlation
-replay camera follow
-replay forensic pause workflow
-geofence rendering foundation
-geofence replay awareness
-reusable telemetry widgets
-fuel telemetry gauges
-fleet operational telemetry widgets
-geofence transition event polling
-geofence transition map markers
-ENTERED_ZONE and EXITED_ZONE visualization
-geofence transition investigation timeline integration
-geofence transition detail panel
-geofence View on Map workflow
-journey intelligence
-journey distance calculation
-journey duration calculation
-visited zone intelligence
-zone visit frequency analysis
-last destination reporting
-most active zone intelligence
-zone concentration classification
-Turf.js spatial calculations
-Analytics Dashboard
-Alert Trends
-Geofence Activity Trends
-Most Unreliable Devices
-Geofence Utilization
-Shared Analytics Filters
-Analytics State Management
-Analytics API Integration
-
-Pending:
-
-- Firmware Management
-- Authentication & RBAC
-- OTA Firmware Updates
-- Report Generation (PDF / Excel)
-- Notification Integrations
-- Capacitor Android/iOS Packaging
-- Report Generation (PDF / Excel)
-- Notification Integrations
-- Capacitor Android/iOS Packaging
-
-## Product Direction
-
-The frontend is evolving from a Fuel Dashboard into a complete
-Sensor Intelligence Platform.
-
-The architecture separates:
-
-Platform Administration
-
-- Organizations
-- Assets
-- Device Inventory
-- Provisioning
-- Device Lifecycle
-
-Operational Intelligence
-
-- Operations
-- Investigation
+- React + TypeScript application
+- shared HTTP client
+- Zustand operational state
+- selected-device operational context
+- telemetry polling
+- WebSocket alert streaming
+- automatic WebSocket reconnect
+- alert lifecycle management
+- responsive Operations dashboard
+- Device Health
+- Investigation Intelligence
 - Map Intelligence
 - Replay Intelligence
-- Analytics
+- Journey Intelligence
+- Geofence Intelligence
+- Analytics Intelligence
+- Fleet Overview telemetry integration
 
-Future intelligence domains include:
+## Telemetry Reconciliation
 
-- Fleet Intelligence
-- Fuel Intelligence
-- Payload Intelligence
-- Cold Chain Intelligence
-- Generator Intelligence
-- Energy Monitoring
+Completed:
+
+- device-scoped telemetry
+- nullable telemetry handling
+- raw motion semantic reconciliation
+- operational-state semantic separation
+- fuel event severity reconciliation
+- fuel confidence reconciliation
+- fuel correlation reconciliation
+- sensor health nullable-time handling
+- alert contract reconciliation
+- analytics scope reconciliation
+- composed FUEL + GPS + VIBRATION live telemetry
+- composed FUEL + GPS + VIBRATION historical telemetry
+- continuous vibration persistence integration
+- historical pre-vibration compatibility
+
+Current validation checkpoint:
+
+```text
+Backend cargo test
+→ 245 passed
+→ 0 failed
+
+Frontend npm run build
+→ successful
+```
+
+The telemetry composition has also been runtime-validated using physical ORBI
+hardware and persisted PostgreSQL telemetry.
+
+---
+
+# Pending Platform Work
+
+Major remaining work includes:
+
+- Fuel Calibration frontend
+- Vibration Intelligence/UI refinement
+- ORBI Administration integration with `orbi-provision`
+- Authentication
+- Authorization / RBAC
+- Keycloak integration
+- Firmware Management
+- OTA Firmware Updates
+- Remote Kill Switch operational integration
+- Reporting / export
+- Notification integrations
+- Capacitor Android/iOS packaging
+
+Later architecture work includes:
+
+- distributed-service boundaries where operationally justified
+- broker/event-driven integration where justified
+- Kubernetes deployment architecture
+- production observability and operational hardening
+
+---
 
 # Next Platform Milestones
 
-Platform Administration (Completed)
-↓
-Embedded Rust Firmware
-↓
-Firmware Management
-↓
-Sensor Adapter Layer
-↓
-Production ORBI Hardware
-↓
-Production ORBI PCB
-↓
-Fleet Intelligence Expansion
-↓
+The current execution direction is:
+
+```text
+Operational Frontend Reconciliation
+                ✅
+                ↓
+Physical Vibration Telemetry Integration
+                ✅
+                ↓
+Fuel Calibration Frontend
+                ⏳
+                ↓
+Vibration Intelligence / UI Refinement
+                ⏳
+                ↓
+ORBI Administration Integration
+(orbi-provision)
+                ⏳
+                ↓
+Authentication + Authorization
+(Keycloak / RBAC)
+                ⏳
+                ↓
+Firmware / Device Management Expansion
+                ↓
+Distributed Services
+(where justified)
+                ↓
+Kubernetes
+                ↓
+Production Platform Hardening
+```
+
+The ordering of Administration integration and Keycloak may be refined after the
+administration boundaries and authorization requirements are inspected.
+
+---
+
+# Product Direction
+
+ORBI is evolving into a general Sensor Intelligence Platform built around
+physical telemetry, operational context, investigation, spatial intelligence,
+and device administration.
+
+Current primary intelligence areas include:
+
+```text
+Fleet Intelligence
+Fuel Intelligence
+GPS / Spatial Intelligence
+Vibration / Motion Intelligence
+Device Health Intelligence
+```
+
+Potential future intelligence domains include:
+
+```text
 Generator Intelligence
-↓
 Cold Chain Intelligence
-↓
 Payload Intelligence
-↓
 Energy Monitoring
+```
 
-# Frontend Application Architecture
-Frontend
+The platform should expand into these areas only where supported by real product
+requirements and physical sensor capabilities.
 
-Platform Administration
-────────────────────────────
+---
 
-Organizations
-↓
+# Architectural Principle
 
-Assets
-↓
+ORBI separates raw telemetry from derived intelligence.
 
-Device Inventory
-
-↓
-
-Provisioning
-
-↓
-
-Provisioned Devices
-
-Operational Intelligence
-────────────────────────────
-
-Operations
-
-↓
-
+```text
+Physical Sensors
+        ↓
+Telemetry
+        ↓
+Operational State
+        ↓
 Investigation
-
-↓
-
-Map Intelligence
-
-↓
-
+        ↓
 Replay
-
-↓
-
+        ↓
+Map / Spatial Context
+        ↓
 Analytics
-`````
+        ↓
+Operational Decision Support
+```
+
+Platform Administration remains responsible for determining:
+
+```text
+who owns the device
+what asset it belongs to
+which hardware capabilities it contains
+how it was provisioned
+which organization can operate it
+```
+
+Operational Intelligence is responsible for determining:
+
+```text
+what the device is reporting
+what happened
+where it happened
+when it happened
+how the evidence correlates
+and what the operator needs to investigate
+```
+
+Maintaining this separation is a core architectural principle of the ORBI
+Sensor Intelligence Platform.

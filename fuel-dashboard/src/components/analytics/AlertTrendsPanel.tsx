@@ -77,8 +77,8 @@ export default function AlertTrendsPanel() {
   });
 
   useEffect(() => {
-    fetchAlertTrends(selectedDays);
-  }, [fetchAlertTrends, selectedDays]);
+    fetchAlertTrends(selectedDays, selectedDevice?.device_id);
+  }, [fetchAlertTrends, selectedDays, selectedDevice?.device_id]);
 
   const dailyTrendRows = Object.values(
     (alertTrends?.trend ?? []).reduce<

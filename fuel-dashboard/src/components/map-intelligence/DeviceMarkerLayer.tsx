@@ -47,7 +47,11 @@ function DeviceMarkerLayer() {
 
           <div>
             Motion:{" "}
-            {selectedDeviceReading.motion_detected ? "Detected" : "Idle"}
+            {selectedDeviceReading.motion_detected === null
+              ? "Unknown"
+              : selectedDeviceReading.motion_detected
+                ? "Detected"
+                : "Not detected"}
           </div>
 
           <div>Vibration: {selectedDeviceReading.vibration_level ?? "N/A"}</div>

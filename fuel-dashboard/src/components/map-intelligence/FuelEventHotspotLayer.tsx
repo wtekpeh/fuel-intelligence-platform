@@ -54,7 +54,7 @@ export default function FuelEventHotspotLayer() {
 
                 <div>Severity: {event.severity}</div>
 
-                <div>Confidence: {event.confidence}</div>
+                <div>Confidence: {event.confidence ?? "Unknown"}</div>
 
                 <div>
                   Fuel Change: {Math.abs(event.fuel_difference).toFixed(2)}L

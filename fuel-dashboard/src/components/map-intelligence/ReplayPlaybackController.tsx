@@ -122,9 +122,7 @@ function ReplayPlaybackController() {
           ? "danger"
           : matchedEvent.severity.toLowerCase() === "medium"
             ? "warning"
-            : matchedEvent.severity.toLowerCase() === "low"
-              ? "good"
-              : "neutral",
+            : "neutral",
       raw: matchedEvent as FuelEvent,
     });
   }, [

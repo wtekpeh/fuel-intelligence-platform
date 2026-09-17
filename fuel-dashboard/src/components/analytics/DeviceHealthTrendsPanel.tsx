@@ -33,7 +33,7 @@ export default function DeviceHealthTrendsPanel() {
           <thead>
             <tr>
               <th>Device</th>
-              <th>Health Events</th>
+              <th>Reliability Issues</th>
             </tr>
           </thead>
 

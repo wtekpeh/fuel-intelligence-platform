@@ -115,16 +115,18 @@ export function AlertDetailsPanel() {
           Resolve
         </button>
 
-        <button
-          type="button"
-          className="alert-details__secondary-button"
-          onClick={() => {
-            setFocusedFuelEventId(selectedAlert.fuel_event_id);
-            setActiveSection("investigation");
-          }}
-        >
-          View Investigation
-        </button>
+        {selectedAlert.fuel_event_id !== null && (
+          <button
+            type="button"
+            className="alert-details__secondary-button"
+            onClick={() => {
+              setFocusedFuelEventId(selectedAlert.fuel_event_id);
+              setActiveSection("investigation");
+            }}
+          >
+            View Investigation
+          </button>
+        )}
       </div>
     </aside>
   );

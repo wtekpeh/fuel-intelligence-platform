@@ -10,6 +10,7 @@ import {
   Legend,
 } from "recharts";
 import { useAnalyticsStore } from "../../store/analyticsStore";
+import { useFleetStore } from "../../store/fleetStore";
 
 export default function GeofenceActivityPanel() {
   const {
@@ -20,9 +21,11 @@ export default function GeofenceActivityPanel() {
     selectedDays,
   } = useAnalyticsStore();
 
+  const { selectedDevice } = useFleetStore();
+
   useEffect(() => {
-    fetchGeofenceActivityTrends(selectedDays);
-  }, [fetchGeofenceActivityTrends, selectedDays]);
+    fetchGeofenceActivityTrends(selectedDays, selectedDevice?.device_id);
+  }, [fetchGeofenceActivityTrends, selectedDays, selectedDevice?.device_id]);
 
   if (loadingGeofenceActivityTrends) {
     return <p>Loading geofence activity...</p>;

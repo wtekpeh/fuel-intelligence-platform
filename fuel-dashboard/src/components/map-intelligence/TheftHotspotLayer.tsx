@@ -31,7 +31,7 @@ export default function TheftHotspotLayer() {
 
               <div>Severity: {event.severity}</div>
 
-              <div>Confidence: {event.confidence}</div>
+              <div>Confidence: {event.confidence ?? "Unknown"}</div>
 
               <div>
                 Fuel Loss: {Math.abs(event.fuel_difference).toFixed(2)}L

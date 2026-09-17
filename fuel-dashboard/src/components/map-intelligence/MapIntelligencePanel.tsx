@@ -77,7 +77,11 @@ function MapIntelligencePanel() {
                 <label>Motion</label>
 
                 <strong>
-                  {selectedDeviceReading.motion_detected ? "Detected" : "Idle"}
+                  {selectedDeviceReading.motion_detected === null
+                    ? "Unknown"
+                    : selectedDeviceReading.motion_detected
+                      ? "Detected"
+                      : "Not detected"}
                 </strong>
               </div>
 

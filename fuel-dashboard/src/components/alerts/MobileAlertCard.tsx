@@ -43,7 +43,9 @@ export function MobileAlertCard({ alert }: MobileAlertCardProps) {
           className={
             alert.severity === "Critical"
               ? "alert-pill alert-pill--danger"
-              : "alert-pill alert-pill--warning"
+              : alert.severity === "Warning"
+                ? "alert-pill alert-pill--warning"
+                : "alert-pill alert-pill--neutral"
           }
         >
           {alert.severity}

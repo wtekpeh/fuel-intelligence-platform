@@ -8,9 +8,16 @@ import type {
 
 export const getAlertTrends = async (
   days: number = 30,
+  deviceId?: string,
 ): Promise<AlertTrendsResponse> => {
   const response = await httpClient.get<AlertTrendsResponse>(
-    `/api/analytics/alert-trends?days=${days}`,
+    "/api/analytics/alert-trends",
+    {
+      params: {
+        days,
+        device_id: deviceId,
+      },
+    },
   );
 
   return response.data;
@@ -18,9 +25,16 @@ export const getAlertTrends = async (
 
 export const getGeofenceActivityTrends = async (
   days: number = 30,
+  deviceId?: string,
 ): Promise<GeofenceActivityTrendResponse> => {
   const response = await httpClient.get<GeofenceActivityTrendResponse>(
-    `/api/analytics/geofence-activity?days=${days}`,
+    "/api/analytics/geofence-activity",
+    {
+      params: {
+        days,
+        device_id: deviceId,
+      },
+    },
   );
 
   return response.data;
