@@ -1,11 +1,12 @@
 use crate::platform_handlers::{
-    abandon_fuel_calibration_session_handler, apply_fuel_calibration_anchor_handler,
-    assign_device_asset_handler, capture_fuel_calibration_point_handler,
-    complete_fuel_calibration_session_handler, create_asset_handler,
-    create_fuel_calibration_profile_handler, create_operational_behaviour_learning_session_handler,
-    create_orbi_inventory_device_handler, create_organization_handler,
-    create_sensor_calibration_handler, delete_asset_handler, delete_device_handler,
-    delete_organization_handler, get_active_sensor_calibration_handler,
+    abandon_fuel_calibration_session_handler,
+    activate_fuel_calibration_profile_for_production_handler,
+    apply_fuel_calibration_anchor_handler, assign_device_asset_handler,
+    capture_fuel_calibration_point_handler, complete_fuel_calibration_session_handler,
+    create_asset_handler, create_fuel_calibration_profile_handler,
+    create_operational_behaviour_learning_session_handler, create_orbi_inventory_device_handler,
+    create_organization_handler, create_sensor_calibration_handler, delete_asset_handler,
+    delete_device_handler, delete_organization_handler, get_active_sensor_calibration_handler,
     get_fuel_calibration_profile_handler, get_orbi_inventory_device_handler,
     list_device_catalogue_handler, list_device_models_handler, list_device_sensors_handler,
     list_devices_handler, list_hardware_profile_sensors_handler, list_hardware_profiles_handler,
@@ -151,5 +152,9 @@ pub fn platform_routes() -> Router<AppState> {
         .route(
             "/api/fuel-calibration/profiles/:profile_id/publish",
             post(publish_fuel_calibration_profile_handler),
+        )
+        .route(
+            "/api/fuel-calibration/profiles/:profile_id/production",
+            post(activate_fuel_calibration_profile_for_production_handler),
         )
 }

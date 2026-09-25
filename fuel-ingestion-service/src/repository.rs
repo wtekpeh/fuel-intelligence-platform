@@ -618,6 +618,43 @@ pub async fn create_sensor_calibration(
     Ok(calibration_id)
 }
 
+pub async fn create_inactive_sensor_calibration(
+    db_pool: &PgPool,
+    sensor_id: Uuid,
+    request: &CreateSensorCalibrationRequest,
+) -> Result<Uuid> {
+    /*
+     * Store a validated calibration without making it the runtime
+     * calibration for this sensor.
+     *
+     * This is used by managed workflows such as guided fuel
+     * calibration where validation and production approval are
+     * deliberately separate lifecycle stages.
+     *
+     * Unlike create_sensor_calibration(), this function must NOT
+     * deactivate the sensor's existing active calibration.
+     */
+    let calibration_id = sqlx::query_scalar!(
+        r#"
+        INSERT INTO sensor_calibrations (
+            sensor_id,
+            calibration_type,
+            calibration_values,
+            is_active
+        )
+        VALUES ($1, $2, $3, FALSE)
+        RETURNING id
+        "#,
+        sensor_id,
+        request.calibration_type,
+        request.calibration_values,
+    )
+    .fetch_one(db_pool)
+    .await?;
+
+    Ok(calibration_id)
+}
+
 pub async fn get_active_sensor_calibration(
     db_pool: &PgPool,
     sensor_id: Uuid,

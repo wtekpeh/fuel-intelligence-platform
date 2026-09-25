@@ -782,6 +782,78 @@ pub async fn publish_fuel_calibration_profile_handler(
     }
 }
 
+pub async fn activate_fuel_calibration_profile_for_production_handler(
+    State(app_state): State<AppState>,
+    Path(profile_id): Path<Uuid>,
+) -> impl IntoResponse {
+    match crate::services::platform::fuel_calibration::activate_profile_for_production(
+        &app_state.db_pool,
+        profile_id,
+    )
+    .await
+    {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(crate::models::FuelCalibrationProfileMutationResponse {
+                profile_id,
+                message: "Fuel calibration profile activated for production successfully."
+                    .to_string(),
+            }),
+        )
+            .into_response(),
+
+        Err(error) => {
+            let message = error.to_string();
+
+            /*
+             * A missing profile is a resource lookup failure.
+             */
+            if message.contains("not found") {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(crate::models::ApiErrorResponse { message }),
+                )
+                    .into_response();
+            }
+
+            /*
+             * These are valid requests against a profile whose current
+             * lifecycle state does not permit production activation.
+             *
+             * Keep these as client-visible BAD_REQUEST responses so
+             * Platform Management can explain exactly why activation
+             * was refused.
+             */
+            if message.contains("superseded")
+                || message.contains("low confidence")
+                || message.contains("published")
+                || message.contains("same sensor")
+                || message.contains("fuel calibration")
+            {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(crate::models::ApiErrorResponse { message }),
+                )
+                    .into_response();
+            }
+
+            eprintln!(
+                "Failed to activate fuel calibration profile {} for production: {}",
+                profile_id, message
+            );
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to activate fuel calibration profile for production."
+                        .to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
 pub async fn start_fuel_calibration_session_handler(
     State(app_state): State<AppState>,
     Path(profile_id): Path<Uuid>,

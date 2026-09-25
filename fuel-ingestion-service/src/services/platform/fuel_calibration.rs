@@ -342,7 +342,8 @@ pub async fn publish_profile(db_pool: &PgPool, profile_id: Uuid) -> Result<Uuid>
     };
 
     let calibration_id =
-        repository::create_sensor_calibration(db_pool, profile.sensor_id, &request).await?;
+        repository::create_inactive_sensor_calibration(db_pool, profile.sensor_id, &request)
+            .await?;
 
     /*
      * Link the guided calibration profile to the runtime calibration
@@ -356,6 +357,36 @@ pub async fn publish_profile(db_pool: &PgPool, profile_id: Uuid) -> Result<Uuid>
     .await?;
 
     Ok(calibration_id)
+}
+
+pub async fn activate_profile_for_production(db_pool: &PgPool, profile_id: Uuid) -> Result<()> {
+    /*
+     * Production activation is deliberately separate from publication.
+     *
+     * Publishing proves that the accumulated guided-calibration
+     * evidence can form a mathematically valid runtime lookup table.
+     *
+     * Production activation is the explicit operational approval step
+     * that makes that published calibration the active FUEL
+     * calibration used by live telemetry.
+     *
+     * The repository owns the atomic database transition and verifies:
+     *
+     * - the profile exists;
+     * - the profile is not superseded;
+     * - confidence is not LOW;
+     * - a published runtime calibration exists;
+     * - that calibration belongs to the same sensor;
+     * - that calibration is a FUEL calibration;
+     * - any previously active FUEL calibration is deactivated;
+     * - the published calibration becomes active;
+     * - the guided profile becomes PRODUCTION.
+     *
+     * All of those changes happen inside one transaction so runtime
+     * calibration activation and profile lifecycle state cannot drift
+     * apart.
+     */
+    fuel_calibration_repository::mark_fuel_calibration_profile_production(db_pool, profile_id).await
 }
 
 pub async fn get_profile(

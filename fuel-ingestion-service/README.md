@@ -230,10 +230,26 @@ Build Publishable Lookup Table
 ↓
 Domain Validation
 ↓
-Publish Active Runtime Calibration
+Publish Validated Runtime Calibration Candidate
+↓
+Explicit Production Approval
+↓
+Activate Runtime Fuel Calibration
 ↓
 Runtime Fuel Interpolation
-```
+
+### Calibration Coverage and Confidence
+
+Fuel calibration confidence is derived from the percentage of the declared
+tank capacity covered by verified physical calibration evidence.
+
+Current confidence classification:
+
+```text
+0% to <25%     → LOW
+25% to <75%    → MEDIUM
+75% to <100%   → HIGH
+100%            → VERIFIED
 
 Guided calibration profiles track:
 
@@ -325,20 +341,25 @@ This established a verified range of:
 ```text
 0.25 L → 1.50 L
 83.33% tank coverage
+Confidence → HIGH
 ```
 
 The true-empty condition was deliberately not fabricated as a calibration
 point because the raw ultrasonic echo disappeared at empty. The runtime
 engine therefore avoids extrapolating below the lowest verified point.
 
-The completed guided evidence was successfully:
+The completed guided evidence was successfully exercised through:
 
 ```text
 completed session points
 ↓
 validated FuelCalibration domain model
 ↓
-published sensor_calibrations record
+published inactive sensor_calibrations candidate
+↓
+validated guided profile
+↓
+explicit production approval
 ↓
 active runtime calibration
 ↓
@@ -346,6 +367,10 @@ live interpolation
 ↓
 PostgreSQL calibrated fuel persistence
 ```
+
+Publication and production activation are deliberately separate lifecycle
+decisions. Publishing creates the validated runtime calibration candidate but
+does not by itself authorize that calibration for normal production use.
 
 End-to-end runtime testing confirmed that a real-time KUM measurement of
 approximately 23.79 cm interpolated to approximately 1.19 L while the slow
@@ -1345,7 +1370,7 @@ Apply an absolute fuel anchor:
 POST /api/fuel-calibration/sessions/{session_id}/anchor
 ```
 
-Publish validated guided evidence as the active runtime calibration:
+Publish completed guided evidence as a validated runtime calibration candidate:
 
 ```http
 POST /api/fuel-calibration/profiles/{profile_id}/publish
@@ -1357,13 +1382,71 @@ Publication:
 - uses resolved points from completed sessions only
 - orders points by resolved litres rather than capture time
 - validates the resulting `FuelCalibration`
-- deactivates any previous active calibration of the same type
-- creates the new active runtime `sensor_calibrations` record
+- creates a new **inactive** runtime `sensor_calibrations` record
 - links the guided profile through `published_calibration_id`
-- moves the guided profile to `validated`
+- moves the guided profile to `VALIDATED`
+- does **not** deactivate the currently active production calibration
+- does **not** automatically promote the guided profile to `PRODUCTION`
 
-A validated profile is not automatically promoted to `production`.
-Production approval remains a separate lifecycle decision.
+Approve a validated profile for normal production use:
+
+```http
+POST /api/fuel-calibration/profiles/{profile_id}/production
+```
+
+Production approval is intentionally separate from publication.
+
+The production transition requires:
+
+- the guided profile status to already be `VALIDATED`
+- a valid publishable `FuelCalibration`
+- at least one completed calibration session
+- a linked `published_calibration_id`
+- confidence above `LOW`
+
+A `LOW`-confidence calibration cannot be promoted to production.
+
+When production approval succeeds, the backend:
+
+1. validates the guided profile against the production domain invariants
+2. deactivates any previous active runtime `FUEL` calibration for the sensor
+3. activates the runtime calibration referenced by `published_calibration_id`
+4. moves the guided profile from `VALIDATED` to `PRODUCTION`
+
+The lifecycle is therefore:
+
+```text
+DRAFT
+↓
+PROGRESSIVE
+↓
+VALIDATED
+↓
+PRODUCTION
+```
+
+and the runtime activation boundary is:
+
+```text
+Guided Physical Evidence
+↓
+Publish
+↓
+Validated Inactive Runtime Candidate
+↓
+Explicit Production Approval
+↓
+Previous Active FUEL Calibration Retired
+↓
+Published Candidate Activated
+↓
+Normal Runtime Fuel Intelligence
+```
+
+This separation prevents calibration evidence from becoming production-active
+merely because it was successfully published. Production activation remains an
+explicit operational approval step.
+
 
 ---
 
@@ -2509,7 +2592,11 @@ Implemented:
 - completed-point sorting by resolved litres before publication
 - fuel calibration domain validation before runtime publication
 - guided-profile linkage to published runtime calibration
-- active runtime fuel-calibration publication
+- inactive runtime calibration candidate publication
+- explicit `VALIDATED` → `PRODUCTION` approval
+- LOW-confidence production rejection
+- transactional retirement of the previous active FUEL calibration during production approval
+- activation of the approved published runtime calibration
 - piecewise linear fuel interpolation
 - real-time KUM measurement as the live calibration input
 - real hardware end-to-end KUM calibration validation
@@ -3278,7 +3365,11 @@ Guided Tank Calibration
 ↓
 Validated Lookup Table
 ↓
-Published Runtime Calibration
+Published Inactive Runtime Calibration Candidate
+↓
+Explicit Production Approval
+↓
+Active Runtime Calibration
 ↓
 Real-Time Measurement Interpolation
 ↓
@@ -3689,7 +3780,11 @@ Abandon / Supersede Calibration Lifecycle ✅
 ↓
 Publishable Fuel Lookup Construction ✅
 ↓
-Runtime Calibration Publication ✅
+Runtime Calibration Candidate Publication ✅
+↓
+Explicit Production Calibration Approval ✅
+↓
+Production Runtime Calibration Activation ✅
 ↓
 Real-Time KUM Runtime Calibration Input ✅
 ↓

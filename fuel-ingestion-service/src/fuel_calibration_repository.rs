@@ -4,7 +4,8 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::calibration::{
-    FuelCalibrationAnchor, FuelCalibrationSessionPoint, resolve_session_points,
+    FuelCalibrationAnchor, FuelCalibrationConfidence, FuelCalibrationSessionPoint,
+    resolve_session_points,
 };
 
 #[derive(Debug, Clone)]
@@ -482,6 +483,170 @@ pub async fn mark_fuel_calibration_profile_published(
             "Fuel calibration profile could not be marked as published."
         ));
     }
+
+    Ok(())
+}
+
+pub async fn mark_fuel_calibration_profile_production(
+    db_pool: &PgPool,
+    profile_id: Uuid,
+) -> Result<()> {
+    let mut transaction = db_pool.begin().await?;
+
+    /*
+     * Lock the guided calibration profile while production activation
+     * is performed.
+     *
+     * Production approval changes both the profile lifecycle and the
+     * runtime sensor calibration, so those changes must succeed or fail
+     * together.
+     */
+    let profile = sqlx::query!(
+        r#"
+        SELECT
+            sensor_id,
+            status,
+            confidence,
+            published_calibration_id
+        FROM fuel_calibration_profiles
+        WHERE id = $1
+        FOR UPDATE
+        "#,
+        profile_id,
+    )
+    .fetch_optional(&mut *transaction)
+    .await?;
+
+    let Some(profile) = profile else {
+        return Err(anyhow!("Fuel calibration profile was not found."));
+    };
+
+    /*
+     * Only a validated profile may be explicitly approved for normal
+     * production use.
+     */
+    if profile.status != "validated" {
+        return Err(anyhow!(
+            "Only a validated fuel calibration profile can be approved for production use."
+        ));
+    }
+
+    /*
+     * The domain model explicitly forbids LOW-confidence production
+     * calibrations.
+     */
+    if profile.confidence == "low" {
+        return Err(anyhow!(
+            "A low-confidence fuel calibration profile cannot be approved for production use."
+        ));
+    }
+
+    /*
+     * Validation/publishing must already have produced a runtime
+     * sensor_calibrations record.
+     */
+    let published_calibration_id = profile.published_calibration_id.ok_or_else(|| {
+        anyhow!("Fuel calibration profile cannot enter production without a published calibration.")
+    })?;
+
+    /*
+     * Lock the published runtime calibration and verify that the
+     * profile actually owns a FUEL calibration for the same sensor.
+     *
+     * This prevents a corrupt or incorrect foreign-key relationship
+     * from activating another sensor's calibration.
+     */
+    let published_calibration = sqlx::query!(
+        r#"
+        SELECT
+            sensor_id,
+            calibration_type
+        FROM sensor_calibrations
+        WHERE id = $1
+        FOR UPDATE
+        "#,
+        published_calibration_id,
+    )
+    .fetch_optional(&mut *transaction)
+    .await?;
+
+    let Some(published_calibration) = published_calibration else {
+        return Err(anyhow!("Published fuel calibration could not be found."));
+    };
+
+    if published_calibration.sensor_id != profile.sensor_id {
+        return Err(anyhow!(
+            "Published fuel calibration does not belong to the profile's sensor."
+        ));
+    }
+
+    if published_calibration.calibration_type != "fuel" {
+        return Err(anyhow!("Published calibration is not a fuel calibration."));
+    }
+
+    /*
+     * Retire whichever FUEL calibration is currently serving runtime
+     * telemetry for this sensor.
+     *
+     * The published calibration itself may already be active for
+     * historical profiles created before validation and production
+     * activation were separated. Excluding it here keeps this
+     * transition safe for those profiles as well.
+     */
+    sqlx::query!(
+        r#"
+        UPDATE sensor_calibrations
+        SET
+            is_active = FALSE,
+            updated_at = NOW()
+        WHERE sensor_id = $1
+          AND calibration_type = 'fuel'
+          AND is_active = TRUE
+          AND id <> $2
+        "#,
+        profile.sensor_id,
+        published_calibration_id,
+    )
+    .execute(&mut *transaction)
+    .await?;
+
+    /*
+     * Activate the calibration that was produced from this guided
+     * profile.
+     */
+    sqlx::query!(
+        r#"
+        UPDATE sensor_calibrations
+        SET
+            is_active = TRUE,
+            updated_at = NOW()
+        WHERE id = $1
+        "#,
+        published_calibration_id,
+    )
+    .execute(&mut *transaction)
+    .await?;
+
+    /*
+     * The profile and its runtime calibration now agree:
+     *
+     *     profile.status = production
+     *     published calibration = active
+     */
+    sqlx::query!(
+        r#"
+        UPDATE fuel_calibration_profiles
+        SET
+            status = 'production',
+            updated_at = NOW()
+        WHERE id = $1
+        "#,
+        profile_id,
+    )
+    .execute(&mut *transaction)
+    .await?;
+
+    transaction.commit().await?;
 
     Ok(())
 }
@@ -1023,8 +1188,34 @@ pub async fn complete_fuel_calibration_session(db_pool: &PgPool, session_id: Uui
     let coverage_percentage = verified_range_litres / session_context.tank_capacity_litres * 100.0;
 
     /*
+     * Derive calibration confidence from the percentage of this
+     * particular tank's declared capacity that has been physically
+     * verified.
+     *
+     * Because coverage is normalized against tank_capacity_litres,
+     * the same policy works for different vehicle and tank sizes.
+     *
+     * Examples:
+     *
+     *     15 L verified on a 60 L tank  = 25%  -> Medium
+     *     50 L verified on a 200 L tank = 25%  -> Medium
+     *
+     * Confidence therefore describes verified proportional coverage,
+     * not a fixed number of litres.
+     */
+    let confidence = FuelCalibrationConfidence::from_coverage_percentage(coverage_percentage);
+
+    let confidence = match confidence {
+        FuelCalibrationConfidence::Low => "low",
+        FuelCalibrationConfidence::Medium => "medium",
+        FuelCalibrationConfidence::High => "high",
+        FuelCalibrationConfidence::Verified => "verified",
+    };
+
+    /*
      * Mark the guided session as completed.
      */
+
     sqlx::query!(
         r#"
         UPDATE fuel_calibration_sessions
@@ -1056,22 +1247,24 @@ pub async fn complete_fuel_calibration_session(db_pool: &PgPool, session_id: Uui
      */
     sqlx::query!(
         r#"
-        UPDATE fuel_calibration_profiles
-        SET
-            status = CASE
-                WHEN status = 'draft' THEN 'progressive'
-                ELSE status
-            END,
-            verified_from_litres = $2,
-            verified_to_litres = $3,
-            coverage_percentage = $4,
-            updated_at = NOW()
-        WHERE id = $1
-        "#,
+    UPDATE fuel_calibration_profiles
+    SET
+        status = CASE
+            WHEN status = 'draft' THEN 'progressive'
+            ELSE status
+        END,
+        verified_from_litres = $2,
+        verified_to_litres = $3,
+        coverage_percentage = $4,
+        confidence = $5,
+        updated_at = NOW()
+    WHERE id = $1
+    "#,
         session_context.profile_id,
         new_verified_from_litres,
         new_verified_to_litres,
         coverage_percentage,
+        confidence,
     )
     .execute(&mut *transaction)
     .await?;
