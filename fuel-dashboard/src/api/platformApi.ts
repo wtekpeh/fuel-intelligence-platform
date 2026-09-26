@@ -1,3 +1,5 @@
+import axios from "axios";
+
 import { httpClient } from "./httpClient";
 
 import type {
@@ -23,6 +25,7 @@ import type {
   FuelCalibrationProfile,
   FuelCalibrationProfileMutationResponse,
   FuelCalibrationSessionMutationResponse,
+  LatestFuelSensorObservation,
   StartFuelCalibrationSessionRequest,
 } from "../platform/types/fuelCalibration";
 
@@ -293,8 +296,36 @@ export async function provisionInventoryDevice(
 export async function fetchFuelCalibrationProfile(
   sensorId: string,
 ): Promise<FuelCalibrationProfile | null> {
-  const response = await httpClient.get<FuelCalibrationProfile | null>(
-    `/api/sensors/${sensorId}/fuel-calibration`,
+  try {
+    const response = await httpClient.get<FuelCalibrationProfile>(
+      `/api/sensors/${sensorId}/fuel-calibration`,
+    );
+
+    return response.data;
+  } catch (error) {
+    /*
+     * The backend returns 404 when the sensor exists but has no current
+     * guided fuel-calibration profile.
+     *
+     * That is a valid workflow state rather than a frontend failure:
+     * the installer should be allowed to create a replacement profile.
+     *
+     * Other failures must continue propagating so the store can surface
+     * a genuine loading error.
+     */
+    if (axios.isAxiosError(error) && error.response?.status === 404) {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+export async function fetchLatestFuelSensorObservation(
+  sensorId: string,
+): Promise<LatestFuelSensorObservation> {
+  const response = await httpClient.get<LatestFuelSensorObservation>(
+    `/api/sensors/${sensorId}/fuel-calibration/latest-observation`,
   );
 
   return response.data;

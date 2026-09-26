@@ -12,6 +12,8 @@ import type {
   RegisterDeviceRequest,
 } from "../types";
 
+const SELECTED_DEVICE_STORAGE_KEY = "orbi:selected-device-id";
+
 interface DeviceStore {
   devices: DeviceSummary[];
   selectedDevice: DeviceSummary | null;
@@ -44,8 +46,21 @@ export const useDeviceStore = create<DeviceStore>((set) => ({
     try {
       const devices = await fetchDevices();
 
+      const storedDeviceId = localStorage.getItem(SELECTED_DEVICE_STORAGE_KEY);
+
+      const restoredDevice =
+        devices.find((device) => device.id === storedDeviceId) ?? null;
+
+      let restoredDeviceSensors: DeviceSensorSummary[] = [];
+
+      if (restoredDevice) {
+        restoredDeviceSensors = await fetchDeviceSensors(restoredDevice.id);
+      }
+
       set({
         devices,
+        selectedDevice: restoredDevice,
+        deviceSensors: restoredDeviceSensors,
         loading: false,
       });
     } catch {
@@ -58,6 +73,8 @@ export const useDeviceStore = create<DeviceStore>((set) => ({
 
   selectDevice: async (device) => {
     if (!device) {
+      localStorage.removeItem(SELECTED_DEVICE_STORAGE_KEY);
+
       set({
         selectedDevice: null,
         deviceSensors: [],
@@ -65,6 +82,8 @@ export const useDeviceStore = create<DeviceStore>((set) => ({
 
       return;
     }
+
+    localStorage.setItem(SELECTED_DEVICE_STORAGE_KEY, device.id);
 
     set({
       selectedDevice: device,

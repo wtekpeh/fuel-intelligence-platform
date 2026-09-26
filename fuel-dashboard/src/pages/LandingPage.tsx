@@ -2,7 +2,7 @@ import { useOrganizationOverview } from "../services/useOrganizationOverview";
 
 import { useOrganizationStore } from "../store/organizationStore";
 
-import { useAppViewStore } from "../store/appViewStore";
+import { useNavigate } from "react-router-dom";
 
 import "../styles/landing.css";
 
@@ -15,8 +15,7 @@ export function LandingPage() {
     (state) => state.selectOrganization,
   );
 
-  const showFleet = useAppViewStore((state) => state.showFleet);
-  const showPlatform = useAppViewStore((state) => state.showPlatform);
+  const navigate = useNavigate();
 
   return (
     <main className="landing-page">
@@ -34,7 +33,7 @@ export function LandingPage() {
           <button
             type="button"
             className="landing-platform-button"
-            onClick={showPlatform}
+            onClick={() => navigate("/platform")}
           >
             Platform Management
           </button>
@@ -96,8 +95,7 @@ export function LandingPage() {
               className="organization-card__button"
               onClick={() => {
                 selectOrganization(organization);
-
-                showFleet();
+                navigate("/fleet");
               }}
             >
               View Fleet Overview

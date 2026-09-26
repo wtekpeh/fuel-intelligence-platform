@@ -24,6 +24,8 @@ const COMMAND_SETTLE_DELAY_MS: u32 = 200;
 const PAYLOAD_SETTLE_DELAY_MS: u32 = 250;
 const CLEANUP_SETTLE_DELAY_MS: u32 = 200;
 
+const RUNTIME_STATE_URL_COMMAND_CAPACITY: usize = 192;
+
 fn contains_bytes(buffer: &[u8], pattern: &[u8]) -> bool {
     if pattern.is_empty() || pattern.len() > buffer.len() {
         return false;
@@ -35,14 +37,64 @@ fn contains_bytes(buffer: &[u8], pattern: &[u8]) -> bool {
 }
 
 fn extract_http_status(response: &[u8]) -> Option<u16> {
-    const PREFIX: &[u8] = b"+HTTPACTION: 1,";
+    /*
+     * A7670 HTTPACTION result format:
+     *
+     * +HTTPACTION: <method>,<status>,<length>
+     *
+     * Examples:
+     *
+     * GET:
+     * +HTTPACTION: 0,200,25
+     *
+     * POST:
+     * +HTTPACTION: 1,200,42
+     *
+     * The previous implementation searched specifically for
+     * "+HTTPACTION: 1,", which meant only POST responses could
+     * be parsed. Runtime-state retrieval uses GET (method 0),
+     * so status parsing must not depend on the HTTP method.
+     */
+    const PREFIX: &[u8] = b"+HTTPACTION:";
 
     let prefix_start = response
         .windows(PREFIX.len())
         .position(|window| window == PREFIX)?;
 
-    let status_start = prefix_start + PREFIX.len();
-    let status_bytes = response.get(status_start..status_start + 3)?;
+    let mut index = prefix_start + PREFIX.len();
+
+    /*
+     * Skip optional spaces after "+HTTPACTION:".
+     */
+    while response.get(index) == Some(&b' ') {
+        index += 1;
+    }
+
+    /*
+     * Skip the HTTP method field until its comma.
+     *
+     * Currently:
+     *
+     * 0 = GET
+     * 1 = POST
+     *
+     * We deliberately do not care which method produced the
+     * response because this function's only responsibility is
+     * extracting the HTTP status code.
+     */
+    while let Some(byte) = response.get(index) {
+        if *byte == b',' {
+            index += 1;
+            break;
+        }
+
+        index += 1;
+    }
+
+    /*
+     * The next three bytes must be the HTTP status code.
+     */
+    let status_bytes = response.get(index..index + 3)?;
 
     if !status_bytes.iter().all(u8::is_ascii_digit) {
         return None;
@@ -55,11 +107,55 @@ fn extract_http_status(response: &[u8]) -> Option<u16> {
     Some(status)
 }
 
+fn build_runtime_state_url_command(
+    device_code: &str,
+) -> Option<heapless::String<RUNTIME_STATE_URL_COMMAND_CAPACITY>> {
+    let mut command = heapless::String::<RUNTIME_STATE_URL_COMMAND_CAPACITY>::new();
+
+    if core::fmt::write(
+        &mut command,
+        format_args!(
+            "AT+HTTPPARA=\"URL\",\"http://rust-api.williamtekpeh.com/api/devices/{}/runtime-state\"\r\n",
+            device_code
+        ),
+    )
+    .is_err()
+    {
+        println!("Failed to build runtime-state URL command.");
+
+        return None;
+    }
+
+    Some(command)
+}
+
+fn parse_calibration_mode(response: &[u8]) -> Option<bool> {
+    /*
+     * Runtime-state responses currently contain one backend-controlled
+     * boolean:
+     *
+     * {"calibration_mode":true}
+     *
+     * Keep parsing deliberately narrow. If the expected field cannot be
+     * found, return None rather than guessing a device mode.
+     */
+    if contains_bytes(response, b"\"calibration_mode\":true") {
+        return Some(true);
+    }
+
+    if contains_bytes(response, b"\"calibration_mode\":false") {
+        return Some(false);
+    }
+
+    None
+}
+
 async fn collect_http_action_response(
     modem: &mut Modem<'_>,
+    action_command: &[u8],
     action_label: &str,
 ) -> Option<([u8; HTTP_ACTION_BUFFER_SIZE], usize)> {
-    if !modem.send_command(b"AT+HTTPACTION=1\r\n", action_label) {
+    if !modem.send_command(action_command, action_label) {
         println!("Failed to send HTTPACTION command.");
 
         return None;
@@ -221,7 +317,8 @@ async fn post_json<const N: usize>(
 
     Timer::after(Duration::from_millis(PAYLOAD_SETTLE_DELAY_MS as u64)).await;
 
-    let action_response = collect_http_action_response(modem, action_label).await;
+    let action_response =
+        collect_http_action_response(modem, b"AT+HTTPACTION=1\r\n", action_label).await;
 
     let upload_succeeded = if let Some((response_buffer, bytes_read)) = action_response {
         let response = &response_buffer[..bytes_read];
@@ -268,6 +365,123 @@ async fn post_json<const N: usize>(
     Timer::after(Duration::from_millis(CLEANUP_SETTLE_DELAY_MS as u64)).await;
 
     upload_succeeded
+}
+
+pub async fn get_runtime_calibration_mode(
+    modem: &mut Modem<'_>,
+    device_code: &str,
+) -> Option<bool> {
+    println!("========================");
+    println!("GETTING ORBI RUNTIME STATE");
+    println!("========================");
+
+    let url_command = build_runtime_state_url_command(device_code)?;
+
+    /*
+     * Start from a clean HTTP session.
+     */
+    modem
+        .send_command_and_print_response_async(b"AT+HTTPTERM\r\n", "AT+HTTPTERM")
+        .await;
+
+    Timer::after(Duration::from_millis(COMMAND_SETTLE_DELAY_MS as u64)).await;
+
+    modem
+        .send_command_and_print_response_async(b"AT+HTTPINIT\r\n", "AT+HTTPINIT")
+        .await;
+
+    Timer::after(Duration::from_millis(COMMAND_SETTLE_DELAY_MS as u64)).await;
+
+    modem
+        .send_command_and_print_response_async(
+            url_command.as_bytes(),
+            "AT+HTTPPARA RUNTIME STATE URL",
+        )
+        .await;
+
+    Timer::after(Duration::from_millis(COMMAND_SETTLE_DELAY_MS as u64)).await;
+
+    /*
+     * HTTPACTION=0 performs an HTTP GET.
+     */
+    let action_response = collect_http_action_response(
+        modem,
+        b"AT+HTTPACTION=0\r\n",
+        "AT+HTTPACTION RUNTIME STATE GET",
+    )
+    .await;
+
+    let request_succeeded = match action_response {
+        Some((response_buffer, bytes_read)) => {
+            match extract_http_status(&response_buffer[..bytes_read]) {
+                Some(status) if (200..300).contains(&status) => {
+                    println!("Runtime-state HTTP status: {}", status);
+                    true
+                }
+
+                Some(status) => {
+                    println!("Runtime-state HTTP request failed with status: {}", status);
+                    false
+                }
+
+                None => {
+                    println!("Could not parse runtime-state HTTP status.");
+                    false
+                }
+            }
+        }
+
+        None => {
+            println!("No runtime-state HTTPACTION response received.");
+            false
+        }
+    };
+
+    if !request_succeeded {
+        modem
+            .send_command_and_print_response_async(b"AT+HTTPTERM\r\n", "AT+HTTPTERM")
+            .await;
+
+        return None;
+    }
+
+    /*
+     * Request the HTTP response body.
+     *
+     * Unlike telemetry POSTs, this body is meaningful to the firmware:
+     *
+     * {"calibration_mode":true}
+     */
+    let body_response = modem
+        .send_command_and_collect_response_async(b"AT+HTTPREAD\r\n", "AT+HTTPREAD RUNTIME STATE")
+        .await;
+
+    modem
+        .send_command_and_print_response_async(b"AT+HTTPTERM\r\n", "AT+HTTPTERM")
+        .await;
+
+    let Some((response_buffer, bytes_read)) = body_response else {
+        println!("Runtime-state response body was not received.");
+        return None;
+    };
+
+    let calibration_mode = parse_calibration_mode(&response_buffer[..bytes_read]);
+
+    match calibration_mode {
+        Some(true) => {
+            println!("Backend runtime state: calibration mode ON.");
+        }
+
+        Some(false) => {
+            println!("Backend runtime state: calibration mode OFF.");
+        }
+
+        None => {
+            println!("Could not parse calibration mode from runtime-state response.");
+        }
+    }
+
+    calibration_mode
 }
 
 pub async fn send_payload<const N: usize>(

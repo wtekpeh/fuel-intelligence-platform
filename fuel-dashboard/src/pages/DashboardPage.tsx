@@ -13,8 +13,19 @@ import { InvestigationPanel } from "../components/investigation/InvestigationPan
 import MapIntelligencePanel from "../components/map-intelligence/MapIntelligencePanel";
 import { useInvestigationData } from "../services/useInvestigationData";
 import AlertTrendsPanel from "../components/analytics/AlertTrendsPanel";
+import { useOrganizationOverview } from "../services/useOrganizationOverview";
+import { useFleetOverview } from "../services/useFleetOverview";
+import { useOrganizationStore } from "../store/organizationStore";
 
 export function DashboardPage() {
+  useOrganizationOverview();
+
+  const selectedOrganization = useOrganizationStore(
+    (state) => state.selectedOrganization,
+  );
+
+  useFleetOverview(selectedOrganization?.organization_id ?? null);
+
   const activeSection = useDashboardSectionStore(
     (state) => state.activeSection,
   );

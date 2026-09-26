@@ -8,6 +8,7 @@ import {
   completeFuelCalibrationSession,
   createFuelCalibrationProfile,
   fetchFuelCalibrationProfile,
+  fetchLatestFuelSensorObservation,
   pauseFuelCalibrationSession,
   publishFuelCalibrationProfile,
   resumeFuelCalibrationSession,
@@ -20,6 +21,7 @@ import type {
   CaptureFuelCalibrationPointRequest,
   CreateFuelCalibrationProfileRequest,
   FuelCalibrationProfile,
+  LatestFuelSensorObservation,
   StartFuelCalibrationSessionRequest,
 } from "../types/fuelCalibration";
 
@@ -27,10 +29,16 @@ interface FuelCalibrationStore {
   profile: FuelCalibrationProfile | null;
   selectedSensorId: string | null;
 
+  latestObservation: LatestFuelSensorObservation | null;
+
   loading: boolean;
   error: string | null;
 
   loadProfile: (sensorId: string) => Promise<void>;
+
+  loadLatestObservation: (
+    sensorId: string,
+  ) => Promise<LatestFuelSensorObservation | null>;
 
   createProfile: (
     sensorId: string,
@@ -102,6 +110,8 @@ export const useFuelCalibrationStore = create<FuelCalibrationStore>(
       profile: null,
       selectedSensorId: null,
 
+      latestObservation: null,
+
       loading: false,
       error: null,
 
@@ -137,6 +147,49 @@ export const useFuelCalibrationStore = create<FuelCalibrationStore>(
             loading: false,
             error: "Failed to load fuel calibration profile.",
           });
+        }
+      },
+
+      loadLatestObservation: async (sensorId: string) => {
+        /*
+         * Retrieve the newest physical KUM observation independently of the
+         * guided calibration profile.
+         *
+         * This allows calibration to begin before a runtime distance-to-litres
+         * calibration exists.
+         */
+        try {
+          const observation = await fetchLatestFuelSensorObservation(sensorId);
+
+          /*
+           * Do not allow a response belonging to a previously selected sensor
+           * to replace the current sensor's physical observation.
+           */
+          if (get().selectedSensorId !== sensorId) {
+            return null;
+          }
+
+          set({
+            latestObservation: observation,
+          });
+
+          return observation;
+        } catch {
+          /*
+           * A missing observation is not treated as a failure of the entire
+           * calibration workflow.
+           *
+           * The device may simply not have submitted physical KUM telemetry yet.
+           */
+          if (get().selectedSensorId !== sensorId) {
+            return null;
+          }
+
+          set({
+            latestObservation: null,
+          });
+
+          return null;
         }
       },
 

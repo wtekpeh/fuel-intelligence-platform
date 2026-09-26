@@ -269,6 +269,16 @@ async fn main(spawner: embassy_executor::Spawner) {
     const HEARTBEAT_INTERVAL_SECONDS: u64 = 300;
     const DIAGNOSTICS_INTERVAL_SECONDS: u64 = 600;
 
+    /*
+     * Backend runtime state does not need to be checked on every
+     * one-second GNSS sample.
+     *
+     * Polling every 30 seconds is responsive enough for an installer
+     * entering or leaving guided fuel-calibration mode without creating
+     * unnecessary HTTP traffic.
+     */
+    const RUNTIME_STATE_POLL_INTERVAL_SECONDS: u64 = 30;
+
     let reporting_policy = scheduler::reporting::ReportingPolicy::default();
 
     /*
@@ -300,7 +310,83 @@ async fn main(spawner: embassy_executor::Spawner) {
      */
     let mut last_network_diagnostics = Instant::now();
 
+    /*
+     * Backend-controlled runtime state.
+     *
+     * ORBI starts conservatively in normal operating mode.
+     *
+     * A successful runtime-state request may later switch this to true.
+     * If a subsequent request fails, we will preserve the last known
+     * state rather than incorrectly interpreting a network failure as
+     * calibration mode being disabled.
+     */
+    let mut calibration_mode = false;
+
+    /*
+     * Cause the first runtime-state request to happen immediately after
+     * entering the main runtime loop.
+     */
+    let mut runtime_state_attempted_once = false;
+    let mut last_runtime_state_attempt = Instant::now();
+
     loop {
+        /*
+         * Periodically retrieve backend-controlled runtime state.
+         *
+         * This allows the backend to temporarily change firmware behaviour
+         * without reflashing or physically touching the ORBI device.
+         *
+         * Guided fuel calibration is the first consumer of this mechanism.
+         */
+        let runtime_state_due = !runtime_state_attempted_once
+            || last_runtime_state_attempt.elapsed().as_secs()
+                >= RUNTIME_STATE_POLL_INTERVAL_SECONDS;
+
+        if runtime_state_due {
+            println!("========================");
+            println!("ORBI RUNTIME STATE CHECK");
+            println!("========================");
+
+            let runtime_state =
+                network::modem_owner::request_runtime_state(runtime_identity.device_code()).await;
+
+            /*
+             * Record the attempt regardless of whether the backend request
+             * succeeded.
+             *
+             * Otherwise a network/backend failure would cause another HTTP
+             * request on every one-second main-loop cycle.
+             */
+            runtime_state_attempted_once = true;
+            last_runtime_state_attempt = Instant::now();
+
+            match runtime_state {
+                Some(new_calibration_mode) => {
+                    if new_calibration_mode != calibration_mode {
+                        println!(
+                            "Calibration mode changed: {} -> {}",
+                            calibration_mode, new_calibration_mode
+                        );
+                    } else {
+                        println!("Calibration mode remains: {}", new_calibration_mode);
+                    }
+
+                    calibration_mode = new_calibration_mode;
+                }
+
+                None => {
+                    /*
+                     * Preserve the last known state.
+                     *
+                     * A failed HTTP request must not silently disable an
+                     * active calibration session.
+                     */
+                    println!("Runtime state could not be retrieved.");
+                    println!("Preserving previous calibration mode: {}", calibration_mode);
+                }
+            }
+        }
+
         /*
          * Heartbeat is evaluated before GNSS acquisition.
          *

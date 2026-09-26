@@ -854,6 +854,49 @@ pub async fn activate_fuel_calibration_profile_for_production_handler(
     }
 }
 
+pub async fn get_latest_fuel_sensor_observation_handler(
+    State(app_state): State<AppState>,
+    Path(sensor_id): Path<Uuid>,
+) -> impl IntoResponse {
+    match crate::services::platform::fuel_calibration::get_latest_sensor_observation(
+        &app_state.db_pool,
+        sensor_id,
+    )
+    .await
+    {
+        Ok(Some(observation)) => (StatusCode::OK, Json(observation)).into_response(),
+
+        /*
+         * The sensor may legitimately have no physical observation yet.
+         *
+         * This can happen immediately after installation, before the device
+         * has transmitted its first KUM telemetry packet.
+         */
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(crate::models::ApiErrorResponse {
+                message: "No physical fuel-sensor observation is available yet.".to_string(),
+            }),
+        )
+            .into_response(),
+
+        Err(error) => {
+            eprintln!(
+                "Failed to retrieve latest physical fuel observation for sensor {}: {}",
+                sensor_id, error
+            );
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to retrieve latest fuel-sensor observation.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
 pub async fn start_fuel_calibration_session_handler(
     State(app_state): State<AppState>,
     Path(profile_id): Path<Uuid>,
@@ -929,7 +972,6 @@ pub async fn capture_fuel_calibration_point_handler(
     match crate::services::platform::fuel_calibration::capture_point(
         &app_state.db_pool,
         session_id,
-        payload.level_cm,
         payload.cumulative_change_litres,
     )
     .await
@@ -954,10 +996,12 @@ pub async fn capture_fuel_calibration_point_handler(
                     .into_response();
             }
 
-            if message.contains("Fuel calibration level")
-                || message.contains("Cumulative fuel change")
+            if message.contains("Cumulative fuel change")
                 || message.contains("can only be captured while the session is active")
                 || message.contains("outside the declared tank capacity")
+                || message.contains("No physical fuel sensor observation is available")
+                || message.contains("physical fuel sensor observation is too old")
+                || message.contains("invalid real-time distance")
             {
                 return (
                     StatusCode::BAD_REQUEST,

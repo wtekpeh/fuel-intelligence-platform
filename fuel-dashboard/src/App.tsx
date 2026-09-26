@@ -1,32 +1,32 @@
+import { Navigate, Route, Routes } from "react-router-dom";
+
 import { DashboardPage } from "./pages/DashboardPage";
 import { FleetOverviewPage } from "./pages/FleetOverviewPage";
 import { LandingPage } from "./pages/LandingPage";
-import { useTelemetryPolling } from "./services/useTelemetryPolling";
-import { useAppViewStore } from "./store/appViewStore";
-import { useGeofenceData } from "./services/useGeofenceData";
 import PlatformManagementPage from "./platform/pages/PlatformManagementPage";
+
+import { useTelemetryPolling } from "./services/useTelemetryPolling";
+import { useGeofenceData } from "./services/useGeofenceData";
 
 import "./styles/global.css";
 
 function App() {
-  const activeView = useAppViewStore((state) => state.activeView);
-
   useTelemetryPolling();
   useGeofenceData();
 
-  if (activeView === "fleet") {
-    return <FleetOverviewPage />;
-  }
+  return (
+    <Routes>
+      <Route path="/" element={<LandingPage />} />
 
-  if (activeView === "dashboard") {
-    return <DashboardPage />;
-  }
+      <Route path="/fleet" element={<FleetOverviewPage />} />
 
-  if (activeView === "platform") {
-    return <PlatformManagementPage />;
-  }
+      <Route path="/dashboard" element={<DashboardPage />} />
 
-  return <LandingPage />;
+      <Route path="/platform" element={<PlatformManagementPage />} />
+
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
 }
 
 export default App;

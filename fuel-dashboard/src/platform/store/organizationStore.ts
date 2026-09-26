@@ -8,6 +8,19 @@ import {
 
 import type { OrganizationOverview } from "../../types";
 
+/*
+ * Temporary development tenant.
+ *
+ * ORBI currently has no authentication/tenant identity provider wired into
+ * the dashboard. During physical hardware bench testing, the platform should
+ * therefore enter the ORBI test organization rather than whichever
+ * organization happens to be returned first by the API.
+ *
+ * This must be removed once Keycloak-backed organization context becomes
+ * authoritative.
+ */
+const DEVELOPMENT_ORGANIZATION_ID = "fad51a33-2cbd-4bea-a195-6936e02f3e05";
+
 interface OrganizationStore {
   organizations: OrganizationOverview[];
   selectedOrganization: OrganizationOverview | null;
@@ -41,9 +54,17 @@ export const useOrganizationStore = create<OrganizationStore>((set) => ({
     try {
       const organizations = await fetchOrganizationOverview();
 
+      const developmentOrganization =
+        organizations.find(
+          (organization) =>
+            organization.organization_id === DEVELOPMENT_ORGANIZATION_ID,
+        ) ??
+        organizations[0] ??
+        null;
+
       set({
         organizations,
-        selectedOrganization: organizations[0] ?? null,
+        selectedOrganization: developmentOrganization,
         loading: false,
       });
     } catch {

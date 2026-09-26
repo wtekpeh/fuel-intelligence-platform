@@ -8,15 +8,18 @@ export default function FuelCalibrationPanel() {
   const [tankCapacityLitres, setTankCapacityLitres] = useState("");
   const [startingLitres, setStartingLitres] = useState("");
   const [startingQuantityKnown, setStartingQuantityKnown] = useState(false);
-  const [levelCm, setLevelCm] = useState("");
   const [cumulativeChangeLitres, setCumulativeChangeLitres] = useState("");
+  const [supersedeConfirmationOpen, setSupersedeConfirmationOpen] =
+    useState(false);
 
   const {
     profile,
     selectedSensorId,
+    latestObservation,
     loading,
     error,
     loadProfile,
+    loadLatestObservation,
     createProfile,
     startSession,
     capturePoint,
@@ -173,6 +176,14 @@ export default function FuelCalibrationPanel() {
     }
   }, [selectedDevice, fuelSensor, selectedSensorId, loadProfile, clearProfile]);
 
+  useEffect(() => {
+    if (!fuelSensor || selectedSensorId !== fuelSensor.id) {
+      return;
+    }
+
+    void loadLatestObservation(fuelSensor.id);
+  }, [fuelSensor, selectedSensorId, loadLatestObservation]);
+
   const handleCreateProfile = async () => {
     if (!fuelSensor) {
       return;
@@ -223,27 +234,33 @@ export default function FuelCalibrationPanel() {
   };
 
   const handleCapturePoint = async () => {
-    if (!currentSession || currentSession.status !== "active") {
+    if (!currentSession || currentSession.status !== "active" || !fuelSensor) {
       return;
     }
 
-    const measuredLevelCm = Number(levelCm);
+    /*
+     * Fetch the newest physical KUM observation at the exact moment
+     * this calibration point is being captured.
+     *
+     * The observation already displayed in the UI may be older because
+     * newer physical telemetry can arrive after the panel was loaded.
+     */
+    const observation = await loadLatestObservation(fuelSensor.id);
+
+    if (!observation) {
+      return;
+    }
+
     const cumulativeChange = Number(cumulativeChangeLitres);
 
-    if (
-      !Number.isFinite(measuredLevelCm) ||
-      measuredLevelCm < 0 ||
-      !Number.isFinite(cumulativeChange)
-    ) {
+    if (!Number.isFinite(cumulativeChange)) {
       return;
     }
 
     await capturePoint(currentSession.id, {
-      level_cm: measuredLevelCm,
       cumulative_change_litres: cumulativeChange,
     });
 
-    setLevelCm("");
     setCumulativeChangeLitres("");
   };
 
@@ -400,6 +417,8 @@ export default function FuelCalibrationPanel() {
     }
 
     await supersedeProfile();
+
+    setSupersedeConfirmationOpen(false);
   };
 
   if (!selectedDevice) {
@@ -619,6 +638,47 @@ export default function FuelCalibrationPanel() {
           </div>
 
           <div className="platform-detail-section">
+            <label>Latest Physical KUM Observation</label>
+
+            {latestObservation ? (
+              <div className="platform-detail-grid">
+                <div>
+                  <label>Real-Time Distance</label>
+                  <strong>
+                    {latestObservation.realtime_distance_cm.toFixed(2)} cm
+                  </strong>
+                </div>
+
+                <div>
+                  <label>Smooth Distance</label>
+                  <strong>
+                    {latestObservation.smooth_distance_cm.toFixed(2)} cm
+                  </strong>
+                </div>
+
+                <div>
+                  <label>Raw Distance</label>
+                  <strong>
+                    {latestObservation.raw_distance_cm.toFixed(2)} cm
+                  </strong>
+                </div>
+
+                <div>
+                  <label>Recorded At</label>
+                  <strong>
+                    {new Date(latestObservation.recorded_at).toLocaleString()}
+                  </strong>
+                </div>
+              </div>
+            ) : (
+              <p className="platform-detail-text">
+                No physical KUM observation has been received for this fuel
+                sensor yet.
+              </p>
+            )}
+          </div>
+
+          <div className="platform-detail-section">
             <label>Verified Range</label>
 
             <p className="platform-detail-text">
@@ -812,19 +872,6 @@ export default function FuelCalibrationPanel() {
 
               <div className="platform-form">
                 <label>
-                  KUM Level (cm)
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    inputMode="decimal"
-                    placeholder="e.g. 13.71"
-                    value={levelCm}
-                    onChange={(event) => setLevelCm(event.target.value)}
-                  />
-                </label>
-
-                <label>
                   Cumulative Fuel Change (litres)
                   <input
                     type="number"
@@ -842,10 +889,8 @@ export default function FuelCalibrationPanel() {
                   type="button"
                   className="platform-primary-button"
                   disabled={
-                    levelCm.trim() === "" ||
+                    !latestObservation ||
                     cumulativeChangeLitres.trim() === "" ||
-                    !Number.isFinite(Number(levelCm)) ||
-                    Number(levelCm) < 0 ||
                     !Number.isFinite(Number(cumulativeChangeLitres))
                   }
                   onClick={() => void handleCapturePoint()}
@@ -978,10 +1023,53 @@ export default function FuelCalibrationPanel() {
                   type="button"
                   className="platform-primary-button"
                   disabled={loading}
-                  onClick={() => void handleSupersedeProfile()}
+                  onClick={() => setSupersedeConfirmationOpen(true)}
                 >
                   Supersede Calibration Profile
                 </button>
+
+                {supersedeConfirmationOpen && (
+                  <div className="platform-confirmation-panel">
+                    <div>
+                      <strong>Supersede this calibration?</strong>
+
+                      <p className="platform-detail-text">
+                        This will retire the current guided calibration profile.
+                        Its historical calibration data will be preserved, but a
+                        new calibration profile must be created before a
+                        replacement physical calibration can be established.
+                      </p>
+
+                      {profile.status === "production" && (
+                        <p className="platform-detail-text">
+                          The calibration currently used at runtime will remain
+                          active until a replacement calibration is approved for
+                          production.
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="platform-confirmation-actions">
+                      <button
+                        type="button"
+                        className="platform-secondary-button"
+                        disabled={loading}
+                        onClick={() => setSupersedeConfirmationOpen(false)}
+                      >
+                        Cancel
+                      </button>
+
+                      <button
+                        type="button"
+                        className="platform-danger-button"
+                        disabled={loading}
+                        onClick={() => void handleSupersedeProfile()}
+                      >
+                        Confirm Supersede
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
         </>

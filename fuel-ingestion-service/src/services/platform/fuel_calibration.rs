@@ -6,7 +6,7 @@ use crate::domain::calibration::{FuelCalibration, FuelCalibrationAnchor, FuelCal
 use crate::fuel_calibration_repository;
 use crate::models::{
     FuelCalibrationProfileResponse, FuelCalibrationSessionPointResponse,
-    FuelCalibrationSessionResponse,
+    FuelCalibrationSessionResponse, LatestFuelSensorObservationResponse,
 };
 use serde_json::to_value;
 
@@ -167,19 +167,8 @@ pub async fn start_session(
 pub async fn capture_point(
     db_pool: &PgPool,
     session_id: Uuid,
-    level_cm: f64,
     cumulative_change_litres: f64,
 ) -> Result<Uuid> {
-    /*
-     * The physical KUM measurement must always be a finite
-     * non-negative distance.
-     */
-    if !level_cm.is_finite() || level_cm < 0.0 {
-        return Err(anyhow!(
-            "Fuel calibration level must be a finite non-negative value."
-        ));
-    }
-
     /*
      * Cumulative fuel change is signed:
      *
@@ -195,6 +184,95 @@ pub async fn capture_point(
     }
 
     /*
+     * Resolve the calibration session back to the physical FUEL sensor
+     * that owns it.
+     *
+     * The client must not decide which sensor observation belongs to a
+     * calibration session. That relationship is owned by the backend:
+     *
+     * session -> profile -> sensor.
+     */
+    let session =
+        fuel_calibration_repository::get_fuel_calibration_session_by_id(db_pool, session_id)
+            .await?;
+
+    let Some(session) = session else {
+        return Err(anyhow!("Fuel calibration session was not found."));
+    };
+
+    let profile = fuel_calibration_repository::get_fuel_calibration_profile_by_id(
+        db_pool,
+        session.profile_id,
+    )
+    .await?;
+
+    let Some(profile) = profile else {
+        return Err(anyhow!("Fuel calibration profile not found."));
+    };
+
+    let sensor_id = profile.sensor_id;
+
+    /*
+     * Load the newest physical KUM observation for the sensor that
+     * actually owns this calibration session.
+     *
+     * This observation comes from fuel_sensor_observations and therefore
+     * exists independently of runtime distance-to-litres calibration.
+     */
+    let observation =
+        fuel_calibration_repository::get_latest_fuel_sensor_observation(db_pool, sensor_id).await?;
+
+    let Some(observation) = observation else {
+        return Err(anyhow!(
+            "No physical fuel sensor observation is available for this calibration session."
+        ));
+    };
+
+    /*
+     * Calibration evidence must come from a recent physical observation.
+     *
+     * The firmware normally reports every 30 seconds while parked, which
+     * is the expected state during guided tank calibration. Allowing up to
+     * 60 seconds accommodates approximately two normal parked reporting
+     * cycles without accepting genuinely stale physical measurements.
+     *
+     * This is intentionally stricter than the general device-health stale
+     * threshold because calibration evidence directly determines the
+     * distance-to-litres relationship used in production.
+     */
+    const MAX_CALIBRATION_OBSERVATION_AGE_SECONDS: i64 = 60;
+
+    let observation_age_seconds = (chrono::Utc::now() - observation.recorded_at).num_seconds();
+
+    if observation_age_seconds < 0
+        || observation_age_seconds > MAX_CALIBRATION_OBSERVATION_AGE_SECONDS
+    {
+        return Err(anyhow!(
+            "Latest physical fuel sensor observation is too old for calibration capture."
+        ));
+    }
+
+    /*
+     * The real-time KUM distance is ORBI's canonical physical measurement
+     * for guided fuel calibration.
+     *
+     * The measurement is resolved entirely by the backend from the latest
+     * physical observation belonging to the session's FUEL sensor. The
+     * client supplies only the known cumulative fuel change.
+     */
+    let observed_level_cm = observation.realtime_distance_cm;
+
+    /*
+     * The backend-derived physical KUM measurement must itself be valid
+     * before it can become calibration evidence.
+     */
+    if !observed_level_cm.is_finite() || observed_level_cm < 0.0 {
+        return Err(anyhow!(
+            "Latest physical fuel sensor observation contains an invalid real-time distance."
+        ));
+    }
+
+    /*
      * The repository owns the persistence details and will:
      *
      * - reject missing sessions;
@@ -206,7 +284,7 @@ pub async fn capture_point(
     fuel_calibration_repository::capture_fuel_calibration_point(
         db_pool,
         session_id,
-        level_cm,
+        observed_level_cm,
         cumulative_change_litres,
     )
     .await
@@ -409,6 +487,53 @@ pub async fn activate_profile_for_production(db_pool: &PgPool, profile_id: Uuid)
     fuel_calibration_repository::mark_fuel_calibration_profile_production(db_pool, profile_id).await
 }
 
+pub async fn get_latest_sensor_observation(
+    db_pool: &PgPool,
+    sensor_id: Uuid,
+) -> Result<Option<LatestFuelSensorObservationResponse>> {
+    /*
+     * Retrieve the newest physical KUM observation independently of
+     * whether this sensor currently has an active runtime calibration.
+     *
+     * This is important during initial installation because guided
+     * calibration necessarily begins before a distance-to-litres
+     * calibration exists.
+     */
+    let observation =
+        fuel_calibration_repository::get_latest_fuel_sensor_observation(db_pool, sensor_id).await?;
+
+    let Some(observation) = observation else {
+        return Ok(None);
+    };
+
+    /*
+     * Keep persistence representation inside the repository layer and
+     * expose an explicit Platform API response model.
+     *
+     * realtime_distance_cm is the measurement that guided calibration
+     * will use when capturing the current physical KUM position.
+     */
+    Ok(Some(LatestFuelSensorObservationResponse {
+        sensor_id: observation.sensor_id,
+        device_id: observation.device_id,
+
+        recorded_at: observation.recorded_at,
+
+        realtime_distance_cm: observation.realtime_distance_cm,
+        smooth_distance_cm: observation.smooth_distance_cm,
+        raw_distance_cm: observation.raw_distance_cm,
+
+        temperature_c: observation.temperature_c,
+
+        status_1: observation.status_1,
+        status_2: observation.status_2,
+        raw_data_validity: observation.raw_data_validity,
+
+        latitude: observation.latitude,
+        longitude: observation.longitude,
+    }))
+}
+
 pub async fn get_profile(
     db_pool: &PgPool,
     sensor_id: Uuid,
@@ -514,4 +639,36 @@ pub async fn get_profile(
         created_at: profile.created_at,
         updated_at: profile.updated_at,
     }))
+}
+
+pub async fn get_device_calibration_mode(db_pool: &PgPool, device_code: &str) -> Result<bool> {
+    /*
+     * Resolve the provisioned device and its installed sensor capabilities
+     * using the same authoritative telemetry context used during ingestion.
+     */
+    let context = repository::find_registered_telemetry_context(db_pool, device_code).await?;
+
+    let Some(context) = context else {
+        return Err(anyhow!(
+            "Unknown device '{}'. Device must be provisioned before runtime state can be requested.",
+            device_code
+        ));
+    };
+
+    /*
+     * Devices without the Fuel Intelligence capability can never enter
+     * fuel-calibration mode.
+     */
+    let Some(fuel_sensor_id) = context.fuel_sensor_id else {
+        return Ok(false);
+    };
+
+    /*
+     * Calibration mode is derived from the calibration-session lifecycle.
+     *
+     * Only an ACTIVE guided calibration session enables the faster physical
+     * fuel-observation mode. Paused, completed and abandoned sessions all
+     * resolve to false.
+     */
+    fuel_calibration_repository::is_fuel_calibration_active(db_pool, fuel_sensor_id).await
 }

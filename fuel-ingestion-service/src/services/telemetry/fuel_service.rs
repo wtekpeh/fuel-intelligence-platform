@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::domain::telemetry::models::FuelTelemetry;
 use crate::models::FuelReading;
-use crate::repository::NewSensorReading;
+use crate::repository::{self, NewFuelSensorObservation, NewSensorReading};
 use crate::services::telemetry::persistence::persist_sensor_reading;
 
 /// Persists fuel telemetry for devices that include the Fuel Intelligence
@@ -29,6 +29,41 @@ pub async fn persist_fuel_reading(
     fuel: &FuelTelemetry,
 ) -> Result<()> {
     let raw_payload: Value = serde_json::to_value(reading)?;
+
+    /*
+     * Persist the physical KUM observation before attempting runtime
+     * calibration persistence.
+     *
+     * This is deliberately unconditional once canonical FuelTelemetry exists.
+     * A newly installed sensor therefore retains its physical measurements even
+     * when no active tank calibration exists yet.
+     *
+     * Those observations can later be used by the guided calibration workflow
+     * to capture the current physical sensor position without asking the
+     * installer to manually type a centimetre measurement.
+     */
+    repository::insert_fuel_sensor_observation(
+        db_pool,
+        NewFuelSensorObservation {
+            sensor_id: fuel_sensor_id,
+            device_id,
+            recorded_at: reading.timestamp,
+
+            realtime_distance_cm: fuel.raw.realtime_distance_cm,
+            smooth_distance_cm: fuel.raw.smooth_distance_cm,
+            raw_distance_cm: fuel.raw.raw_distance_cm,
+
+            temperature_c: fuel.raw.temperature_c,
+
+            status_1: fuel.raw.status_byte_1,
+            status_2: fuel.raw.status_byte_2,
+            raw_data_validity: fuel.raw.raw_data_validity,
+
+            latitude: Some(reading.latitude),
+            longitude: Some(reading.longitude),
+        },
+    )
+    .await?;
 
     /*
      * Physical firmware submits raw fuel measurements such as ultrasonic

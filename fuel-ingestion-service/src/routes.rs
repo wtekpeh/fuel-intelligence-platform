@@ -6,7 +6,7 @@ use crate::domain::telemetry::telemetry_pipeline::TelemetryPipeline;
 
 use crate::handlers::{
     acknowledge_alert_handler, check_position_against_geofences_handler, create_geofence_handler,
-    get_alert_trends_handler, get_device_health_trends_handler,
+    get_alert_trends_handler, get_device_health_trends_handler, get_device_runtime_state,
     get_geofence_activity_trends_handler, get_geofence_utilization_handler, ingest_reading_batch,
     list_alerts, list_device_state_events, list_geofence_transition_events_handler,
     list_geofences_handler, list_operational_intelligence_events_handler,
@@ -90,6 +90,10 @@ pub fn app_routes(db_pool: PgPool, config: AppConfig, alert_hub: AlertHub) -> Ro
             get(list_recent_telemetry_stream),
         )
         .route("/api/heartbeat", post(receive_heartbeat))
+        .route(
+            "/api/devices/:device_code/runtime-state",
+            get(get_device_runtime_state),
+        )
         .route("/api/devices/refresh-health", post(refresh_device_health))
         .route(
             "/api/device-health-events",

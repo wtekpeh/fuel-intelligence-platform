@@ -56,10 +56,101 @@ pub struct FuelCalibrationSessionPointRow {
     pub created_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone)]
+pub struct FuelSensorObservationRow {
+    pub id: Uuid,
+    pub sensor_id: Uuid,
+    pub device_id: Uuid,
+
+    pub recorded_at: DateTime<Utc>,
+    pub received_at: DateTime<Utc>,
+
+    pub realtime_distance_cm: f64,
+    pub smooth_distance_cm: f64,
+    pub raw_distance_cm: f64,
+
+    pub temperature_c: Option<f64>,
+    pub status_1: Option<i16>,
+    pub status_2: Option<i16>,
+    pub raw_data_validity: Option<i16>,
+
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+}
+
 #[derive(Debug)]
 pub struct StoredPublishableFuelCalibrationPoint {
     pub level_cm: f64,
     pub resolved_litres: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct LatestFuelSensorObservationRow {
+    pub sensor_id: Uuid,
+    pub device_id: Uuid,
+
+    pub recorded_at: DateTime<Utc>,
+
+    pub realtime_distance_cm: f64,
+    pub smooth_distance_cm: f64,
+    pub raw_distance_cm: f64,
+
+    pub temperature_c: Option<f64>,
+
+    pub status_1: Option<i16>,
+    pub status_2: Option<i16>,
+    pub raw_data_validity: Option<i16>,
+
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+}
+
+pub async fn get_latest_fuel_sensor_observation(
+    db_pool: &PgPool,
+    sensor_id: Uuid,
+) -> Result<Option<LatestFuelSensorObservationRow>> {
+    /*
+     * Retrieve the newest physical KUM observation for this installed
+     * fuel sensor.
+     *
+     * This deliberately reads from fuel_sensor_observations rather than
+     * sensor_readings:
+     *
+     * fuel_sensor_observations
+     *     -> physical KUM distances before tank calibration
+     *
+     * sensor_readings
+     *     -> calibrated operational quantity in litres
+     *
+     * Guided calibration needs the physical measurement.
+     */
+    let observation = sqlx::query_as!(
+        LatestFuelSensorObservationRow,
+        r#"
+        SELECT
+            sensor_id,
+            device_id,
+            recorded_at,
+            realtime_distance_cm,
+            smooth_distance_cm,
+            raw_distance_cm,
+            temperature_c,
+            status_1,
+            status_2,
+            raw_data_validity,
+            latitude,
+            longitude
+        FROM fuel_sensor_observations
+        WHERE sensor_id = $1
+        ORDER BY recorded_at DESC
+        LIMIT 1
+        "#,
+        sensor_id,
+    )
+    .fetch_optional(db_pool)
+    .await?;
+
+    Ok(observation)
 }
 
 pub async fn create_fuel_calibration_profile(
@@ -115,6 +206,41 @@ pub async fn get_current_fuel_calibration_profile(
     .await?;
 
     Ok(profile)
+}
+
+pub async fn is_fuel_calibration_active(db_pool: &PgPool, sensor_id: Uuid) -> Result<bool> {
+    /*
+     * Firmware calibration mode is derived from the authoritative
+     * calibration-session lifecycle.
+     *
+     * We deliberately do not persist a separate calibration-mode flag
+     * against the device. Doing so would introduce another piece of state
+     * that could drift away from the actual calibration session.
+     *
+     * Only an ACTIVE session enables calibration mode.
+     *
+     * A paused session remains unfinished from the platform's perspective,
+     * but the physical device should return to its normal reporting cadence
+     * while calibration work is paused.
+     */
+    let calibration_active = sqlx::query_scalar!(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM fuel_calibration_profiles fcp
+            INNER JOIN fuel_calibration_sessions fcs
+                ON fcs.profile_id = fcp.id
+            WHERE fcp.sensor_id = $1
+              AND fcp.status <> 'superseded'
+              AND fcs.status = 'active'
+        ) AS "calibration_active!"
+        "#,
+        sensor_id,
+    )
+    .fetch_one(db_pool)
+    .await?;
+
+    Ok(calibration_active)
 }
 
 pub async fn get_fuel_calibration_profile_by_id(
@@ -252,6 +378,38 @@ pub async fn get_unfinished_fuel_calibration_session(
     Ok(session)
 }
 
+pub async fn get_fuel_calibration_session_by_id(
+    db_pool: &PgPool,
+    session_id: Uuid,
+) -> Result<Option<FuelCalibrationSessionRow>> {
+    let session = sqlx::query_as!(
+        FuelCalibrationSessionRow,
+        r#"
+        SELECT
+            id,
+            profile_id,
+            status,
+            started_at,
+            completed_at,
+            starting_litres,
+            ending_litres,
+            anchor_cumulative_change_litres,
+            anchor_absolute_litres,
+            anchor_established_at,
+            created_at,
+            updated_at
+        FROM fuel_calibration_sessions
+        WHERE id = $1
+        LIMIT 1
+        "#,
+        session_id,
+    )
+    .fetch_optional(db_pool)
+    .await?;
+
+    Ok(session)
+}
+
 pub async fn list_fuel_calibration_sessions(
     db_pool: &PgPool,
     profile_id: Uuid,
@@ -295,6 +453,7 @@ pub async fn capture_fuel_calibration_point(
         SELECT
             fcs.status,
             fcs.starting_litres,
+            fcp.sensor_id,
             fcp.tank_capacity_litres
         FROM fuel_calibration_sessions fcs
         JOIN fuel_calibration_profiles fcp

@@ -14,6 +14,7 @@ use axum::{
 
 use crate::domain::telemetry::conversions::map_legacy_readings;
 use crate::services::fuel_detection::{detect_fuel_event, detect_possible_leak};
+use crate::services::platform::fuel_calibration::get_device_calibration_mode;
 use crate::services::sensor_health::detect_frozen_fuel_sensor;
 use crate::services::telemetry::gps_service::persist_gps_reading;
 use crate::{
@@ -21,8 +22,8 @@ use crate::{
         AlertResponse, AnalyticsDeviceHealthTrendQuery, AnalyticsGeofenceActivityQuery,
         AnalyticsGeofenceUtilizationQuery, ApiResponse, CheckPositionRequest,
         CheckPositionResponse, CreateGeofenceRequest, DeviceHealthTrendResponse,
-        DeviceStateEventResponse, GeofenceActivityTrendResponse, GeofenceUtilizationResponse,
-        HeartbeatRequest, HeartbeatResponse, ReadingBatch,
+        DeviceRuntimeStateResponse, DeviceStateEventResponse, GeofenceActivityTrendResponse,
+        GeofenceUtilizationResponse, HeartbeatRequest, HeartbeatResponse, ReadingBatch,
     },
     repository::{
         StoredTelemetryPosition, acknowledge_alert, check_position_against_geofences,
@@ -334,6 +335,40 @@ pub async fn refresh_device_health(State(app_state): State<AppState>) -> impl In
                 Json(serde_json::json!({
                     "success": false,
                     "message": format!("Device health refresh failed: {}", err)
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+pub async fn get_device_runtime_state(
+    State(app_state): State<AppState>,
+    Path(device_code): Path<String>,
+) -> impl IntoResponse {
+    let db_pool = &app_state.db_pool;
+
+    match get_device_calibration_mode(db_pool, &device_code).await {
+        Ok(calibration_mode) => (
+            StatusCode::OK,
+            Json(DeviceRuntimeStateResponse { calibration_mode }),
+        )
+            .into_response(),
+
+        Err(err) => {
+            eprintln!(
+                "Failed to retrieve runtime state for device '{}': {}",
+                device_code, err
+            );
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "success": false,
+                    "message": format!(
+                        "Failed to retrieve runtime state for device '{}'.",
+                        device_code
+                    )
                 })),
             )
                 .into_response()

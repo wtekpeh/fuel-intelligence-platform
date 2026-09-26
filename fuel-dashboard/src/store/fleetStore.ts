@@ -2,6 +2,8 @@ import { create } from "zustand";
 
 import type { OrganizationFleetOverview } from "../types";
 
+const SELECTED_FLEET_DEVICE_STORAGE_KEY = "orbi:selected-fleet-device-id";
+
 interface FleetStore {
   fleetItems: OrganizationFleetOverview[];
 
@@ -19,18 +21,34 @@ export const useFleetStore = create<FleetStore>((set) => ({
 
   selectedDevice: null,
 
-  setFleetItems: (items) =>
+  setFleetItems: (items) => {
+    const storedDeviceId = localStorage.getItem(
+      SELECTED_FLEET_DEVICE_STORAGE_KEY,
+    );
+
+    const restoredDevice = storedDeviceId
+      ? (items.find((item) => item.device_id === storedDeviceId) ?? null)
+      : null;
+
     set({
       fleetItems: items,
-    }),
+      selectedDevice: restoredDevice,
+    });
+  },
 
-  selectDevice: (device) =>
+  selectDevice: (device) => {
+    localStorage.setItem(SELECTED_FLEET_DEVICE_STORAGE_KEY, device.device_id);
+
     set({
       selectedDevice: device,
-    }),
+    });
+  },
 
-  clearSelectedDevice: () =>
+  clearSelectedDevice: () => {
+    localStorage.removeItem(SELECTED_FLEET_DEVICE_STORAGE_KEY);
+
     set({
       selectedDevice: null,
-    }),
+    });
+  },
 }));

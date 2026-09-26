@@ -216,7 +216,11 @@ Create Fuel Calibration Profile
 ↓
 Start Guided Calibration Session
 ↓
-Capture Physical KUM Measurements
+Installer Enters Signed Cumulative Litre Change
+↓
+Backend Resolves Fresh Authoritative KUM Real-Time Observation
+↓
+Persist Guided Calibration Point
 ↓
 Pause / Resume / Abandon When Required
 ↓
@@ -237,6 +241,67 @@ Explicit Production Approval
 Activate Runtime Fuel Calibration
 ↓
 Runtime Fuel Interpolation
+
+### Authoritative Guided Calibration Capture Contract
+
+Guided calibration capture now follows a server-authoritative measurement model.
+
+The browser does **not** submit the ultrasonic distance used as calibration
+evidence. Its responsibility is limited to the installer-known fuel change for
+the current guided session.
+
+Current capture responsibility:
+
+```text
+Physical KUM Sensor
+↓
+Normal Telemetry Ingestion
+↓
+Persisted Physical Fuel Observation
+↓
+Guided Calibration Capture Request
+    └── Browser supplies signed cumulative litre change only
+↓
+Backend loads the latest physical observation for the provisioned FUEL sensor
+↓
+Freshness validation
+↓
+Authoritative fuel_distance_realtime_cm selected by the backend
+↓
+Guided calibration point persisted
+```
+
+This prevents a browser client from becoming the authority for physical sensor
+measurements.
+
+For the current guided workflow:
+
+- `fuel_distance_realtime_cm` is the authoritative KUM channel used for point capture
+- the latest physical observation must belong to the provisioned FUEL sensor
+- observations older than **60 seconds** are rejected for guided point capture
+- missing physical observations are rejected
+- invalid or unavailable real-time distance measurements are rejected
+- the browser does not provide the authoritative distance value
+
+Physical KUM observations are persisted independently of calibrated fuel
+readings. This is important because guided calibration must be possible before
+a production fuel lookup table exists.
+
+The resulting separation is:
+
+```text
+Physical observation
+    = what the KUM sensor actually measured
+
+Guided calibration point
+    = physical observation + installer-known litre change
+
+Runtime calibrated fuel
+    = active approved lookup table + current physical observation
+```
+
+This preserves the measurement-first architecture throughout installation,
+calibration, publication, production approval, and normal runtime operation.
 
 ### Calibration Coverage and Confidence
 
@@ -430,6 +495,9 @@ Fuel Service
 Current responsibilities:
 
 - raw fuel telemetry acceptance
+- independent persistence of physical KUM observations
+- authoritative latest-observation resolution for guided calibration
+- calibration-capture freshness enforcement
 - active installation-specific fuel calibration loading
 - real-time KUM measurement calibration
 - piecewise interpolation into litres and tank percentage
@@ -1354,6 +1422,14 @@ Capture a physical calibration point:
 ```http
 POST /api/fuel-calibration/sessions/{session_id}/points
 ```
+
+The capture request supplies the installer-known signed cumulative litre change.
+The backend resolves the physical KUM distance from the latest persisted
+observation for the provisioned FUEL sensor. The client does not author the
+distance used as calibration evidence.
+
+A capture is rejected when no usable physical observation exists or when the
+latest observation is older than the current 60-second freshness boundary.
 
 Session lifecycle:
 
@@ -2585,6 +2661,12 @@ Implemented:
   - abandoned
   - completed
 - signed cumulative fuel-change capture
+- server-authoritative guided calibration distance capture
+- independent physical KUM observation persistence
+- latest physical-observation resolution by provisioned FUEL sensor
+- 60-second guided-calibration observation freshness guard
+- rejection of missing, stale, or unusable physical observations
+- browser-independent physical measurement authority
 - absolute anchor support
 - progressive verified-range accumulation
 - calibration coverage percentage tracking
@@ -3377,8 +3459,22 @@ Calibrated Fuel Persistence
 ↓
 Fuel Intelligence
 
-Guided fuel calibration sessions are now implemented and validated with real
-hardware. Future capabilities such as sensor replacement workflows,
+Guided fuel calibration sessions are implemented, and the underlying KUM
+calibration/runtime architecture has already been validated with real hardware.
+
+The hardened guided-calibration backend currently passes its dedicated
+regression suite:
+
+```text
+65 calibration tests passed
+0 failed
+```
+
+The next calibration milestone is the redesigned installer-facing wizard,
+followed by a final physical guided-calibration workflow validation using the
+server-authoritative capture contract.
+
+Future capabilities such as sensor replacement workflows,
 deployment profiles, and adapter-management interfaces will be introduced
 when required.
 
@@ -3790,7 +3886,17 @@ Real-Time KUM Runtime Calibration Input ✅
 ↓
 End-to-End Physical Fuel Interpolation Validation ✅
 ↓
-Guided Calibration Wizard
+Server-Authoritative Guided Calibration Capture ✅
+↓
+Physical KUM Observation Persistence ✅
+↓
+Calibration Observation Freshness Guard ✅
+↓
+Guided Calibration Backend Regression Tests (65/65) ✅
+↓
+Guided Calibration Wizard Redesign ← Current
+↓
+Final Physical Guided-Calibration Workflow Validation
 ↓
 Fuel Intelligence Validation ✅
 ↓

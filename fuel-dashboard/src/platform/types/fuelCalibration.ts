@@ -22,10 +22,8 @@ export interface StartFuelCalibrationSessionRequest {
 }
 
 export interface CaptureFuelCalibrationPointRequest {
-  level_cm: number;
   cumulative_change_litres: number;
 }
-
 export interface ApplyFuelCalibrationAnchorRequest {
   cumulative_change_litres: number;
   absolute_litres: number;
@@ -90,4 +88,24 @@ export interface FuelCalibrationProfile {
 
   created_at: string;
   updated_at: string;
+}
+
+export interface LatestFuelSensorObservation {
+  sensor_id: string;
+  device_id: string;
+
+  recorded_at: string;
+
+  realtime_distance_cm: number;
+  smooth_distance_cm: number;
+  raw_distance_cm: number;
+
+  temperature_c: number | null;
+
+  status_1: number | null;
+  status_2: number | null;
+  raw_data_validity: number | null;
+
+  latitude: number | null;
+  longitude: number | null;
 }

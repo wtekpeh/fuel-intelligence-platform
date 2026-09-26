@@ -175,6 +175,11 @@ pub struct HeartbeatResponse {
 }
 
 #[derive(Debug, Serialize)]
+pub struct DeviceRuntimeStateResponse {
+    pub calibration_mode: bool,
+}
+
+#[derive(Debug, Serialize)]
 pub struct DeviceHealthEventResponse {
     pub id: String,
     pub device_id: String,
@@ -651,17 +656,16 @@ pub struct StartFuelCalibrationSessionRequest {
     pub starting_litres: Option<f64>,
 }
 
-/// Records one physical KUM observation during an active guided session.
+/// Captures one guided calibration point during an active session.
 ///
-/// `cumulative_change_litres` represents the known change relative to the
-/// beginning of the session:
+/// The client supplies only the known cumulative fuel change relative
+/// to the beginning of the session.
 ///
-/// - 0.0   = no known change from session start;
-/// - 20.0  = twenty litres added;
-/// - -20.0 = twenty litres removed.
+/// The physical KUM level is not client-supplied. The backend resolves
+/// the session's FUEL sensor and uses its latest valid physical
+/// observation as the calibration measurement.
 #[derive(Debug, Deserialize)]
 pub struct CaptureFuelCalibrationPointRequest {
-    pub level_cm: f64,
     pub cumulative_change_litres: f64,
 }
 
@@ -695,6 +699,35 @@ pub struct FuelCalibrationSessionMutationResponse {
 pub struct FuelCalibrationPointMutationResponse {
     pub point_id: Uuid,
     pub message: String,
+}
+
+/// Latest physical observation reported by an installed KUM fuel sensor.
+///
+/// This represents the sensor measurement before tank-specific calibration
+/// converts ultrasonic distance into litres.
+///
+/// Guided calibration uses the real-time distance as the physical measurement
+/// captured for a calibration point. The smooth and raw measurements remain
+/// available to the installer for comparison and diagnostics.
+#[derive(Debug, Serialize)]
+pub struct LatestFuelSensorObservationResponse {
+    pub sensor_id: Uuid,
+    pub device_id: Uuid,
+
+    pub recorded_at: DateTime<Utc>,
+
+    pub realtime_distance_cm: f64,
+    pub smooth_distance_cm: f64,
+    pub raw_distance_cm: f64,
+
+    pub temperature_c: Option<f64>,
+
+    pub status_1: Option<i16>,
+    pub status_2: Option<i16>,
+    pub raw_data_validity: Option<i16>,
+
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
 }
 
 /// One verified or unresolved KUM observation belonging to a guided

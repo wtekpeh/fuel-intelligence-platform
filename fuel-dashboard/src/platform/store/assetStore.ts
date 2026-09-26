@@ -7,6 +7,21 @@ import type { OrganizationFleetOverview } from "../../types";
 import { createAsset } from "../../api/platformApi";
 import type { CreateAssetRequest } from "../../types";
 
+const SELECTED_ASSET_STORAGE_KEY = "orbi.platform.selectedAssetId";
+
+const readStoredAssetId = (): string | null => {
+  return window.localStorage.getItem(SELECTED_ASSET_STORAGE_KEY);
+};
+
+const storeSelectedAssetId = (assetId: string | null) => {
+  if (assetId) {
+    window.localStorage.setItem(SELECTED_ASSET_STORAGE_KEY, assetId);
+    return;
+  }
+
+  window.localStorage.removeItem(SELECTED_ASSET_STORAGE_KEY);
+};
+
 export interface PlatformAssetSummary {
   asset_id: string;
   asset_name: string;
@@ -93,7 +108,15 @@ export const useAssetStore = create<AssetStore>((set) => ({
       const fleetRows = await fetchOrganizationFleetOverview(organizationId);
 
       const assets = groupFleetRowsIntoAssets(fleetRows);
-      const selectedAsset = assets[0] ?? null;
+
+      const storedAssetId = readStoredAssetId();
+
+      const selectedAsset =
+        assets.find((asset) => asset.asset_id === storedAssetId) ??
+        assets[0] ??
+        null;
+
+      storeSelectedAssetId(selectedAsset?.asset_id ?? null);
 
       set({
         assets,
@@ -134,6 +157,8 @@ export const useAssetStore = create<AssetStore>((set) => ({
   },
 
   addLocalAsset: (asset) => {
+    storeSelectedAssetId(asset.asset_id);
+
     set((state) => ({
       assets: [asset, ...state.assets],
       selectedAsset: asset,
@@ -142,6 +167,8 @@ export const useAssetStore = create<AssetStore>((set) => ({
   },
 
   selectAsset: (asset) => {
+    storeSelectedAssetId(asset?.asset_id ?? null);
+
     set({
       selectedAsset: asset,
       selectedAssetRows: asset?.rows ?? [],

@@ -20,6 +20,32 @@ use crate::models::{
 };
 use crate::services::device_health::classify_device_status;
 
+/// One raw physical observation received from an installed KUM fuel sensor.
+///
+/// This is deliberately separate from `NewSensorReading`.
+///
+/// `NewFuelSensorObservation` represents the physical ultrasonic measurement
+/// before tank calibration, while `NewSensorReading` represents the normalized
+/// operational value produced after calibration.
+pub struct NewFuelSensorObservation {
+    pub sensor_id: Uuid,
+    pub device_id: Uuid,
+    pub recorded_at: DateTime<Utc>,
+
+    pub realtime_distance_cm: f64,
+    pub smooth_distance_cm: f64,
+    pub raw_distance_cm: f64,
+
+    pub temperature_c: f64,
+
+    pub status_1: u8,
+    pub status_2: u8,
+    pub raw_data_validity: u8,
+
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+}
+
 pub struct NewSensorReading {
     pub sensor_id: Uuid,
     pub device_id: Uuid,
@@ -754,6 +780,62 @@ async fn get_or_create_sensor(
     .await?;
 
     Ok(row.id)
+}
+
+pub(crate) async fn insert_fuel_sensor_observation(
+    db_pool: &PgPool,
+    observation: NewFuelSensorObservation,
+) -> Result<()> {
+    /*
+     * Persist the physical KUM observation independently from the
+     * calibrated operational fuel reading.
+     *
+     * This means raw fuel measurements remain available even when the
+     * sensor does not yet have an active tank calibration.
+     *
+     * The unique (sensor_id, recorded_at) constraint makes ingestion
+     * idempotent when the same telemetry packet is received again.
+     */
+    sqlx::query!(
+        r#"
+        INSERT INTO fuel_sensor_observations (
+            sensor_id,
+            device_id,
+            recorded_at,
+            realtime_distance_cm,
+            smooth_distance_cm,
+            raw_distance_cm,
+            temperature_c,
+            status_1,
+            status_2,
+            raw_data_validity,
+            latitude,
+            longitude
+        )
+        VALUES (
+            $1, $2, $3, $4, $5, $6,
+            $7, $8, $9, $10, $11, $12
+        )
+        ON CONFLICT (sensor_id, recorded_at)
+        DO NOTHING
+        "#,
+        observation.sensor_id,
+        observation.device_id,
+        observation.recorded_at,
+        observation.realtime_distance_cm,
+        observation.smooth_distance_cm,
+        observation.raw_distance_cm,
+        observation.temperature_c,
+        i16::from(observation.status_1),
+        i16::from(observation.status_2),
+        i16::from(observation.raw_data_validity),
+        observation.latitude,
+        observation.longitude,
+    )
+    .execute(db_pool)
+    .await?;
+
+    Ok(())
 }
 
 pub(crate) async fn insert_sensor_reading(

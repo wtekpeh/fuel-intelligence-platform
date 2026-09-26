@@ -45,6 +45,9 @@ pub enum ModemRequestKind {
     /// Publish the independent device heartbeat.
     Heartbeat,
 
+    /// Retrieve backend-controlled runtime state such as calibration mode.
+    RuntimeState,
+
     /// Read SIM/network registration and packet-data state.
     NetworkState,
 
@@ -102,6 +105,7 @@ impl ModemRequestKind {
             Self::GnssFix
             | Self::LiveTelemetry
             | Self::Heartbeat
+            | Self::RuntimeState
             | Self::NetworkState
             | Self::Diagnostics => ModemRequestPriority::Foreground,
         }
@@ -125,6 +129,9 @@ pub enum ModemRequest {
     /// Send the prepared heartbeat payload.
     Heartbeat,
 
+    /// Retrieve the backend-controlled runtime state for this device.
+    RuntimeState,
+
     /// Send the newest live telemetry payload immediately.
     LiveTelemetry,
 }
@@ -137,6 +144,7 @@ impl ModemRequest {
             Self::NetworkState => ModemRequestKind::NetworkState,
             Self::Diagnostics => ModemRequestKind::Diagnostics,
             Self::Heartbeat => ModemRequestKind::Heartbeat,
+            Self::RuntimeState => ModemRequestKind::RuntimeState,
             Self::LiveTelemetry => ModemRequestKind::LiveTelemetry,
         }
     }
@@ -181,6 +189,22 @@ pub static HEARTBEAT_PAYLOAD: Signal<CriticalSectionRawMutex, String<256>> = Sig
 
 /// Result of the most recent heartbeat HTTP transaction.
 pub static HEARTBEAT_RESPONSE: Signal<CriticalSectionRawMutex, bool> = Signal::new();
+
+/// Device code associated with the pending runtime-state request.
+///
+/// The actual identity is staged separately from `ModemRequest` so the
+/// foreground control channel remains lightweight, following the same
+/// pattern already used for heartbeat and live telemetry payloads.
+pub static RUNTIME_STATE_DEVICE_CODE: Signal<CriticalSectionRawMutex, String<32>> = Signal::new();
+
+/// Backend-controlled calibration-mode state returned by the modem owner.
+///
+/// Option<bool> deliberately preserves three different outcomes:
+///
+/// - Some(true)  -> backend explicitly enabled calibration mode
+/// - Some(false) -> backend explicitly disabled calibration mode
+/// - None        -> runtime state could not be retrieved or parsed
+pub static RUNTIME_STATE_RESPONSE: Signal<CriticalSectionRawMutex, Option<bool>> = Signal::new();
 
 /// Prepared live telemetry payload waiting for the modem owner.
 ///
@@ -247,6 +271,31 @@ pub async fn execute_foreground_request(modem: &mut Modem<'_>, request: ModemReq
             let succeeded = crate::network::http::send_heartbeat(modem, &payload).await;
 
             HEARTBEAT_RESPONSE.signal(succeeded);
+        }
+
+        ModemRequest::RuntimeState => {
+            /*
+             * Retrieve the provisioned runtime device code staged by the
+             * caller before this control request was queued.
+             *
+             * The modem owner remains responsible only for executing the
+             * HTTP transaction. It does not independently determine the
+             * device's identity.
+             */
+            let device_code = RUNTIME_STATE_DEVICE_CODE.wait().await;
+
+            /*
+             * Ask the backend whether this particular provisioned device
+             * is currently operating in guided fuel-calibration mode.
+             *
+             * None deliberately represents an unavailable or unparseable
+             * runtime-state response rather than silently meaning false.
+             */
+            let calibration_mode =
+                crate::network::http::get_runtime_calibration_mode(modem, device_code.as_str())
+                    .await;
+
+            RUNTIME_STATE_RESPONSE.signal(calibration_mode);
         }
 
         ModemRequest::LiveTelemetry => {
@@ -350,6 +399,40 @@ pub async fn request_network_state() -> NetworkState {
     MODEM_WORK_AVAILABLE.signal(());
 
     NETWORK_STATE_RESPONSE.wait().await
+}
+
+/// Ask the modem owner for the backend-controlled runtime state
+/// belonging to this provisioned device.
+///
+/// The caller supplies the runtime device code because device identity
+/// belongs to the provisioning/runtime-identity layer rather than to
+/// the modem owner.
+///
+/// None means the runtime state could not be retrieved or parsed.
+pub async fn request_runtime_state(device_code: &str) -> Option<bool> {
+    /*
+     * Copy the provisioned device code into a bounded heapless string
+     * before handing ownership to the modem-owner request path.
+     */
+    let mut staged_device_code = String::<32>::new();
+
+    if staged_device_code.push_str(device_code).is_err() {
+        return None;
+    }
+
+    /*
+     * Stage the request data before queueing the lightweight control
+     * message, matching the existing heartbeat/telemetry architecture.
+     */
+    RUNTIME_STATE_DEVICE_CODE.signal(staged_device_code);
+
+    FOREGROUND_MODEM_REQUESTS
+        .send(ModemRequest::RuntimeState)
+        .await;
+
+    MODEM_WORK_AVAILABLE.signal(());
+
+    RUNTIME_STATE_RESPONSE.wait().await
 }
 
 /// Send a heartbeat through the modem owner.

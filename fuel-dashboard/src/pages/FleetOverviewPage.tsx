@@ -1,20 +1,23 @@
 import { useFleetOverview } from "../services/useFleetOverview";
 import { useFleetStore } from "../store/fleetStore";
 import { useOrganizationStore } from "../store/organizationStore";
-import { useAppViewStore } from "../store/appViewStore";
+import { useNavigate } from "react-router-dom";
 import FuelLevelGauge from "../components/shared/FuelLevelGauge";
 import { useTelemetryStore } from "../store/telemetryStore";
+import { useOrganizationOverview } from "../services/useOrganizationOverview";
 
 import "../styles/fleet.css";
 
 export function FleetOverviewPage() {
+  useOrganizationOverview();
+
   const selectedOrganization = useOrganizationStore(
     (state) => state.selectedOrganization,
   );
 
   const selectDevice = useFleetStore((state) => state.selectDevice);
 
-  const showDashboard = useAppViewStore((state) => state.showDashboard);
+  const navigate = useNavigate();
 
   const fleetItems = useFleetStore((state) => state.fleetItems);
 
@@ -178,7 +181,7 @@ export function FleetOverviewPage() {
               className="fleet-card__button"
               onClick={() => {
                 selectDevice(item);
-                showDashboard();
+                navigate("/dashboard");
               }}
             >
               Open Device Dashboard
