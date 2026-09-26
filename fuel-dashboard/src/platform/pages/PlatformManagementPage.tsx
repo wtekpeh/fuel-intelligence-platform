@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import RegisterDeviceSheet from "../components/RegisterDeviceSheet";
 import DeviceOnboardingWizard from "../components/DeviceOnboardingWizard";
+import FuelCalibrationPanel from "../components/FuelCalibrationPanel";
 import { useAssetStore } from "../store/assetStore";
 import { useDeviceStore } from "../store/deviceStore";
 import { useDeviceModelStore } from "../store/deviceModelStore";
@@ -374,6 +375,10 @@ export default function PlatformManagementPage() {
             </div>
           </div>
         </aside>
+      </section>
+
+      <section className="platform-calibration-section">
+        <FuelCalibrationPanel />
       </section>
 
       <DeviceOnboardingWizard

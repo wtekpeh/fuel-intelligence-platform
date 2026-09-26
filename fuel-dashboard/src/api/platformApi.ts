@@ -15,6 +15,17 @@ import type {
   DeviceCatalogueModel,
 } from "../types";
 
+import type {
+  ApplyFuelCalibrationAnchorRequest,
+  CaptureFuelCalibrationPointRequest,
+  CreateFuelCalibrationProfileRequest,
+  FuelCalibrationPointMutationResponse,
+  FuelCalibrationProfile,
+  FuelCalibrationProfileMutationResponse,
+  FuelCalibrationSessionMutationResponse,
+  StartFuelCalibrationSessionRequest,
+} from "../platform/types/fuelCalibration";
+
 interface HardwareProfileApiResponse {
   id: string;
   profile_code: string;
@@ -271,6 +282,148 @@ export async function provisionInventoryDevice(
       asset_id: request.assetId,
     },
   );
+
+  return response.data;
+}
+
+// -----------------------------------------------------------------------------
+// Guided Fuel Calibration
+// -----------------------------------------------------------------------------
+
+export async function fetchFuelCalibrationProfile(
+  sensorId: string,
+): Promise<FuelCalibrationProfile | null> {
+  const response = await httpClient.get<FuelCalibrationProfile | null>(
+    `/api/sensors/${sensorId}/fuel-calibration`,
+  );
+
+  return response.data;
+}
+
+export async function createFuelCalibrationProfile(
+  sensorId: string,
+  request: CreateFuelCalibrationProfileRequest,
+): Promise<FuelCalibrationProfileMutationResponse> {
+  const response =
+    await httpClient.post<FuelCalibrationProfileMutationResponse>(
+      `/api/sensors/${sensorId}/fuel-calibration`,
+      request,
+    );
+
+  return response.data;
+}
+
+export async function startFuelCalibrationSession(
+  profileId: string,
+  request: StartFuelCalibrationSessionRequest,
+): Promise<FuelCalibrationSessionMutationResponse> {
+  const response =
+    await httpClient.post<FuelCalibrationSessionMutationResponse>(
+      `/api/fuel-calibration/profiles/${profileId}/sessions`,
+      request,
+    );
+
+  return response.data;
+}
+
+export async function captureFuelCalibrationPoint(
+  sessionId: string,
+  request: CaptureFuelCalibrationPointRequest,
+): Promise<FuelCalibrationPointMutationResponse> {
+  const response = await httpClient.post<FuelCalibrationPointMutationResponse>(
+    `/api/fuel-calibration/sessions/${sessionId}/points`,
+    request,
+  );
+
+  return response.data;
+}
+
+export async function pauseFuelCalibrationSession(
+  sessionId: string,
+): Promise<FuelCalibrationSessionMutationResponse> {
+  const response =
+    await httpClient.post<FuelCalibrationSessionMutationResponse>(
+      `/api/fuel-calibration/sessions/${sessionId}/pause`,
+    );
+
+  return response.data;
+}
+
+export async function resumeFuelCalibrationSession(
+  sessionId: string,
+): Promise<FuelCalibrationSessionMutationResponse> {
+  const response =
+    await httpClient.post<FuelCalibrationSessionMutationResponse>(
+      `/api/fuel-calibration/sessions/${sessionId}/resume`,
+    );
+
+  return response.data;
+}
+
+export async function applyFuelCalibrationAnchor(
+  sessionId: string,
+  request: ApplyFuelCalibrationAnchorRequest,
+): Promise<FuelCalibrationSessionMutationResponse> {
+  const response =
+    await httpClient.post<FuelCalibrationSessionMutationResponse>(
+      `/api/fuel-calibration/sessions/${sessionId}/anchor`,
+      request,
+    );
+
+  return response.data;
+}
+
+export async function completeFuelCalibrationSession(
+  sessionId: string,
+): Promise<FuelCalibrationSessionMutationResponse> {
+  const response =
+    await httpClient.post<FuelCalibrationSessionMutationResponse>(
+      `/api/fuel-calibration/sessions/${sessionId}/complete`,
+    );
+
+  return response.data;
+}
+
+export async function abandonFuelCalibrationSession(
+  sessionId: string,
+): Promise<FuelCalibrationSessionMutationResponse> {
+  const response =
+    await httpClient.post<FuelCalibrationSessionMutationResponse>(
+      `/api/fuel-calibration/sessions/${sessionId}/abandon`,
+    );
+
+  return response.data;
+}
+
+export async function supersedeFuelCalibrationProfile(
+  profileId: string,
+): Promise<FuelCalibrationProfileMutationResponse> {
+  const response =
+    await httpClient.post<FuelCalibrationProfileMutationResponse>(
+      `/api/fuel-calibration/profiles/${profileId}/supersede`,
+    );
+
+  return response.data;
+}
+
+export async function publishFuelCalibrationProfile(
+  profileId: string,
+): Promise<FuelCalibrationProfileMutationResponse> {
+  const response =
+    await httpClient.post<FuelCalibrationProfileMutationResponse>(
+      `/api/fuel-calibration/profiles/${profileId}/publish`,
+    );
+
+  return response.data;
+}
+
+export async function activateFuelCalibrationProduction(
+  profileId: string,
+): Promise<FuelCalibrationProfileMutationResponse> {
+  const response =
+    await httpClient.post<FuelCalibrationProfileMutationResponse>(
+      `/api/fuel-calibration/profiles/${profileId}/production`,
+    );
 
   return response.data;
 }

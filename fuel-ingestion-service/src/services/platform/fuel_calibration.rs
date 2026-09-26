@@ -92,6 +92,26 @@ pub async fn start_session(
     }
 
     /*
+     * A guided calibration profile may produce only one published runtime
+     * calibration.
+     *
+     * Publishing again would create another inactive sensor_calibrations
+     * record and replace published_calibration_id on the profile, leaving
+     * the previously published calibration orphaned from the managed
+     * workflow.
+     *
+     * Further physical calibration work should therefore continue through
+     * guided sessions before publication. Once published, the resulting
+     * runtime calibration is the single candidate that may later be
+     * approved for production.
+     */
+    if profile.published_calibration_id.is_some() {
+        return Err(anyhow!(
+            "Fuel calibration profile has already been published."
+        ));
+    }
+
+    /*
      * Only one unfinished session may exist for a profile.
      *
      * An unfinished session may be either:

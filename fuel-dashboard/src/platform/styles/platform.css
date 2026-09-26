@@ -729,3 +729,183 @@
   text-transform: uppercase;
   letter-spacing: 0.02em;
 }
+
+/* ------------------------------------------------ */
+/* Fuel Calibration */
+/* ------------------------------------------------ */
+
+.platform-calibration-section {
+  margin-top: 22px;
+}
+
+.platform-calibration-points {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.platform-calibration-point {
+  padding: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 18px;
+  background: rgba(2, 6, 23, 0.42);
+}
+
+.platform-calibration-point__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.platform-calibration-point__header strong {
+  color: #f8fafc;
+  font-size: 0.92rem;
+}
+
+.platform-calibration-point__header span {
+  color: #64748b;
+  font-size: 0.76rem;
+}
+
+.platform-calibration-point__values {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.platform-calibration-point__values > div {
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.52);
+}
+
+.platform-calibration-point__values label {
+  display: block;
+  color: #64748b;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.platform-calibration-point__values strong {
+  display: block;
+  margin-top: 7px;
+  color: #f8fafc;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 720px) {
+  .platform-calibration-point__header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .platform-calibration-point__values {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ------------------------------------------------ */
+/* Fuel Calibration Workflow */
+/* ------------------------------------------------ */
+
+.platform-calibration-workflow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.platform-calibration-workflow > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  min-height: 54px;
+  padding: 12px;
+
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 16px;
+
+  background: rgba(2, 6, 23, 0.42);
+}
+
+.platform-calibration-workflow__step {
+  transition:
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.platform-calibration-workflow__step--active {
+  border-color: rgba(56, 189, 248, 0.55);
+  background: rgba(14, 116, 144, 0.16);
+}
+
+.platform-calibration-workflow__step--active span {
+  color: #f0f9ff;
+  background: rgba(14, 165, 233, 0.42);
+}
+
+.platform-calibration-workflow__step--complete {
+  border-color: rgba(34, 197, 94, 0.28);
+  background: rgba(22, 101, 52, 0.1);
+}
+
+.platform-calibration-workflow__step--complete span {
+  color: #dcfce7;
+  background: rgba(34, 197, 94, 0.22);
+}
+
+.platform-calibration-workflow span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  flex: 0 0 auto;
+
+  width: 28px;
+  height: 28px;
+
+  border-radius: 999px;
+
+  color: #bae6fd;
+  background: rgba(14, 165, 233, 0.14);
+
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.platform-calibration-workflow strong {
+  color: #e2e8f0;
+  font-size: 0.82rem;
+  line-height: 1.3;
+}
+
+.platform-calibration-current-step {
+  margin: 12px 0 0;
+  padding: 12px 14px;
+
+  border-left: 3px solid rgba(56, 189, 248, 0.7);
+  border-radius: 0 12px 12px 0;
+
+  color: #94a3b8;
+  background: rgba(14, 116, 144, 0.1);
+
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.platform-calibration-current-step strong {
+  color: #f8fafc;
+}
+
+@media (max-width: 720px) {
+  .platform-calibration-workflow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
