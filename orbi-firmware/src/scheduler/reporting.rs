@@ -13,6 +13,8 @@ pub struct ReportingPolicy {
     pub idle_interval_ms: u32,
     pub parked_interval_ms: u32,
 
+    pub calibration_interval_ms: u32,
+
     pub moving_threshold_kmh: f64,
     pub parked_threshold_kmh: f64,
 }
@@ -24,6 +26,15 @@ impl ReportingPolicy {
             moving_interval_ms: 2_000,
             idle_interval_ms: 10_000,
             parked_interval_ms: 30_000,
+
+            /*
+             * Guided fuel calibration needs frequent physical KUM
+             * observations even while the vehicle is stationary.
+             *
+             * Calibration mode therefore uses a fixed reporting cadence
+             * rather than the normal motion-based adaptive interval.
+             */
+            calibration_interval_ms: 5_000,
 
             moving_threshold_kmh: 3.0,
             parked_threshold_kmh: 0.5,
@@ -47,6 +58,22 @@ impl ReportingPolicy {
             MotionState::Moving => self.moving_interval_ms,
             MotionState::Idle => self.idle_interval_ms,
             MotionState::Parked => self.parked_interval_ms,
+        }
+    }
+
+    pub fn effective_interval_for(&self, state: MotionState, calibration_mode: bool) -> u32 {
+        /*
+         * Guided fuel calibration overrides the normal motion-based
+         * reporting cadence.
+         *
+         * This does not change the physical motion classification.
+         * A parked vehicle remains Parked; we simply report more
+         * frequently while an ACTIVE calibration session exists.
+         */
+        if calibration_mode {
+            self.calibration_interval_ms
+        } else {
+            self.interval_for(state)
         }
     }
 

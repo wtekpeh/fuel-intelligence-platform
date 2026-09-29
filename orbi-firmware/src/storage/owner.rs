@@ -48,6 +48,33 @@ pub enum ReplayPrepareResult {
     StorageUnavailable,
 }
 
+/*
+ * Result of revalidating replay work immediately before transmission.
+ *
+ * Replay preparation returns a snapshot of the queue. While that snapshot
+ * is waiting for modem access, foreground live telemetry may successfully
+ * upload and ACK one or more records from the front of ORBIQ.LOG.
+ *
+ * Revalidation therefore asks the storage owner for a fresh view of the
+ * queue before replay performs its HTTP upload.
+ */
+pub enum ReplayRevalidateResult {
+    /*
+     * No pending records remain after acknowledged-record cleanup.
+     */
+    NoPendingRecords,
+
+    /*
+     * A fresh bounded batch is still pending and may be transmitted.
+     */
+    Batch(ReplayQueueBatch),
+
+    /*
+     * Persistent storage is unavailable.
+     */
+    StorageUnavailable,
+}
+
 pub struct ReplayFinalizeRequest {
     pub records: ReplayQueueBatch,
 }
@@ -110,6 +137,11 @@ static STORAGE_WORK_AVAILABLE: Signal<CriticalSectionRawMutex, ()> = Signal::new
 static REPLAY_PREPARE_REQUESTS: Channel<CriticalSectionRawMutex, (), 1> = Channel::new();
 
 static REPLAY_PREPARE_RESPONSE: Signal<CriticalSectionRawMutex, ReplayPrepareResult> =
+    Signal::new();
+
+static REPLAY_REVALIDATE_REQUESTS: Channel<CriticalSectionRawMutex, (), 1> = Channel::new();
+
+static REPLAY_REVALIDATE_RESPONSE: Signal<CriticalSectionRawMutex, ReplayRevalidateResult> =
     Signal::new();
 
 static REPLAY_FINALIZE_REQUESTS: Channel<CriticalSectionRawMutex, ReplayFinalizeRequest, 1> =
@@ -297,6 +329,112 @@ pub async fn storage_owner_task(
             continue;
         }
 
+        /*
+         * Revalidate replay work immediately before transmission.
+         *
+         * A batch returned by replay preparation is only a snapshot.
+         * While replay is waiting for modem access, foreground live
+         * telemetry may upload and persist ACKs for records at the
+         * front of ORBIQ.LOG.
+         *
+         * Therefore:
+         *
+         * 1. remove any now-acknowledged records from the queue front;
+         * 2. read a fresh bounded batch from persistent storage;
+         * 3. return that fresh batch to replay.
+         *
+         * ORBIQ.LOG remains the authoritative queue state.
+         */
+        if REPLAY_REVALIDATE_REQUESTS.try_receive().is_ok() {
+            let result = match persistent_storage.as_mut() {
+                Some(storage) => {
+                    let mut recovered_records = 0usize;
+
+                    /*
+                     * Keep cleanup bounded for the same reason as replay
+                     * preparation: storage work must not monopolize the
+                     * Embassy executor.
+                     */
+                    while recovered_records < REPLAY_BATCH_SIZE {
+                        let queued_record = match storage.read_first_record() {
+                            Some(record) => record,
+
+                            None => {
+                                break;
+                            }
+                        };
+
+                        let (device_id, timestamp) =
+                            match crate::telemetry::payload::extract_replay_identity(
+                                queued_record.as_str(),
+                            ) {
+                                Some(identity) => identity,
+
+                                None => {
+                                    println!(
+                                        "Invalid record found at the front of ORBIQ.LOG during replay revalidation."
+                                    );
+
+                                    println!("Replay revalidation cleanup stopped.");
+
+                                    break;
+                                }
+                            };
+
+                        if !storage.is_acknowledged(device_id, timestamp) {
+                            break;
+                        }
+
+                        println!(
+                            "Replay revalidation found an already acknowledged queued record."
+                        );
+
+                        if !storage.remove_first_record() {
+                            println!(
+                                "Failed to remove acknowledged record during replay revalidation."
+                            );
+
+                            break;
+                        }
+
+                        recovered_records += 1;
+                    }
+
+                    if recovered_records > 0 {
+                        println!(
+                            "Replay revalidation removed {} acknowledged queued record(s).",
+                            recovered_records
+                        );
+                    }
+
+                    /*
+                     * Do not return the old in-memory replay snapshot.
+                     *
+                     * Read the queue again so replay receives the current
+                     * authoritative front of ORBIQ.LOG.
+                     */
+                    let queued_records =
+                        storage.read_first_records::<REPLAY_BATCH_SIZE>(REPLAY_BATCH_SIZE);
+
+                    if queued_records.is_empty() {
+                        ReplayRevalidateResult::NoPendingRecords
+                    } else {
+                        ReplayRevalidateResult::Batch(queued_records)
+                    }
+                }
+
+                None => {
+                    println!("Replay revalidation failed because SD storage is unavailable.");
+
+                    ReplayRevalidateResult::StorageUnavailable
+                }
+            };
+
+            REPLAY_REVALIDATE_RESPONSE.signal(result);
+
+            continue;
+        }
+
         if let Ok(request) = REPLAY_FINALIZE_REQUESTS.try_receive() {
             let expected_records = request.records.len();
 
@@ -414,6 +552,14 @@ pub async fn request_replay_prepare() -> ReplayPrepareResult {
     STORAGE_WORK_AVAILABLE.signal(());
 
     REPLAY_PREPARE_RESPONSE.wait().await
+}
+
+pub async fn request_replay_revalidate() -> ReplayRevalidateResult {
+    REPLAY_REVALIDATE_REQUESTS.send(()).await;
+
+    STORAGE_WORK_AVAILABLE.signal(());
+
+    REPLAY_REVALIDATE_RESPONSE.wait().await
 }
 
 pub async fn request_replay_finalize(records: ReplayQueueBatch) -> ReplayFinalizeResult {

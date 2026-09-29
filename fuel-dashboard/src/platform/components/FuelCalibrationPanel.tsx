@@ -181,7 +181,42 @@ export default function FuelCalibrationPanel() {
       return;
     }
 
+    /*
+     * Load the newest physical KUM observation immediately when the
+     * calibration panel becomes ready for the selected fuel sensor.
+     */
     void loadLatestObservation(fuelSensor.id);
+
+    /*
+     * While this panel remains open, refresh the physical KUM observation
+     * every 5 seconds.
+     *
+     * The firmware uses a 5-second reporting interval while calibration
+     * mode is enabled, so matching that cadence keeps the installer-facing
+     * calibration measurement close to the physical sensor without
+     * continuously hammering the backend.
+     *
+     * This polling is observational only. Calibration capture remains
+     * backend-authoritative: the capture endpoint independently resolves
+     * the latest physical fuel observation when a point is captured.
+     */
+    const observationPollingInterval = window.setInterval(() => {
+      void loadLatestObservation(fuelSensor.id);
+    }, 5_000);
+
+    /*
+     * Stop polling when:
+     *
+     * - the component unmounts;
+     * - another device/sensor is selected; or
+     * - this effect is otherwise recreated.
+     *
+     * This prevents stale calibration polling from continuing in the
+     * background for a previously selected sensor.
+     */
+    return () => {
+      window.clearInterval(observationPollingInterval);
+    };
   }, [fuelSensor, selectedSensorId, loadLatestObservation]);
 
   const handleCreateProfile = async () => {

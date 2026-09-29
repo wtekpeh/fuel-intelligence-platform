@@ -3,10 +3,9 @@ use esp_println::println;
 
 use crate::{
     network::modem_owner,
-    storage::owner::{self, ReplayPrepareResult},
-    telemetry::payload,
+    storage::owner::{self, ReplayPrepareResult, ReplayRevalidateResult},
+    telemetry::{coordination, payload},
 };
-
 /*
  * Replay pending telemetry without owning either the modem
  * or the SD card directly.
@@ -34,13 +33,32 @@ pub async fn replay_pending_records() {
 
     loop {
         /*
+         * Foreground live telemetry has priority over background replay.
+         *
+         * Do not inspect ORBIQ.LOG while a live telemetry transaction is
+         * still being completed. In particular, this prevents replay from
+         * selecting a newly persisted live record before that record's
+         * direct-upload ACK has been written to ORBIACK.LOG.
+         *
+         * Yield briefly and try again rather than blocking other Embassy
+         * tasks.
+         */
+        if coordination::live_telemetry_transaction_active() {
+            println!("Live telemetry transaction active. Replay yielding.");
+
+            Timer::after(Duration::from_millis(250)).await;
+
+            continue;
+        }
+
+        /*
          * Ask the dedicated storage owner for one bounded batch.
          *
          * The storage owner also performs bounded recovery of records
          * whose ACKs were persisted previously but whose queue removal
          * was interrupted.
          */
-        let queued_records = match owner::request_replay_prepare().await {
+        match owner::request_replay_prepare().await {
             ReplayPrepareResult::NoPendingRecords => {
                 println!(
                     "Replay complete. {} queued record(s) replayed.",
@@ -50,10 +68,61 @@ pub async fn replay_pending_records() {
                 break;
             }
 
-            ReplayPrepareResult::Batch(records) => records,
+            ReplayPrepareResult::Batch(_) => {
+                /*
+                 * Preparation confirms that replay work currently exists.
+                 *
+                 * Do not use this batch for transmission. It is only a snapshot
+                 * and may become stale while foreground telemetry is being
+                 * uploaded and acknowledged.
+                 *
+                 * The queue will be read again during revalidation immediately
+                 * before the replay payload is constructed.
+                 */
+            }
 
             ReplayPrepareResult::StorageUnavailable => {
                 println!("SD storage unavailable. Replay stopped.");
+
+                break;
+            }
+        }
+
+        /*
+         * Replay preparation returned a queue snapshot, but that snapshot may
+         * already be stale.
+         *
+         * While replay was waiting to continue, foreground live telemetry may
+         * have uploaded and ACKed one or more records from the front of
+         * ORBIQ.LOG.
+         *
+         * Ask the storage owner for a fresh authoritative view immediately
+         * before constructing the replay HTTP payload.
+         */
+        let queued_records = match owner::request_replay_revalidate().await {
+            ReplayRevalidateResult::NoPendingRecords => {
+                println!("Replay revalidation found no pending records.");
+
+                println!(
+                    "Replay complete. {} queued record(s) replayed.",
+                    total_replayed_records
+                );
+
+                break;
+            }
+
+            ReplayRevalidateResult::Batch(records) => {
+                println!(
+                    "Replay batch revalidated. {} record(s) remain pending.",
+                    records.len()
+                );
+
+                records
+            }
+
+            ReplayRevalidateResult::StorageUnavailable => {
+                println!("SD storage unavailable during replay revalidation.");
+                println!("Replay stopped.");
 
                 break;
             }
@@ -62,8 +131,8 @@ pub async fn replay_pending_records() {
         let batch_record_count = queued_records.len();
 
         /*
-         * Build the HTTP payload from exactly the records returned
-         * by the storage owner.
+         * Build the HTTP payload from the freshly revalidated records,
+         * not from the earlier replay-preparation snapshot.
          */
         let batch_payload = match payload::build_queue_batch_payload(&queued_records) {
             Some(payload) => payload,

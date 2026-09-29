@@ -460,7 +460,23 @@ async fn main(spawner: embassy_executor::Spawner) {
 
             let new_motion_state = reporting_policy.classify_speed_knots(gps_info.speed);
 
-            let reporting_interval_ms = reporting_policy.interval_for(new_motion_state);
+            /*
+             * Select the effective reporting cadence.
+             *
+             * During normal operation this remains motion-adaptive:
+             *
+             * Moving -> 2 seconds
+             * Idle   -> 10 seconds
+             * Parked -> 30 seconds
+             *
+             * During an ACTIVE guided fuel-calibration session, the backend-derived
+             * calibration mode overrides that cadence so the physical KUM sensor is
+             * observed every 5 seconds regardless of vehicle motion.
+             *
+             * Motion classification itself is unchanged.
+             */
+            let reporting_interval_ms =
+                reporting_policy.effective_interval_for(new_motion_state, calibration_mode);
 
             let reporting_interval_seconds = reporting_interval_ms / 1_000;
 
@@ -485,6 +501,7 @@ async fn main(spawner: embassy_executor::Spawner) {
             println!("Previous State: {:?}", current_motion_state);
             println!("New State: {:?}", new_motion_state);
             println!("State Changed: {}", motion_state_changed);
+            println!("Calibration Mode: {}", calibration_mode);
             println!("Reporting Due: {}", reporting_due);
             println!(
                 "Selected Reporting Interval: {} seconds",

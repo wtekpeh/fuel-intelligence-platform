@@ -1,5 +1,5 @@
 use embassy_time::{Duration, Timer};
-use esp_println::println;
+use esp_println::{print, println};
 
 use crate::drivers::Modem;
 
@@ -36,25 +36,23 @@ fn contains_bytes(buffer: &[u8], pattern: &[u8]) -> bool {
         .any(|window| window == pattern)
 }
 
-fn extract_http_status(response: &[u8]) -> Option<u16> {
-    /*
-     * A7670 HTTPACTION result format:
-     *
-     * +HTTPACTION: <method>,<status>,<length>
-     *
-     * Examples:
-     *
-     * GET:
-     * +HTTPACTION: 0,200,25
-     *
-     * POST:
-     * +HTTPACTION: 1,200,42
-     *
-     * The previous implementation searched specifically for
-     * "+HTTPACTION: 1,", which meant only POST responses could
-     * be parsed. Runtime-state retrieval uses GET (method 0),
-     * so status parsing must not depend on the HTTP method.
-     */
+/// Metadata returned by the A7670 after an HTTP transaction.
+///
+/// A typical modem response is:
+///
+/// +HTTPACTION: 0,200,25
+///
+/// where:
+///
+/// - 0   = HTTP method used by the modem
+/// - 200 = HTTP status code
+/// - 25  = number of response-body bytes available to read
+struct HttpActionResult {
+    status: u16,
+    body_length: usize,
+}
+
+fn extract_http_action_result(response: &[u8]) -> Option<HttpActionResult> {
     const PREFIX: &[u8] = b"+HTTPACTION:";
 
     let prefix_start = response
@@ -71,28 +69,32 @@ fn extract_http_status(response: &[u8]) -> Option<u16> {
     }
 
     /*
-     * Skip the HTTP method field until its comma.
+     * Skip the HTTP method field.
      *
-     * Currently:
+     * Examples:
      *
      * 0 = GET
      * 1 = POST
-     *
-     * We deliberately do not care which method produced the
-     * response because this function's only responsibility is
-     * extracting the HTTP status code.
      */
-    while let Some(byte) = response.get(index) {
-        if *byte == b',' {
-            index += 1;
-            break;
-        }
+    while response.get(index) != Some(&b',') {
+        response.get(index)?;
 
         index += 1;
     }
 
     /*
-     * The next three bytes must be the HTTP status code.
+     * Move past the comma separating method and status.
+     */
+    index += 1;
+
+    /*
+     * Parse the HTTP status field.
+     *
+     * HTTP status codes are three digits, for example:
+     *
+     * 200
+     * 404
+     * 500
      */
     let status_bytes = response.get(index..index + 3)?;
 
@@ -104,7 +106,59 @@ fn extract_http_status(response: &[u8]) -> Option<u16> {
         + ((status_bytes[1] - b'0') as u16 * 10)
         + (status_bytes[2] - b'0') as u16;
 
-    Some(status)
+    index += 3;
+
+    /*
+     * The status field must be followed by the comma that begins
+     * the response-body length field.
+     */
+    if response.get(index) != Some(&b',') {
+        return None;
+    }
+
+    index += 1;
+
+    /*
+     * Parse the body length.
+     *
+     * Unlike the status code, the length is variable-width:
+     *
+     * 0
+     * 25
+     * 73
+     * 1024
+     *
+     * Stop as soon as we reach a non-digit such as '\r' or '\n'.
+     */
+    let mut body_length = 0usize;
+    let mut body_length_digits = 0usize;
+
+    while let Some(byte) = response.get(index) {
+        if !byte.is_ascii_digit() {
+            break;
+        }
+
+        body_length = body_length
+            .checked_mul(10)?
+            .checked_add((byte - b'0') as usize)?;
+
+        body_length_digits += 1;
+        index += 1;
+    }
+
+    /*
+     * A missing length is malformed rather than equivalent to zero.
+     *
+     * "+HTTPACTION: 0,200," must therefore fail parsing.
+     */
+    if body_length_digits == 0 {
+        return None;
+    }
+
+    Some(HttpActionResult {
+        status,
+        body_length,
+    })
 }
 
 fn build_runtime_state_url_command(
@@ -196,6 +250,28 @@ async fn collect_http_action_response(
                 poll_number,
                 poll_number * HTTP_ACTION_POLL_INTERVAL_MS as usize
             );
+
+            /*
+             * Temporary diagnostic:
+             *
+             * Show the complete modem response so we can inspect the
+             * +HTTPACTION method, HTTP status and response-body length.
+             */
+            println!("RAW HTTPACTION RESPONSE:");
+
+            for byte in combined_response.iter().take(total_bytes_read) {
+                if *byte >= 32 && *byte <= 126 {
+                    print!("{}", *byte as char);
+                } else if *byte == b'\r' {
+                    print!("\\r");
+                } else if *byte == b'\n' {
+                    print!("\\n");
+                } else {
+                    print!("[{}]", *byte);
+                }
+            }
+
+            println!();
 
             return Some((combined_response, total_bytes_read));
         }
@@ -323,11 +399,11 @@ async fn post_json<const N: usize>(
     let upload_succeeded = if let Some((response_buffer, bytes_read)) = action_response {
         let response = &response_buffer[..bytes_read];
 
-        match extract_http_status(response) {
-            Some(status) => {
-                println!("HTTP status: {}", status);
+        match extract_http_action_result(response) {
+            Some(action_result) => {
+                println!("HTTP status: {}", action_result.status);
 
-                if (200..300).contains(&status) {
+                if (200..300).contains(&action_result.status) {
                     println!("HTTP upload succeeded.");
 
                     true
@@ -339,7 +415,7 @@ async fn post_json<const N: usize>(
             }
 
             None => {
-                println!("Could not parse HTTPACTION status.");
+                println!("Could not parse HTTPACTION result.");
 
                 false
             }
@@ -411,33 +487,87 @@ pub async fn get_runtime_calibration_mode(
     )
     .await;
 
-    let request_succeeded = match action_response {
+    /*
+     * A successful runtime-state GET must preserve the response-body
+     * length reported by the modem.
+     *
+     * For example:
+     *
+     * +HTTPACTION: 0,200,25
+     *
+     * means the request succeeded and 25 response bytes are available
+     * for AT+HTTPREAD.
+     */
+    let response_body_length = match action_response {
         Some((response_buffer, bytes_read)) => {
-            match extract_http_status(&response_buffer[..bytes_read]) {
-                Some(status) if (200..300).contains(&status) => {
-                    println!("Runtime-state HTTP status: {}", status);
-                    true
+            match extract_http_action_result(&response_buffer[..bytes_read]) {
+                Some(action_result) if (200..300).contains(&action_result.status) => {
+                    println!("Runtime-state HTTP status: {}", action_result.status);
+                    println!(
+                        "Runtime-state response body length: {} byte(s).",
+                        action_result.body_length
+                    );
+
+                    Some(action_result.body_length)
                 }
 
-                Some(status) => {
-                    println!("Runtime-state HTTP request failed with status: {}", status);
-                    false
+                Some(action_result) => {
+                    println!(
+                        "Runtime-state HTTP request failed with status: {}",
+                        action_result.status
+                    );
+
+                    None
                 }
 
                 None => {
-                    println!("Could not parse runtime-state HTTP status.");
-                    false
+                    println!("Could not parse runtime-state HTTPACTION result.");
+
+                    None
                 }
             }
         }
 
         None => {
             println!("No runtime-state HTTPACTION response received.");
-            false
+
+            None
         }
     };
 
-    if !request_succeeded {
+    let Some(response_body_length) = response_body_length else {
+        modem
+            .send_command_and_print_response_async(b"AT+HTTPTERM\r\n", "AT+HTTPTERM")
+            .await;
+
+        return None;
+    };
+
+    /*
+     * Ask the modem for exactly the number of response-body bytes
+     * reported by +HTTPACTION.
+     *
+     * Example:
+     *
+     * +HTTPACTION: 0,200,25
+     *
+     * becomes:
+     *
+     * AT+HTTPREAD=0,25
+     *
+     * Do not hard-code the body length because the backend runtime-state
+     * response may grow as additional runtime controls are introduced.
+     */
+    let mut read_command = heapless::String::<32>::new();
+
+    if core::fmt::write(
+        &mut read_command,
+        format_args!("AT+HTTPREAD=0,{}\r\n", response_body_length),
+    )
+    .is_err()
+    {
+        println!("Failed to build runtime-state HTTPREAD command.");
+
         modem
             .send_command_and_print_response_async(b"AT+HTTPTERM\r\n", "AT+HTTPTERM")
             .await;
@@ -445,15 +575,16 @@ pub async fn get_runtime_calibration_mode(
         return None;
     }
 
-    /*
-     * Request the HTTP response body.
-     *
-     * Unlike telemetry POSTs, this body is meaningful to the firmware:
-     *
-     * {"calibration_mode":true}
-     */
+    println!(
+        "Runtime-state response body length: {} byte(s).",
+        response_body_length
+    );
+
     let body_response = modem
-        .send_command_and_collect_response_async(b"AT+HTTPREAD\r\n", "AT+HTTPREAD RUNTIME STATE")
+        .send_command_and_collect_fragmented_response_async(
+            read_command.as_bytes(),
+            "AT+HTTPREAD RUNTIME STATE",
+        )
         .await;
 
     modem

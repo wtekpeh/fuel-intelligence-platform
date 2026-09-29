@@ -204,4 +204,68 @@ impl<'d> Modem<'d> {
             }
         }
     }
+
+    /// Send a modem command and collect response bytes that may arrive
+    /// across multiple UART reads.
+    ///
+    /// This is useful for commands such as AT+HTTPREAD where the A7670
+    /// may return the command echo / response header first and the HTTP
+    /// body in a later UART fragment.
+    pub async fn send_command_and_collect_fragmented_response_async(
+        &mut self,
+        command: &[u8],
+        label: &str,
+    ) -> Option<([u8; RESPONSE_BUFFER_SIZE], usize)> {
+        if !self.send_command(command, label) {
+            println!("No response received.");
+            return None;
+        }
+
+        let mut combined_response = [0u8; RESPONSE_BUFFER_SIZE];
+        let mut total_bytes_read = 0usize;
+
+        /*
+         * Give the modem several opportunities to deliver the complete
+         * response.
+         *
+         * We intentionally use short cooperative Embassy waits rather
+         * than one fixed blocking delay.
+         */
+        for _ in 0..8 {
+            Timer::after(Duration::from_millis(250)).await;
+
+            let Some((response_buffer, bytes_read)) = self.read_response() else {
+                continue;
+            };
+
+            if bytes_read == 0 {
+                continue;
+            }
+
+            let remaining_capacity = RESPONSE_BUFFER_SIZE - total_bytes_read;
+            let bytes_to_copy = core::cmp::min(bytes_read, remaining_capacity);
+
+            combined_response[total_bytes_read..total_bytes_read + bytes_to_copy]
+                .copy_from_slice(&response_buffer[..bytes_to_copy]);
+
+            total_bytes_read += bytes_to_copy;
+
+            if total_bytes_read == RESPONSE_BUFFER_SIZE {
+                println!("Fragmented modem response filled collection buffer.");
+                break;
+            }
+        }
+
+        if total_bytes_read == 0 {
+            println!("No response received.");
+            return None;
+        }
+
+        println!(
+            "Collected {} byte(s) across fragmented modem response.",
+            total_bytes_read
+        );
+
+        Some((combined_response, total_bytes_read))
+    }
 }

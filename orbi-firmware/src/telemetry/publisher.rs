@@ -5,10 +5,22 @@ use crate::{
         owned_record::{OwnedAckRecord, OwnedTelemetryRecord},
         owner as storage_owner,
     },
-    telemetry::{payload, record::TelemetryRecord, snapshot::SensorSnapshot},
+    telemetry::{coordination, payload, record::TelemetryRecord, snapshot::SensorSnapshot},
 };
 
 pub async fn publish_live_fix(device_code: &str, snapshot: &SensorSnapshot<'_>) -> bool {
+    /*
+     * From this point until the live telemetry transaction finishes,
+     * replay must not prepare or upload this newly created live record.
+     *
+     * The transaction covers:
+     *
+     * 1. persistence to ORBIQ.LOG;
+     * 2. direct live HTTP upload;
+     * 3. ACK persistence when the upload succeeds.
+     */
+    coordination::begin_live_telemetry_transaction();
+
     let gps_info = snapshot.gps;
     let imu_data = snapshot.imu;
 
@@ -213,6 +225,19 @@ pub async fn publish_live_fix(device_code: &str, snapshot: &SensorSnapshot<'_>) 
 
         crate::network::modem_owner::request_live_telemetry(live_payload).await
     };
+
+    /*
+     * The complete live telemetry transaction has now finished.
+     *
+     * At this point:
+     *
+     * - the live record has been persisted when SD storage was available;
+     * - the direct HTTP upload has completed;
+     * - and, when that upload succeeded, ACK persistence has been attempted.
+     *
+     * Replay may now inspect the persistent queue again.
+     */
+    coordination::end_live_telemetry_transaction();
 
     telemetry_upload_success
 }
