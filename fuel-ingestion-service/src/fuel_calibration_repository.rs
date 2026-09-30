@@ -153,6 +153,54 @@ pub async fn get_latest_fuel_sensor_observation(
     Ok(observation)
 }
 
+/// Retrieves physical KUM observations for an installed fuel sensor from
+/// the requested measurement-time window.
+///
+/// This repository function deliberately performs no stability evaluation.
+/// Its responsibility is only to retrieve physical observation evidence in
+/// chronological order.
+///
+/// `window_start` is based on the device observation timestamp
+/// (`recorded_at`), not database arrival time (`received_at`), because
+/// calibration stability describes physical sensor behaviour over measurement
+/// time rather than network/database delivery timing.
+pub async fn get_fuel_sensor_observations_since(
+    db_pool: &PgPool,
+    sensor_id: Uuid,
+    window_start: DateTime<Utc>,
+) -> Result<Vec<FuelSensorObservationRow>> {
+    let observations = sqlx::query_as!(
+        FuelSensorObservationRow,
+        r#"
+        SELECT
+            id,
+            sensor_id,
+            device_id,
+            recorded_at,
+            received_at,
+            realtime_distance_cm,
+            smooth_distance_cm,
+            raw_distance_cm,
+            temperature_c,
+            status_1,
+            status_2,
+            raw_data_validity,
+            latitude,
+            longitude
+        FROM fuel_sensor_observations
+        WHERE sensor_id = $1
+          AND recorded_at >= $2
+        ORDER BY recorded_at ASC
+        "#,
+        sensor_id,
+        window_start,
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    Ok(observations)
+}
+
 pub async fn create_fuel_calibration_profile(
     db_pool: &PgPool,
     sensor_id: Uuid,
@@ -497,24 +545,70 @@ pub async fn capture_fuel_calibration_point(
         None
     };
 
+    /*
+     * A cumulative fuel-change position represents one logical calibration
+     * point inside a guided session.
+     *
+     * Automatic stability evaluation may call this operation repeatedly while
+     * the physical measurement remains stable. The database unique index on:
+     *
+     *     (session_id, cumulative_change_litres)
+     *
+     * is therefore also used as the concurrency-safe idempotency boundary.
+     *
+     * The first request creates the point.
+     *
+     * Later requests for the same cumulative position do not replace the
+     * already-captured physical evidence. They return the existing point ID.
+     */
     let point_id = sqlx::query_scalar!(
         r#"
-        INSERT INTO fuel_calibration_session_points (
-            session_id,
-            level_cm,
-            cumulative_change_litres,
-            resolved_litres
-        )
-        VALUES ($1, $2, $3, $4)
-        RETURNING id
-        "#,
+    INSERT INTO fuel_calibration_session_points (
+        session_id,
+        level_cm,
+        cumulative_change_litres,
+        resolved_litres
+    )
+    VALUES ($1, $2, $3, $4)
+
+    ON CONFLICT (session_id, cumulative_change_litres)
+    DO NOTHING
+
+    RETURNING id
+    "#,
         session_id,
         level_cm,
         cumulative_change_litres,
         resolved_litres,
     )
-    .fetch_one(db_pool)
+    .fetch_optional(db_pool)
     .await?;
+
+    let point_id = match point_id {
+        Some(point_id) => point_id,
+
+        None => {
+            /*
+             * Another request has already captured this logical calibration
+             * position.
+             *
+             * Preserve the original physical evidence rather than overwriting
+             * it with a later stability observation.
+             */
+            sqlx::query_scalar!(
+                r#"
+            SELECT id
+            FROM fuel_calibration_session_points
+            WHERE session_id = $1
+              AND cumulative_change_litres = $2
+            "#,
+                session_id,
+                cumulative_change_litres,
+            )
+            .fetch_one(db_pool)
+            .await?
+        }
+    };
 
     /*
      * Once the session has been anchored, the most recently captured

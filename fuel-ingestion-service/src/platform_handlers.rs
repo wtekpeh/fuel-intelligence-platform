@@ -969,26 +969,102 @@ pub async fn capture_fuel_calibration_point_handler(
     Path(session_id): Path<Uuid>,
     Json(payload): Json<crate::models::CaptureFuelCalibrationPointRequest>,
 ) -> impl IntoResponse {
-    match crate::services::platform::fuel_calibration::capture_point(
+    /*
+     * The HTTP layer does not define stability mathematics.
+     *
+     * It selects ORBI's production KUM stability policy and delegates the
+     * complete automatic-capture workflow to the platform service.
+     */
+    let config = crate::domain::calibration::FuelCalibrationStabilityConfig::production();
+
+    match crate::services::platform::fuel_calibration::capture_stable_point(
         &app_state.db_pool,
         session_id,
         payload.cumulative_change_litres,
+        payload.observation_started_at,
+        config,
     )
     .await
     {
-        Ok(point_id) => (
-            StatusCode::CREATED,
-            Json(crate::models::FuelCalibrationPointMutationResponse {
-                point_id,
-                message: "Fuel calibration point captured successfully.".to_string(),
-            }),
-        )
-            .into_response(),
+        Ok(result) => {
+            let stability = result.stability;
+
+            /*
+             * Translate the domain state into a stable API representation
+             * suitable for the frontend calibration animation.
+             */
+            let state = match stability.state {
+                crate::domain::calibration::FuelCalibrationStabilityState::WaitingForTelemetry => {
+                    "waiting_for_telemetry"
+                }
+
+                crate::domain::calibration::FuelCalibrationStabilityState::Observing => "observing",
+
+                crate::domain::calibration::FuelCalibrationStabilityState::Settling => "settling",
+
+                crate::domain::calibration::FuelCalibrationStabilityState::Stable => "stable",
+            };
+
+            let captured = result.point_id.is_some();
+
+            let message = match stability.state {
+                crate::domain::calibration::FuelCalibrationStabilityState::WaitingForTelemetry => {
+                    "Waiting for fuel sensor telemetry."
+                }
+
+                crate::domain::calibration::FuelCalibrationStabilityState::Observing => {
+                    "Observing fuel sensor measurements."
+                }
+
+                crate::domain::calibration::FuelCalibrationStabilityState::Settling => {
+                    "Fuel level is settling."
+                }
+
+                crate::domain::calibration::FuelCalibrationStabilityState::Stable => {
+                    "Fuel level is stable. Calibration point captured automatically."
+                }
+            };
+
+            /*
+             * Every successful evaluation returns 200 OK.
+             *
+             * The endpoint is intentionally pollable and idempotent:
+             *
+             * observing -> 200
+             * settling  -> 200
+             * stable    -> 200 + point_id
+             *
+             * Repeated stable requests for the same cumulative position
+             * return the existing calibration point.
+             */
+            (
+                StatusCode::OK,
+                Json(crate::models::FuelCalibrationAutomaticCaptureResponse {
+                    state: state.to_string(),
+
+                    sample_count: stability.sample_count,
+
+                    observation_duration_seconds: stability.observation_duration_ms as f64 / 1000.0,
+
+                    realtime_range_cm: stability.realtime_range_cm,
+
+                    realtime_slope_cm_per_second: stability.realtime_slope_cm_per_second,
+
+                    capture_distance_cm: stability.capture_distance_cm,
+
+                    captured,
+                    point_id: result.point_id,
+
+                    message: message.to_string(),
+                }),
+            )
+                .into_response()
+        }
 
         Err(error) => {
             let message = error.to_string();
 
-            if message.contains("session was not found") {
+            if message.contains("session was not found") || message.contains("profile not found") {
                 return (
                     StatusCode::NOT_FOUND,
                     Json(crate::models::ApiErrorResponse { message }),
@@ -999,9 +1075,8 @@ pub async fn capture_fuel_calibration_point_handler(
             if message.contains("Cumulative fuel change")
                 || message.contains("can only be captured while the session is active")
                 || message.contains("outside the declared tank capacity")
-                || message.contains("No physical fuel sensor observation is available")
-                || message.contains("physical fuel sensor observation is too old")
-                || message.contains("invalid real-time distance")
+                || message
+                    .contains("Stable fuel calibration result did not contain a capture distance")
             {
                 return (
                     StatusCode::BAD_REQUEST,
@@ -1010,27 +1085,15 @@ pub async fn capture_fuel_calibration_point_handler(
                     .into_response();
             }
 
-            if message.contains("unique_fuel_calibration_session_change") {
-                return (
-                    StatusCode::CONFLICT,
-                    Json(crate::models::ApiErrorResponse {
-                        message:
-                            "A calibration point already exists for this cumulative fuel change."
-                                .to_string(),
-                    }),
-                )
-                    .into_response();
-            }
-
             eprintln!(
-                "Failed to capture fuel calibration point for session {}: {}",
+                "Failed automatic fuel calibration capture for session {}: {}",
                 session_id, message
             );
 
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(crate::models::ApiErrorResponse {
-                    message: "Failed to capture fuel calibration point.".to_string(),
+                    message: "Failed to evaluate automatic fuel calibration capture.".to_string(),
                 }),
             )
                 .into_response()

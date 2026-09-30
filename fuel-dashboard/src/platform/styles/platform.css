@@ -253,6 +253,13 @@
   font-size: 0.9rem;
 }
 
+.platform-calibration-session-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+
 .platform-primary-button {
   min-height: 42px;
   padding: 0 16px;
@@ -279,6 +286,15 @@
 
   .platform-detail-panel {
     position: static;
+  }
+
+  .platform-calibration-session-actions {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .platform-calibration-session-actions .platform-primary-button {
+    width: 100%;
   }
 }
 
@@ -1199,4 +1215,305 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
+}
+
+/* =========================================================
+   ORBI Fuel Calibration — Automatic Stability Capture
+   ========================================================= */
+
+.platform-auto-capture {
+  margin-bottom: 22px;
+  padding: 26px;
+  overflow: hidden;
+  border: 1px solid rgba(56, 189, 248, 0.22);
+  border-radius: 20px;
+  background:
+    radial-gradient(
+      circle at top,
+      rgba(14, 165, 233, 0.09),
+      transparent 48%
+    ),
+    rgba(15, 23, 42, 0.45);
+}
+
+.platform-auto-capture__visual {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+/*
+ * Rotating measurement ring.
+ *
+ * This does not represent fake percentage progress.
+ * It simply communicates that ORBI is actively evaluating
+ * incoming physical KUM observations.
+ */
+.platform-auto-capture__spinner {
+  position: relative;
+  width: 82px;
+  height: 82px;
+  margin-bottom: 18px;
+  border: 4px solid rgba(56, 189, 248, 0.12);
+  border-top-color: #38bdf8;
+  border-right-color: rgba(56, 189, 248, 0.55);
+  border-radius: 50%;
+  animation: platform-auto-capture-spin 1.15s linear infinite;
+}
+
+.platform-auto-capture__spinner::before {
+  content: "";
+  position: absolute;
+  inset: 9px;
+  border: 1px solid rgba(56, 189, 248, 0.18);
+  border-radius: 50%;
+}
+
+.platform-auto-capture__spinner span {
+  position: absolute;
+  top: -5px;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #7dd3fc;
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.9);
+  transform: translateX(-50%);
+}
+
+@keyframes platform-auto-capture-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Successful automatic capture */
+
+.platform-auto-capture__success {
+  display: grid;
+  width: 82px;
+  height: 82px;
+  margin-bottom: 18px;
+  place-items: center;
+  border: 2px solid rgba(34, 197, 94, 0.55);
+  border-radius: 50%;
+  background: rgba(34, 197, 94, 0.1);
+  color: #86efac;
+  font-size: 38px;
+  font-weight: 800;
+  box-shadow: 0 0 28px rgba(34, 197, 94, 0.12);
+  animation: platform-auto-capture-success 320ms ease-out;
+}
+
+@keyframes platform-auto-capture-success {
+  from {
+    opacity: 0;
+    transform: scale(0.65);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.platform-auto-capture__eyebrow {
+  margin-bottom: 7px;
+  color: #38bdf8;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.platform-auto-capture__title {
+  color: #f8fafc;
+  font-size: 1.25rem;
+  line-height: 1.3;
+}
+
+.platform-auto-capture__reading {
+  margin-top: 18px;
+  color: #f8fafc;
+  font-size: clamp(2.8rem, 6vw, 4.4rem);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+.platform-auto-capture__reading span {
+  margin-left: 7px;
+  color: #94a3b8;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: normal;
+}
+
+.platform-auto-capture__message {
+  max-width: 650px;
+  margin: 18px auto 0;
+  color: #94a3b8;
+  font-size: 0.92rem;
+  line-height: 1.65;
+}
+
+/* Live backend stability evidence */
+
+.platform-auto-capture__telemetry {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 25px;
+}
+
+.platform-auto-capture__telemetry > div {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.11);
+  border-radius: 14px;
+  background: rgba(2, 6, 23, 0.34);
+  text-align: center;
+}
+
+.platform-auto-capture__telemetry span {
+  display: block;
+  color: #64748b;
+  font-size: 0.67rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.platform-auto-capture__telemetry strong {
+  display: block;
+  margin-top: 7px;
+  overflow-wrap: anywhere;
+  color: #e2e8f0;
+  font-size: 0.92rem;
+}
+
+/*
+ * Activity bars show that automatic observation is still running.
+ * They are deliberately qualitative rather than pretending to be
+ * measurement values or percentage progress.
+ */
+.platform-auto-capture__activity {
+  display: flex;
+  height: 28px;
+  margin-top: 22px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.platform-auto-capture__activity span {
+  width: 4px;
+  height: 8px;
+  border-radius: 999px;
+  background: #38bdf8;
+  animation: platform-auto-capture-pulse 1s ease-in-out infinite;
+}
+
+.platform-auto-capture__activity span:nth-child(2) {
+  animation-delay: 100ms;
+}
+
+.platform-auto-capture__activity span:nth-child(3) {
+  animation-delay: 200ms;
+}
+
+.platform-auto-capture__activity span:nth-child(4) {
+  animation-delay: 300ms;
+}
+
+.platform-auto-capture__activity span:nth-child(5) {
+  animation-delay: 400ms;
+}
+
+@keyframes platform-auto-capture-pulse {
+  0%,
+  100% {
+    height: 8px;
+    opacity: 0.35;
+  }
+
+  50% {
+    height: 26px;
+    opacity: 1;
+  }
+}
+
+.platform-auto-capture--complete {
+  border-color: rgba(34, 197, 94, 0.24);
+  background:
+    radial-gradient(
+      circle at top,
+      rgba(34, 197, 94, 0.08),
+      transparent 48%
+    ),
+    rgba(15, 23, 42, 0.45);
+}
+
+/* Tablet */
+
+@media (max-width: 900px) {
+  .platform-auto-capture__telemetry {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Phone */
+
+@media (max-width: 600px) {
+  .platform-auto-capture {
+    padding: 20px 14px;
+    border-radius: 16px;
+  }
+
+  .platform-auto-capture__spinner,
+  .platform-auto-capture__success {
+    width: 68px;
+    height: 68px;
+  }
+
+  .platform-auto-capture__success {
+    font-size: 31px;
+  }
+
+  .platform-auto-capture__title {
+    font-size: 1.08rem;
+  }
+
+  .platform-auto-capture__reading {
+    margin-top: 15px;
+    font-size: 3rem;
+  }
+
+  .platform-auto-capture__message {
+    font-size: 0.86rem;
+  }
+
+  .platform-auto-capture__telemetry {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .platform-auto-capture__telemetry > div {
+    padding: 12px 8px;
+  }
+
+  .platform-auto-capture__telemetry strong {
+    font-size: 0.82rem;
+  }
+}
+
+/* Respect operating-system accessibility preferences */
+
+@media (prefers-reduced-motion: reduce) {
+  .platform-auto-capture__spinner,
+  .platform-auto-capture__success,
+  .platform-auto-capture__activity span {
+    animation: none;
+  }
 }

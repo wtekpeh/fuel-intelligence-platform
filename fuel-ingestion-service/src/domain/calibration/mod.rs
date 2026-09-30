@@ -9,6 +9,7 @@ mod fuel_calibration_resolver;
 mod fuel_calibration_session;
 mod fuel_calibration_session_point;
 mod fuel_calibration_session_status;
+mod fuel_calibration_stability;
 mod fuel_calibration_status;
 mod imu_calibration;
 mod imu_calibration_engine;
@@ -24,6 +25,11 @@ pub use fuel_calibration_resolver::resolve_session_points;
 pub use fuel_calibration_session::FuelCalibrationSession;
 pub use fuel_calibration_session_point::FuelCalibrationSessionPoint;
 pub use fuel_calibration_session_status::FuelCalibrationSessionStatus;
+pub use fuel_calibration_stability::{
+    FuelCalibrationStabilityConfig, FuelCalibrationStabilityEvaluator,
+    FuelCalibrationStabilityObservation, FuelCalibrationStabilityResult,
+    FuelCalibrationStabilityState,
+};
 pub use fuel_calibration_status::FuelCalibrationStatus;
 pub use imu_calibration::ImuCalibration;
 pub use imu_calibration_engine::ImuCalibrationEngine;

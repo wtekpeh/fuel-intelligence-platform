@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useDeviceStore } from "../store/deviceStore";
 import { useFuelCalibrationStore } from "../store/fuelCalibrationStore";
+import type { FuelCalibrationAutomaticCaptureResponse } from "../types/fuelCalibration";
 
 export default function FuelCalibrationPanel() {
   const { selectedDevice, deviceSensors } = useDeviceStore();
@@ -9,6 +10,23 @@ export default function FuelCalibrationPanel() {
   const [startingLitres, setStartingLitres] = useState("");
   const [startingQuantityKnown, setStartingQuantityKnown] = useState(false);
   const [cumulativeChangeLitres, setCumulativeChangeLitres] = useState("");
+  /*
+   * Automatic calibration capture is an interactive UI lifecycle.
+   *
+   * The backend remains authoritative for physical stability. The panel only
+   * tracks whether automatic capture is currently running and displays the
+   * latest stability evaluation returned by the backend.
+   */
+  const [automaticCaptureActive, setAutomaticCaptureActive] = useState(false);
+
+  const [automaticCaptureResult, setAutomaticCaptureResult] =
+    useState<FuelCalibrationAutomaticCaptureResponse | null>(null);
+
+  /*
+   * The polling timer is kept in a ref rather than application state because
+   * it is an implementation detail of this component's lifecycle.
+   */
+  const automaticCaptureTimerRef = useRef<number | null>(null);
   const [supersedeConfirmationOpen, setSupersedeConfirmationOpen] =
     useState(false);
 
@@ -219,6 +237,22 @@ export default function FuelCalibrationPanel() {
     };
   }, [fuelSensor, selectedSensorId, loadLatestObservation]);
 
+  /*
+   * Automatic capture polling must never survive this component.
+   *
+   * Later, when the automatic-capture loop is wired in, this cleanup guarantees
+   * that navigating away from Platform Management cannot leave an old timer
+   * evaluating a calibration session in the background.
+   */
+  useEffect(() => {
+    return () => {
+      if (automaticCaptureTimerRef.current !== null) {
+        window.clearTimeout(automaticCaptureTimerRef.current);
+        automaticCaptureTimerRef.current = null;
+      }
+    };
+  }, []);
+
   const handleCreateProfile = async () => {
     if (!fuelSensor) {
       return;
@@ -269,20 +303,11 @@ export default function FuelCalibrationPanel() {
   };
 
   const handleCapturePoint = async () => {
-    if (!currentSession || currentSession.status !== "active" || !fuelSensor) {
-      return;
-    }
-
-    /*
-     * Fetch the newest physical KUM observation at the exact moment
-     * this calibration point is being captured.
-     *
-     * The observation already displayed in the UI may be older because
-     * newer physical telemetry can arrive after the panel was loaded.
-     */
-    const observation = await loadLatestObservation(fuelSensor.id);
-
-    if (!observation) {
+    if (
+      !currentSession ||
+      currentSession.status !== "active" ||
+      automaticCaptureActive
+    ) {
       return;
     }
 
@@ -292,11 +317,80 @@ export default function FuelCalibrationPanel() {
       return;
     }
 
-    await capturePoint(currentSession.id, {
-      cumulative_change_litres: cumulativeChange,
-    });
+    /*
+     * Capture the identifiers and requested calibration position at the start
+     * of this automatic-capture attempt.
+     *
+     * The polling loop must continue evaluating exactly this session and
+     * cumulative fuel-change position even while React subsequently rerenders.
+     */
+    const sessionId = currentSession.id;
+    const requestedCumulativeChange = cumulativeChange;
 
-    setCumulativeChangeLitres("");
+    /*
+     * Establish the physical-observation boundary once for this entire
+     * automatic-capture attempt.
+     *
+     * Every poll must reuse this exact timestamp so the backend can accumulate
+     * only KUM observations produced after the installer pressed
+     * "Start Automatic Capture".
+     */
+    const observationStartedAt = new Date().toISOString();
+
+    setAutomaticCaptureActive(true);
+    setAutomaticCaptureResult(null);
+
+    /*
+     * Each iteration performs exactly one backend stability evaluation.
+     *
+     * The backend decides whether the recent physical KUM evidence is stable.
+     * The frontend never calculates or overrides that decision.
+     */
+    const evaluateCapture = async (): Promise<void> => {
+      const result = await capturePoint(sessionId, {
+        cumulative_change_litres: requestedCumulativeChange,
+        observation_started_at: observationStartedAt,
+      });
+
+      /*
+       * A failed request terminates this automatic-capture attempt.
+       *
+       * The store has already populated its user-facing error state.
+       */
+      if (!result) {
+        setAutomaticCaptureActive(false);
+        automaticCaptureTimerRef.current = null;
+        return;
+      }
+
+      setAutomaticCaptureResult(result);
+
+      /*
+       * Stable evidence has already been persisted by the backend.
+       *
+       * capturePoint() reloads the authoritative profile when captured=true,
+       * so there is nothing further for this polling loop to persist.
+       */
+      if (result.captured) {
+        setAutomaticCaptureActive(false);
+        automaticCaptureTimerRef.current = null;
+        setCumulativeChangeLitres("");
+        return;
+      }
+
+      /*
+       * The physical measurement is not ready yet.
+       *
+       * Wait before asking the backend to evaluate the latest observation
+       * window again. setTimeout is used rather than setInterval so requests
+       * can never overlap.
+       */
+      automaticCaptureTimerRef.current = window.setTimeout(() => {
+        void evaluateCapture();
+      }, 5_000);
+    };
+
+    await evaluateCapture();
   };
 
   const handlePauseSession = async () => {
@@ -829,7 +923,7 @@ export default function FuelCalibrationPanel() {
                 </div>
               </div>
 
-              <div className="platform-detail-section">
+              <div className="platform-calibration-session-actions">
                 {currentSession.status === "active" && (
                   <button
                     type="button"
@@ -899,11 +993,115 @@ export default function FuelCalibrationPanel() {
             <div className="platform-detail-section">
               <label>Capture Calibration Point</label>
 
-              <p className="platform-detail-text">
-                Record the current physical KUM level together with the known
-                cumulative fuel change from the beginning of this calibration
-                session.
-              </p>
+              {automaticCaptureResult && (
+                <div
+                  className={`platform-auto-capture ${
+                    automaticCaptureResult.captured
+                      ? "platform-auto-capture--complete"
+                      : "platform-auto-capture--measuring"
+                  }`}
+                >
+                  <div className="platform-auto-capture__visual">
+                    {automaticCaptureResult.captured ? (
+                      <div
+                        className="platform-auto-capture__success"
+                        aria-hidden="true"
+                      >
+                        ✓
+                      </div>
+                    ) : (
+                      <div
+                        className="platform-auto-capture__spinner"
+                        aria-hidden="true"
+                      >
+                        <span />
+                      </div>
+                    )}
+
+                    <span className="platform-auto-capture__eyebrow">
+                      ORBI Auto Calibration
+                    </span>
+
+                    <strong className="platform-auto-capture__title">
+                      {automaticCaptureResult.captured
+                        ? "Calibration Point Captured"
+                        : automaticCaptureResult.state ===
+                            "waiting_for_telemetry"
+                          ? "Waiting for Fuel Sensor"
+                          : automaticCaptureResult.state === "observing"
+                            ? "Measuring Fuel Level"
+                            : automaticCaptureResult.state === "settling"
+                              ? "Fuel Level Is Settling"
+                              : "Checking Fuel Stability"}
+                    </strong>
+
+                    <div className="platform-auto-capture__reading">
+                      {automaticCaptureResult.captured
+                        ? (automaticCaptureResult.capture_distance_cm?.toFixed(
+                            2,
+                          ) ?? "—")
+                        : (latestObservation?.realtime_distance_cm.toFixed(2) ??
+                          "—")}
+
+                      <span>cm</span>
+                    </div>
+
+                    <p className="platform-auto-capture__message">
+                      {automaticCaptureResult.captured
+                        ? "ORBI detected a stable fuel level and recorded this calibration point automatically."
+                        : "Keep the tank and sensor still. ORBI is continuously measuring the physical fuel level and will capture the point automatically when the reading is stable."}
+                    </p>
+                  </div>
+
+                  <div className="platform-auto-capture__telemetry">
+                    <div>
+                      <span>Samples</span>
+                      <strong>{automaticCaptureResult.sample_count}</strong>
+                    </div>
+
+                    <div>
+                      <span>Observing</span>
+                      <strong>
+                        {automaticCaptureResult.observation_duration_seconds.toFixed(
+                          0,
+                        )}{" "}
+                        s
+                      </strong>
+                    </div>
+
+                    <div>
+                      <span>Variation</span>
+                      <strong>
+                        {automaticCaptureResult.realtime_range_cm === null
+                          ? "—"
+                          : `${automaticCaptureResult.realtime_range_cm.toFixed(3)} cm`}
+                      </strong>
+                    </div>
+
+                    <div>
+                      <span>Trend</span>
+                      <strong>
+                        {automaticCaptureResult.realtime_slope_cm_per_second ===
+                        null
+                          ? "—"
+                          : `${automaticCaptureResult.realtime_slope_cm_per_second.toFixed(
+                              4,
+                            )} cm/s`}
+                      </strong>
+                    </div>
+                  </div>
+
+                  {!automaticCaptureResult.captured && (
+                    <div className="platform-auto-capture__activity">
+                      <span />
+                      <span />
+                      <span />
+                      <span />
+                      <span />
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="platform-form">
                 <label>
@@ -924,13 +1122,16 @@ export default function FuelCalibrationPanel() {
                   type="button"
                   className="platform-primary-button"
                   disabled={
+                    automaticCaptureActive ||
                     !latestObservation ||
                     cumulativeChangeLitres.trim() === "" ||
                     !Number.isFinite(Number(cumulativeChangeLitres))
                   }
                   onClick={() => void handleCapturePoint()}
                 >
-                  Capture Calibration Point
+                  {automaticCaptureActive
+                    ? "Waiting for Stable Fuel Level..."
+                    : "Start Automatic Capture"}
                 </button>
               </div>
             </div>

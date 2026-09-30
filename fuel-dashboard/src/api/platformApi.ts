@@ -21,7 +21,7 @@ import type {
   ApplyFuelCalibrationAnchorRequest,
   CaptureFuelCalibrationPointRequest,
   CreateFuelCalibrationProfileRequest,
-  FuelCalibrationPointMutationResponse,
+  FuelCalibrationAutomaticCaptureResponse,
   FuelCalibrationProfile,
   FuelCalibrationProfileMutationResponse,
   FuelCalibrationSessionMutationResponse,
@@ -360,11 +360,26 @@ export async function startFuelCalibrationSession(
 export async function captureFuelCalibrationPoint(
   sessionId: string,
   request: CaptureFuelCalibrationPointRequest,
-): Promise<FuelCalibrationPointMutationResponse> {
-  const response = await httpClient.post<FuelCalibrationPointMutationResponse>(
-    `/api/fuel-calibration/sessions/${sessionId}/points`,
-    request,
-  );
+): Promise<FuelCalibrationAutomaticCaptureResponse> {
+  /*
+   * Automatic guided-calibration capture is backend-authoritative.
+   *
+   * Each request evaluates the recent physical KUM observation window.
+   * The response tells the frontend whether ORBI is:
+   *
+   * - waiting for telemetry;
+   * - observing;
+   * - settling;
+   * - stable.
+   *
+   * No calibration point exists until the backend determines that the
+   * physical measurement is stable.
+   */
+  const response =
+    await httpClient.post<FuelCalibrationAutomaticCaptureResponse>(
+      `/api/fuel-calibration/sessions/${sessionId}/points`,
+      request,
+    );
 
   return response.data;
 }

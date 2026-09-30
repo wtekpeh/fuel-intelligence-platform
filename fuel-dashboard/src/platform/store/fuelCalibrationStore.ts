@@ -23,6 +23,7 @@ import type {
   FuelCalibrationProfile,
   LatestFuelSensorObservation,
   StartFuelCalibrationSessionRequest,
+  FuelCalibrationAutomaticCaptureResponse,
 } from "../types/fuelCalibration";
 
 interface FuelCalibrationStore {
@@ -50,7 +51,7 @@ interface FuelCalibrationStore {
   capturePoint: (
     sessionId: string,
     request: CaptureFuelCalibrationPointRequest,
-  ) => Promise<void>;
+  ) => Promise<FuelCalibrationAutomaticCaptureResponse | null>;
 
   pauseSession: (sessionId: string) => Promise<void>;
 
@@ -247,23 +248,41 @@ export const useFuelCalibrationStore = create<FuelCalibrationStore>(
       },
 
       capturePoint: async (sessionId, request) => {
+        /*
+         * One invocation represents one backend stability evaluation.
+         *
+         * The store deliberately does not poll. Polling belongs to the calibration
+         * panel because it owns the interactive automatic-capture lifecycle.
+         *
+         * The backend remains authoritative for deciding whether the physical KUM
+         * measurement is stable enough to become calibration evidence.
+         */
         set({
-          loading: true,
           error: null,
         });
 
         try {
-          await captureFuelCalibrationPoint(sessionId, request);
-          await reloadCurrentProfile();
+          const result = await captureFuelCalibrationPoint(sessionId, request);
 
-          set({
-            loading: false,
-          });
+          /*
+           * A profile reload is necessary only when the backend has actually
+           * persisted a calibration point.
+           *
+           * Waiting/observing/settling evaluations do not mutate the guided
+           * calibration evidence and therefore do not require repeated profile
+           * reloads while the frontend is polling.
+           */
+          if (result.captured) {
+            await reloadCurrentProfile();
+          }
+
+          return result;
         } catch {
           set({
-            loading: false,
-            error: "Failed to capture fuel calibration point.",
+            error: "Failed to evaluate automatic fuel calibration capture.",
           });
+
+          return null;
         }
       },
 

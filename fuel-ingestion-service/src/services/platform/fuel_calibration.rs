@@ -2,7 +2,11 @@ use anyhow::{Result, anyhow};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::domain::calibration::{FuelCalibration, FuelCalibrationAnchor, FuelCalibrationPoint};
+use crate::domain::calibration::{
+    FuelCalibration, FuelCalibrationAnchor, FuelCalibrationPoint, FuelCalibrationStabilityConfig,
+    FuelCalibrationStabilityEvaluator, FuelCalibrationStabilityObservation,
+    FuelCalibrationStabilityResult, FuelCalibrationStabilityState,
+};
 use crate::fuel_calibration_repository;
 use crate::models::{
     FuelCalibrationProfileResponse, FuelCalibrationSessionPointResponse,
@@ -12,6 +16,24 @@ use serde_json::to_value;
 
 use crate::models::CreateSensorCalibrationRequest;
 use crate::repository;
+
+/// Result of one automatic guided fuel-calibration capture attempt.
+///
+/// Stability evaluation remains a domain concern, while `point_id` represents
+/// the persistence outcome of the platform workflow.
+///
+/// `point_id` is:
+///
+/// - `None` while the physical fuel measurement is not yet stable;
+/// - `Some(id)` once the stability-certified measurement has been persisted.
+///
+/// Because calibration-point persistence is idempotent, repeated calls for the
+/// same session and cumulative fuel-change position return the same point ID.
+#[derive(Debug)]
+pub struct FuelCalibrationAutomaticCaptureResult {
+    pub stability: FuelCalibrationStabilityResult,
+    pub point_id: Option<Uuid>,
+}
 
 pub async fn create_profile(
     db_pool: &PgPool,
@@ -290,6 +312,123 @@ pub async fn capture_point(
     .await
 }
 
+/// Automatically captures a guided fuel-calibration point once the
+/// physical KUM measurement has been proven stable.
+///
+/// Unlike the original manual capture path, this function does not query
+/// the latest observation again after stability has been established.
+///
+/// The exact real-time distance certified by the stability evaluator is
+/// persisted as the calibration evidence.
+///
+/// This operation is safe to call repeatedly while the frontend polls:
+///
+/// - non-stable evaluations return without creating a point;
+/// - the first stable evaluation creates the point;
+/// - later stable evaluations return the existing point through the
+///   repository's idempotent persistence boundary.
+pub async fn capture_stable_point(
+    db_pool: &PgPool,
+    session_id: Uuid,
+    cumulative_change_litres: f64,
+    observation_started_at: chrono::DateTime<chrono::Utc>,
+    config: FuelCalibrationStabilityConfig,
+) -> Result<FuelCalibrationAutomaticCaptureResult> {
+    /*
+     * The installer supplies only the known cumulative fuel change.
+     *
+     * Automation replaces the manual physical sensor-capture action.
+     */
+    if !cumulative_change_litres.is_finite() {
+        return Err(anyhow!("Cumulative fuel change must be finite."));
+    }
+
+    /*
+     * Resolve:
+     *
+     * session -> profile -> physical FUEL sensor
+     *
+     * The backend remains authoritative for this relationship.
+     */
+    let session =
+        fuel_calibration_repository::get_fuel_calibration_session_by_id(db_pool, session_id)
+            .await?;
+
+    let Some(session) = session else {
+        return Err(anyhow!("Fuel calibration session was not found."));
+    };
+
+    let profile = fuel_calibration_repository::get_fuel_calibration_profile_by_id(
+        db_pool,
+        session.profile_id,
+    )
+    .await?;
+
+    let Some(profile) = profile else {
+        return Err(anyhow!("Fuel calibration profile not found."));
+    };
+
+    /*
+     * Evaluate the recent physical KUM observation window.
+     *
+     * Possible workflow states are:
+     *
+     * WaitingForTelemetry
+     * Observing
+     * Settling
+     * Stable
+     */
+    let stability =
+        evaluate_sensor_stability(db_pool, profile.sensor_id, observation_started_at, config)
+            .await?;
+
+    /*
+     * A non-stable physical measurement must never become calibration
+     * evidence.
+     *
+     * Return the diagnostics so the frontend can continue its animation
+     * and poll again later.
+     */
+    if stability.state != FuelCalibrationStabilityState::Stable {
+        return Ok(FuelCalibrationAutomaticCaptureResult {
+            stability,
+            point_id: None,
+        });
+    }
+
+    /*
+     * Stable must contain the exact authoritative real-time measurement
+     * certified by the stability evaluator.
+     */
+    let observed_level_cm = stability.capture_distance_cm.ok_or_else(|| {
+        anyhow!("Stable fuel calibration result did not contain a capture distance.")
+    })?;
+
+    /*
+     * Persist exactly the physical measurement that was certified stable.
+     *
+     * Do NOT query the latest observation again here.
+     *
+     * The repository operation is idempotent on:
+     *
+     *     (session_id, cumulative_change_litres)
+     *
+     * so repeated polling cannot create duplicate calibration evidence.
+     */
+    let point_id = fuel_calibration_repository::capture_fuel_calibration_point(
+        db_pool,
+        session_id,
+        observed_level_cm,
+        cumulative_change_litres,
+    )
+    .await?;
+
+    Ok(FuelCalibrationAutomaticCaptureResult {
+        stability,
+        point_id: Some(point_id),
+    })
+}
+
 pub async fn pause_session(db_pool: &PgPool, session_id: Uuid) -> Result<()> {
     fuel_calibration_repository::pause_fuel_calibration_session(db_pool, session_id).await
 }
@@ -532,6 +671,124 @@ pub async fn get_latest_sensor_observation(
         latitude: observation.latitude,
         longitude: observation.longitude,
     }))
+}
+
+/// Evaluates the recent physical KUM observation window for an installed
+/// fuel sensor.
+///
+/// The platform layer owns:
+///
+/// - choosing the physical observation window;
+/// - retrieving persisted sensor evidence;
+/// - converting database timestamps into domain-relative elapsed time.
+///
+/// The domain evaluator owns the actual stability decision.
+pub async fn evaluate_sensor_stability(
+    db_pool: &PgPool,
+    sensor_id: Uuid,
+    observation_started_at: chrono::DateTime<chrono::Utc>,
+    config: FuelCalibrationStabilityConfig,
+) -> Result<FuelCalibrationStabilityResult> {
+    /*
+     * The repository needs an explicit measurement-time boundary.
+     *
+     * The requested history must be at least as long as the evaluator's
+     * minimum evidence duration, but we deliberately retrieve additional
+     * history so the evaluator can observe recent physical behaviour rather
+     * than relying on an exact timing boundary.
+     *
+     * This multiplier is orchestration policy, not a stability threshold.
+     */
+    /*
+     * Automatic guided capture must evaluate only physical observations
+     * produced after this particular capture attempt began.
+     *
+     * observation_started_at is established once when the installer presses
+     * "Start Automatic Capture" and remains unchanged while the frontend
+     * polls this operation.
+     *
+     * This prevents measurements that were already stable before the installer
+     * initiated the capture from immediately satisfying the stability policy.
+     */
+    /*
+     * Stability is evaluated over recent physical behaviour rather than the
+     * entire lifetime of the automatic-capture attempt.
+     *
+     * We retain up to twice the minimum required stability duration. This gives
+     * the evaluator enough evidence to establish sustained stability while
+     * allowing earlier disturbed measurements to age out after the fuel level
+     * has physically settled.
+     *
+     * The automatic-capture start remains a hard lower boundary: observations
+     * recorded before the installer pressed "Start Automatic Capture" must never
+     * contribute to this attempt.
+     */
+    let requested_window_ms = config.minimum_observation_duration_ms.saturating_mul(2);
+
+    let requested_window_ms_i64 = i64::try_from(requested_window_ms)
+        .map_err(|_| anyhow!("Fuel calibration stability window is too large."))?;
+
+    let rolling_window_start =
+        chrono::Utc::now() - chrono::Duration::milliseconds(requested_window_ms_i64);
+
+    let window_start = observation_started_at.max(rolling_window_start);
+
+    let stored_observations = fuel_calibration_repository::get_fuel_sensor_observations_since(
+        db_pool,
+        sensor_id,
+        window_start,
+    )
+    .await?;
+
+    /*
+     * No database observations means there is nothing to convert.
+     *
+     * Let the domain evaluator produce WaitingForTelemetry so state
+     * semantics remain centralized in one place.
+     */
+    if stored_observations.is_empty() {
+        return Ok(FuelCalibrationStabilityEvaluator::evaluate(&[], config));
+    }
+
+    /*
+     * Convert absolute database timestamps into relative measurement time.
+     *
+     * recorded_at is used rather than received_at because stability concerns
+     * physical sensor behaviour, not LTE/database delivery timing.
+     */
+    let first_recorded_at = stored_observations
+        .iter()
+        .map(|observation| observation.recorded_at)
+        .min()
+        .expect("stored observations are known to be non-empty");
+
+    let observations = stored_observations
+        .into_iter()
+        .filter_map(|observation| {
+            let elapsed = observation
+                .recorded_at
+                .signed_duration_since(first_recorded_at);
+
+            /*
+             * Negative elapsed time should be impossible because
+             * first_recorded_at is the minimum timestamp. Protect the
+             * domain boundary nevertheless.
+             */
+            let elapsed_ms = u64::try_from(elapsed.num_milliseconds()).ok()?;
+
+            Some(FuelCalibrationStabilityObservation {
+                realtime_distance_cm: observation.realtime_distance_cm,
+                raw_distance_cm: observation.raw_distance_cm,
+                smooth_distance_cm: observation.smooth_distance_cm,
+                elapsed_ms,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    Ok(FuelCalibrationStabilityEvaluator::evaluate(
+        &observations,
+        config,
+    ))
 }
 
 pub async fn get_profile(

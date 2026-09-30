@@ -13,6 +13,19 @@ export type FuelCalibrationSessionStatus =
   | "completed"
   | "abandoned";
 
+/**
+ * Backend-authoritative physical stability state used during automatic
+ * guided fuel-calibration capture.
+ *
+ * The frontend does not calculate stability itself. It renders the state
+ * produced by the backend from real KUM physical observations.
+ */
+export type FuelCalibrationStabilityState =
+  | "waiting_for_telemetry"
+  | "observing"
+  | "settling"
+  | "stable";
+
 export interface CreateFuelCalibrationProfileRequest {
   tank_capacity_litres: number;
 }
@@ -21,9 +34,26 @@ export interface StartFuelCalibrationSessionRequest {
   starting_litres: number | null;
 }
 
+/**
+ * Starts or continues one automatic guided-calibration capture attempt.
+ *
+ * The installer supplies the known cumulative fuel change.
+ *
+ * `observation_started_at` is established once when the installer presses
+ * "Start Automatic Capture". The same timestamp must then be reused for
+ * every poll belonging to that capture attempt.
+ *
+ * This gives the backend an authoritative lower time boundary so physical
+ * KUM observations recorded before the installer started the capture cannot
+ * satisfy the stability evaluation.
+ *
+ * The frontend does not calculate physical stability itself.
+ */
 export interface CaptureFuelCalibrationPointRequest {
   cumulative_change_litres: number;
+  observation_started_at: string;
 }
+
 export interface ApplyFuelCalibrationAnchorRequest {
   cumulative_change_litres: number;
   absolute_litres: number;
@@ -39,8 +69,37 @@ export interface FuelCalibrationSessionMutationResponse {
   message: string;
 }
 
-export interface FuelCalibrationPointMutationResponse {
-  point_id: string;
+/**
+ * Result of one automatic stability evaluation.
+ *
+ * While the physical fuel measurement is still being evaluated:
+ *
+ *   captured = false
+ *   point_id = null
+ *
+ * Once the backend determines that the KUM measurement is stable:
+ *
+ *   state = "stable"
+ *   captured = true
+ *   point_id = <persisted calibration point UUID>
+ *
+ * Repeated requests for the same cumulative fuel position remain
+ * idempotent and may return the already-existing point ID.
+ */
+export interface FuelCalibrationAutomaticCaptureResponse {
+  state: FuelCalibrationStabilityState;
+
+  sample_count: number;
+  observation_duration_seconds: number;
+
+  realtime_range_cm: number | null;
+  realtime_slope_cm_per_second: number | null;
+
+  capture_distance_cm: number | null;
+
+  captured: boolean;
+  point_id: string | null;
+
   message: string;
 }
 
@@ -90,6 +149,14 @@ export interface FuelCalibrationProfile {
   updated_at: string;
 }
 
+/**
+ * Latest physical KUM observation before tank-specific distance-to-litres
+ * calibration is applied.
+ *
+ * This remains useful for diagnostics and installer visibility, but automatic
+ * calibration capture is controlled by the backend stability evaluator rather
+ * than by the frontend selecting this observation directly.
+ */
 export interface LatestFuelSensorObservation {
   sensor_id: string;
   device_id: string;

@@ -667,8 +667,19 @@ pub struct StartFuelCalibrationSessionRequest {
 #[derive(Debug, Deserialize)]
 pub struct CaptureFuelCalibrationPointRequest {
     pub cumulative_change_litres: f64,
-}
 
+    /*
+     * Fixed beginning of this automatic-capture attempt.
+     *
+     * The frontend establishes this timestamp once when the installer
+     * presses "Start Automatic Capture" and reuses the same value for
+     * every subsequent poll.
+     *
+     * Physical observations recorded before this boundary must not
+     * contribute to the stability decision for this capture attempt.
+     */
+    pub observation_started_at: chrono::DateTime<chrono::Utc>,
+}
 /// Establishes an absolute quantity reference after calibration has
 /// already begun.
 ///
@@ -698,6 +709,29 @@ pub struct FuelCalibrationSessionMutationResponse {
 #[derive(Debug, Serialize)]
 pub struct FuelCalibrationPointMutationResponse {
     pub point_id: Uuid,
+    pub message: String,
+}
+
+/// Response returned while ORBI automatically evaluates physical fuel
+/// stability and captures a guided calibration point.
+///
+/// The frontend uses this response to render the calibration animation
+/// directly from backend sensor state rather than from an artificial timer.
+#[derive(Debug, Serialize)]
+pub struct FuelCalibrationAutomaticCaptureResponse {
+    pub state: String,
+
+    pub sample_count: usize,
+    pub observation_duration_seconds: f64,
+
+    pub realtime_range_cm: Option<f64>,
+    pub realtime_slope_cm_per_second: Option<f64>,
+
+    pub capture_distance_cm: Option<f64>,
+
+    pub captured: bool,
+    pub point_id: Option<Uuid>,
+
     pub message: String,
 }
 
