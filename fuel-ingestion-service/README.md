@@ -303,6 +303,179 @@ Runtime calibrated fuel
 This preserves the measurement-first architecture throughout installation,
 calibration, publication, production approval, and normal runtime operation.
 
+### Automated Stability-Aware Guided Calibration Capture
+
+The guided fuel-calibration workflow is evolving from manual point capture toward
+automated stability-aware capture.
+
+The installer remains responsible for providing the known physical fuel quantity
+change. The platform remains responsible for determining when the physical sensor
+measurement is sufficiently stable to be accepted as calibration evidence.
+
+The target workflow is:
+
+```text
+Installer Adds or Removes Known Fuel Quantity
+↓
+Installer Enters Signed Cumulative Litre Change
+↓
+ORBI Begins Stability Observation
+↓
+Incoming Physical KUM Observations Evaluated Continuously
+↓
+Stability Engine Evaluates Measurement Behaviour
+↓
+Measurement Still Settling?
+├── Yes → Continue Observing
+└── No  → Stable Measurement Window Confirmed
+↓
+Authoritative Real-Time Distance Selected
+↓
+Calibration Point Captured Automatically
+↓
+Installer Receives Visual Confirmation
+↓
+Continue to Next Fuel Quantity
+```
+
+This removes the requirement for the installer to manually decide the precise
+moment at which a calibration point should be captured.
+
+The browser does not determine measurement stability and does not submit the
+authoritative ultrasonic distance. It displays live calibration state and
+stability progress, accepts the installer-known signed cumulative litre change,
+supports cancel/pause/resume/retry actions, and confirms accepted points.
+
+The backend remains authoritative for resolving incoming physical KUM
+observations, evaluating measurement stability, determining when sufficient
+stable evidence exists, selecting the authoritative real-time distance,
+validating observation freshness, and persisting the resulting calibration point.
+
+#### Stability Is Measurement-Driven, Not Delay-Driven
+
+ORBI must not assume that every tank installation requires the same fixed waiting
+period after fuel is added or removed.
+
+Different installations may settle differently because of tank geometry and
+capacity, fuel movement and sloshing, sensor mounting position and angle,
+ultrasonic reflection behaviour, environmental vibration, vehicle movement, and
+sensor noise.
+
+The stability decision should therefore be based on observed measurement
+behaviour rather than a hard-coded delay.
+
+```text
+New Fuel Quantity Entered
+↓
+Observe Measurement Window
+↓
+Evaluate Variation and Trend
+↓
+Unstable → Continue Observing
+Stable   → Automatically Capture Point
+```
+
+The exact stability algorithm and thresholds must be validated against physical
+hardware before being treated as production constants.
+
+#### KUM Channel Responsibilities
+
+Automated stability detection does not change the authoritative fuel-calibration
+measurement policy:
+
+```text
+Real-Time Distance
+→ authoritative distance used for the calibration point
+
+Raw Distance
+→ supporting physical evidence and diagnostics
+
+Smooth Distance
+→ supporting stability, trend, and diagnostic evidence
+```
+
+Raw and smooth measurements may contribute evidence to the stability decision,
+but they do not compete with the real-time channel to become the calibration
+value.
+
+Once stability has been confirmed, the persisted calibration point continues to
+use `fuel_distance_realtime_cm`.
+
+#### Stability Window
+
+The stability engine should operate over a rolling window of recent physical
+observations rather than making a decision from a single telemetry packet.
+
+```text
+Physical KUM Observation Stream
+↓
+Rolling Stability Window
+├── real-time distance
+├── smooth distance
+├── raw distance
+├── sensor validity
+└── observation timestamps
+↓
+Stability Evaluation
+↓
+WAITING / SETTLING / STABLE
+```
+
+A calibration point may only be captured automatically when sufficient valid
+observations classify the current physical condition as stable.
+
+The stability engine must not fabricate a point when telemetry has stopped,
+observations are stale, the authoritative real-time distance is unavailable,
+sensor validity indicates unusable evidence, the measurement window contains
+insufficient evidence, or the fuel surface is still measurably changing.
+
+#### Installer Experience
+
+The installer-facing calibration wizard should visualize the backend stability
+process rather than presenting a passive manual capture button.
+
+```text
+Cumulative Fuel
+1.00 L
+
+Analyzing Sensor Stability...
+
+Real-Time    20.10 cm
+Smooth       20.04 cm
+Raw          20.18 cm
+
+Stability
+████████████████░░░░  Evaluating...
+
+        ↓
+
+Measurement Stable ✓
+Calibration Point Captured Automatically
+1.00 L → 20.10 cm
+```
+
+The animation represents actual backend measurement analysis rather than
+artificial progress.
+
+The frontend should receive or periodically retrieve sufficient backend state to
+represent:
+
+```text
+WAITING_FOR_TELEMETRY
+↓
+OBSERVING
+↓
+SETTLING
+↓
+STABLE
+↓
+CAPTURED
+```
+
+The API contract for this workflow will be introduced incrementally while
+preserving the existing guided-calibration lifecycle and server-authoritative
+measurement model.
+
 ### Calibration Coverage and Confidence
 
 Fuel calibration confidence is derived from the percentage of the declared
@@ -3894,7 +4067,13 @@ Calibration Observation Freshness Guard ✅
 ↓
 Guided Calibration Backend Regression Tests (65/65) ✅
 ↓
-Guided Calibration Wizard Redesign ← Current
+Automated Calibration Stability Engine ← Current
+↓
+Automated Stability-Aware Point Capture
+↓
+Animated Installer Calibration Experience
+↓
+Guided Calibration Wizard Redesign
 ↓
 Final Physical Guided-Calibration Workflow Validation
 ↓

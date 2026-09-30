@@ -882,142 +882,190 @@ Operational Intelligence
 
 # Fuel Calibration
 
-The backend now contains a physical fuel calibration domain used by ORBI Fuel
+The backend contains the physical fuel-calibration domain used by ORBI Fuel
 Intelligence devices.
 
-Runtime fuel telemetry can be converted from physical KUM ultrasonic sensor
-measurements into calibrated fuel quantities.
-
-The calibration backend supports concepts including:
-
-```text
-fuel calibration profiles
-calibration sessions
-calibration points
-physical sensor measurements
-resolved litre quantities
-calibration validation
-coverage
-confidence
-runtime calibration
-```
+Runtime fuel telemetry is converted from physical KUM ultrasonic measurements
+into calibrated fuel quantities using the active production calibration.
 
 ## Fuel Calibration Frontend Status
 
-The Fuel Calibration frontend is the current major frontend development
-milestone.
+The guided calibration frontend is now implemented against the
+server-authoritative calibration workflow.
 
-The backend calibration contract has now been hardened and is authoritative for
-physical measurement capture. The frontend must therefore act as an installer
-workflow and must not duplicate physical-measurement or calibration authority in
-the browser.
-
-The guided calibration UI will follow this responsibility split:
+The current workflow supports:
 
 ```text
-Installer
+Select Provisioned FUEL Sensor
 ↓
-Select provisioned FUEL sensor
+Create / Load Calibration Profile
 ↓
-Create / load calibration profile
+Start Guided Calibration Session
 ↓
-Start guided calibration session
+Physically Add or Remove a Known Fuel Quantity
 ↓
-Physically add or remove a known amount of fuel
+Enter Signed Cumulative Litre Change
 ↓
-Enter signed cumulative litre change
+Capture Calibration Point
 ↓
-Request calibration-point capture
+Backend Resolves Latest Persisted Physical KUM Observation
 ↓
-Backend resolves latest persisted physical KUM observation
+Backend Validates Observation Freshness
 ↓
-Backend validates observation freshness
+Backend Persists Authoritative Calibration Point
 ↓
-Backend persists authoritative calibration point
+Repeat as Required
 ↓
-Review verified coverage and confidence
+Establish Absolute Full-Tank Anchor
 ↓
-Repeat / pause / resume / abandon as required
+Complete Session
 ↓
-Complete session
+Publish Validated Runtime Calibration
 ↓
-Publish validated runtime calibration candidate
-↓
-Explicit production approval
+Explicit Production Approval
 ```
 
-The browser does **not** submit `fuel_distance_realtime_cm` as authoritative
-calibration evidence.
+The frontend displays the latest physical KUM observation, including real-time,
+smooth, and raw distance measurements, but it does not submit a browser-selected
+distance as authoritative calibration evidence.
 
-Instead:
+The current measurement policy is:
 
 ```text
-Frontend authority
-→ installer intent
-→ signed cumulative litre change
-→ workflow actions
+Real-Time Distance
+→ authoritative calibration and runtime fuel measurement
 
-Backend authority
-→ physical KUM observation
-→ observation freshness
-→ resolved calibration distance
-→ absolute litre resolution
-→ verified coverage
-→ confidence
-→ publication validation
-→ production activation
+Raw Distance
+→ physical diagnostic evidence
+
+Smooth Distance
+→ diagnostic, trend, and stability evidence
 ```
 
-The backend currently rejects guided point capture when the latest usable
-physical KUM observation is missing or older than the 60-second freshness
-boundary.
+The backend remains authoritative for the physical observation, observation
+freshness, calibration distance, resolved litres, coverage, confidence,
+publication validation, and production activation.
 
-The frontend redesign should therefore make measurement readiness visible to the
-installer without pretending that a browser-displayed value is itself the
-authoritative calibration measurement.
-
-The calibration UI should expose the backend lifecycle rather than reproduce its
-domain logic locally:
-
-```text
-DRAFT
-↓
-PROGRESSIVE
-↓
-VALIDATED
-↓
-PRODUCTION
-```
-
-Session states remain:
-
-```text
-ACTIVE
-PAUSED
-ABANDONED
-COMPLETED
-```
-
-The frontend should also expose:
+The calibration UI exposes:
 
 - declared tank capacity
+- latest physical KUM observation
+- real-time, smooth, and raw distance
+- signed cumulative fuel change
+- captured calibration points
 - verified fuel range
 - coverage percentage
 - calibration confidence
-- session history
-- captured calibration points
 - pause / resume / abandon controls
-- absolute-anchor workflow where required
-- publish action
-- explicit production-approval action
-- clear stale/missing physical-observation errors
+- full-tank absolute-anchor workflow
+- session completion
+- publication
+- explicit production approval
+- stale or missing physical-observation errors
 
-Publication and production approval must remain visibly separate actions because
-publishing a valid lookup-table candidate does not authorize it for normal
-runtime fuel intelligence.
+Publication and production approval remain separate actions because publishing a
+valid lookup-table candidate does not authorize it for normal runtime fuel
+intelligence.
 
-The immediate implementation target is therefore an installer-focused Guided
-Calibration Wizard built directly against the hardened backend APIs.
+## Automated Stability-Aware Capture — Next Calibration Milestone
+
+The next calibration milestone removes the requirement for the installer to
+manually decide the precise moment at which to press **Capture Point**.
+
+The installer will continue to enter the known signed cumulative litre change.
+ORBI will then automatically observe incoming physical KUM measurements until the
+backend stability engine determines that sufficient stable evidence exists.
+
+Target interaction:
+
+```text
+Installer Adds or Removes Known Fuel Quantity
+↓
+Installer Enters Signed Cumulative Litre Change
+↓
+Start Measurement
+↓
+Frontend Displays Live Measurement Animation
+↓
+Backend Evaluates Incoming KUM Observation Window
+↓
+WAITING_FOR_TELEMETRY
+↓
+OBSERVING
+↓
+SETTLING
+↓
+STABLE
+↓
+Backend Automatically Captures Authoritative Real-Time Distance
+↓
+CAPTURED
+↓
+Frontend Confirms Calibration Point
+```
+
+This is an automation and installer-experience improvement. It does not change
+the established calibration mathematics or authoritative measurement policy.
+
+The browser must not independently determine that a measurement is stable.
+Instead, it visualizes backend state.
+
+Conceptually:
+
+```text
+Physical KUM Telemetry
+↓
+Backend Stability Engine
+├── real-time distance
+├── raw distance
+├── smooth distance
+├── observation timestamps
+└── sensor validity
+↓
+Stability State + Measurement Feedback
+↓
+Frontend Animation
+↓
+Automatic Server-Authoritative Capture
+```
+
+The animation should represent actual measurement progress rather than an
+artificial timer.
+
+Example installer presentation:
+
+```text
+Cumulative Fuel
+1.00 L
+
+Analyzing Sensor Stability...
+
+Real-Time    20.10 cm
+Raw          20.18 cm
+Smooth       20.04 cm
+
+Stability
+████████████████░░░░  Settling...
+
+        ↓
+
+Measurement Stable ✓
+
+Calibration Point Captured
+1.00 L → 20.10 cm
+```
+
+Tank installations may differ in geometry, capacity, sensor mounting, liquid
+movement, vibration, and ultrasonic behaviour. The stability engine should
+therefore evaluate observed signal behaviour rather than rely on one fixed
+waiting period for every installation.
+
+Exact stability thresholds will be established and validated against physical
+hardware before being treated as production constants.
+
+The automated workflow must preserve the existing manual/server-authoritative
+capture foundation while it is introduced incrementally.
+
 
 ---
 
@@ -1160,7 +1208,7 @@ freshness protection required by the redesigned wizard.
 
 Major remaining work includes:
 
-- Guided Fuel Calibration Wizard redesign and implementation
+- Automated fuel-calibration stability integration and animated capture workflow
 - Vibration Intelligence/UI refinement
 - ORBI Administration integration with `orbi-provision`
 - Authentication
@@ -1193,13 +1241,25 @@ Operational Frontend Reconciliation
 Physical Vibration Telemetry Integration
                 ✅
                 ↓
-Guided Fuel Calibration Wizard Redesign
+Guided Fuel Calibration Workflow
+                ✅
+                ↓
+Server-Authoritative Physical Capture
+                ✅
+                ↓
+Physical Calibration → Production Runtime Validation
+                ✅
+                ↓
+Automated Calibration Stability Engine
                 ← CURRENT
                 ↓
-Server-Authoritative Capture UI Integration
+Automated Stability-Aware Point Capture
                 ⏳
                 ↓
-Final Physical Guided-Calibration Workflow Validation
+Animated Installer Calibration Experience
+                ⏳
+                ↓
+Final Automated Physical Calibration Validation
                 ⏳
                 ↓
 Vibration Intelligence / UI Refinement
@@ -1225,6 +1285,7 @@ Production Platform Hardening
 
 The ordering of Administration integration and Keycloak may be refined after the
 administration boundaries and authorization requirements are inspected.
+
 
 ---
 

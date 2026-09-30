@@ -45,6 +45,8 @@ Current firmware capabilities include:
 -   KUM telemetry integration into the unified telemetry pipeline
 -   Raw fuel telemetry persistence to the SD queue
 -   Raw fuel telemetry uploads
+-   Continuous raw KUM measurement delivery suitable for backend-guided
+    calibration observation
 -   LTE backend communication
 -   HTTP telemetry uploads
 -   Persistent SD card queue
@@ -1879,6 +1881,52 @@ Raw fuel telemetry from the KUM ultrasonic sensor is transmitted without
 calibration, allowing the ORBI backend to perform tank calibration,
 normalization, and fuel intelligence centrally.
 
+### Backend-Guided Fuel Calibration Support
+
+The guided fuel-calibration workflow remains a backend and dashboard
+responsibility. The firmware does not decide when a calibration point is
+stable, select a preferred KUM measurement field, interpolate tank volume, or
+publish calibration profiles.
+
+During calibration, the physical device continues to acquire and transmit the
+normal raw KUM measurement set, including the available real-time, smooth, and
+raw distance measurements. This gives the backend a stream of physical
+observations from which it can determine whether the sensor has settled after
+fuel is added.
+
+The intended automated workflow is:
+
+``` text
+Installer enters cumulative fuel quantity
+        │
+        ▼
+Backend enters calibration observation period
+        │
+        ▼
+Firmware continues normal raw KUM acquisition
+        │
+        ▼
+Raw / Real-time / Smooth measurements reach backend
+        │
+        ▼
+Backend stability algorithm evaluates the observation window
+        │
+        ▼
+Stable physical level is captured automatically
+        │
+        ▼
+Fuel quantity + stable level become a calibration point
+```
+
+The stability algorithm is intentionally not embedded in the firmware. Tank
+capacity, geometry, installation conditions, observation-window policy, and
+future calibration algorithms can therefore evolve centrally without requiring
+firmware changes on deployed ORBI devices.
+
+This preserves the core firmware principle:
+
+> **Firmware acquires reality. The ORBI Platform interprets reality.**
+
 This architecture cleanly separates measurement acquisition from
 operational interpretation and provides a scalable foundation for
 supporting additional sensor technologies.
@@ -2237,8 +2285,10 @@ has now validated raw KUM measurement acquisition, decoding,
 SensorSnapshot integration, unified telemetry generation, SD
 persistence, LTE batch upload, and backend measurement-first ingestion.
 
-Tank calibration and fuel intelligence intentionally remain backend
-responsibilities rather than firmware responsibilities.
+Tank calibration, automated calibration-point stability evaluation, and fuel
+intelligence intentionally remain backend responsibilities rather than firmware
+responsibilities. The firmware supplies the raw physical observations required
+by those workflows.
 
 Remaining firmware-side generalization includes:
 
