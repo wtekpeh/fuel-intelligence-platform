@@ -1206,27 +1206,32 @@ freshness protection required by the redesigned wizard.
 
 # Pending Platform Work
 
-Major remaining work includes:
+The fuel-calibration workflow has completed its automated stability-aware capture
+and physical production-validation phase. Authentication and authorization are
+now the immediate platform priority.
 
-- Automated fuel-calibration stability integration and animated capture workflow
+Major remaining product work includes:
+
+- Authentication and authorization using Keycloak and RBAC
+- WhatsApp live event notifications
+- ORBI staff management
+- Installer management and commission workflows
+- Analytics intelligence improvements
 - Vibration Intelligence/UI refinement
 - ORBI Administration integration with `orbi-provision`
-- Authentication
-- Authorization / RBAC
-- Keycloak integration
 - Firmware Management
 - OTA Firmware Updates
 - Remote Kill Switch operational integration
 - Reporting / export
-- Notification integrations
 - Capacitor Android/iOS packaging
 
-Later architecture work includes:
+Parallel release and architecture work includes:
 
-- distributed-service boundaries where operationally justified
-- broker/event-driven integration where justified
-- Kubernetes deployment architecture
+- production deployment preparation
 - production observability and operational hardening
+- Kubernetes deployment architecture
+- distributed-service boundaries where operationally justified
+- broker/event-driven integration where operationally justified
 
 ---
 
@@ -1251,41 +1256,97 @@ Physical Calibration → Production Runtime Validation
                 ✅
                 ↓
 Automated Calibration Stability Engine
-                ← CURRENT
+                ✅
                 ↓
 Automated Stability-Aware Point Capture
-                ⏳
+                ✅
                 ↓
-Animated Installer Calibration Experience
-                ⏳
+Installer Calibration Experience
+                ✅
                 ↓
-Final Automated Physical Calibration Validation
-                ⏳
+Unknown-Start Physical Calibration Validation
+                ✅
                 ↓
-Vibration Intelligence / UI Refinement
-                ⏳
+Full-Tank Anchor Resolution Validation
+                ✅
                 ↓
-ORBI Administration Integration
-(orbi-provision)
-                ⏳
+Production Calibration Publication + Approval
+                ✅
+                ↓
+Live Production Calibration Validation
+                ✅
+                ↓
+Unseen-Point Runtime Interpolation Validation
+                ✅
                 ↓
 Authentication + Authorization
 (Keycloak / RBAC)
-                ⏳
+             ← CURRENT
                 ↓
-Firmware / Device Management Expansion
+WhatsApp Live Event Notifications
                 ↓
-Distributed Services
-(where justified)
+ORBI Staff Management
                 ↓
-Kubernetes
+Installer Management + Commissions
                 ↓
-Production Platform Hardening
+Analytics Intelligence Improvements
+                ↓
+Message Broker / Distributed Services
+(where operationally justified)
 ```
 
-The ordering of Administration integration and Keycloak may be refined after the
-administration boundaries and authorization requirements are inspected.
+## Ghana MVP Delivery Priority
 
+The near-term objective is to produce a deployable ORBI system suitable for
+demonstration and early customer operation in Ghana.
+
+The immediate feature priority is:
+
+1. Authentication and authorization using Keycloak and RBAC
+2. WhatsApp live event notifications
+3. ORBI staff management
+4. Installer management and commission workflows
+5. Analytics intelligence improvements
+6. Message-broker and distributed-service integration where operationally justified
+
+The first commercial deployment does not depend on completing every remaining
+platform feature.
+
+The minimum deployment-oriented ORBI capability is:
+
+```text
+Physical ORBI Hardware
+        ↓
+Device Provisioning
+        ↓
+Physical Sensor Telemetry
+        ↓
+Fuel Calibration
+        ↓
+Production-Calibrated Telemetry
+        ↓
+Operational Intelligence
+        ↓
+Event / Alert Detection
+        ↓
+Authenticated Customer Access
+        ↓
+Dashboard + WhatsApp Notifications
+        ↓
+Production Deployment
+```
+
+Production deployment preparation, observability, operational hardening, and
+Kubernetes form a parallel release track. They should be introduced when needed
+for a reliable commercial deployment rather than being artificially blocked
+behind all remaining business features.
+
+Message-broker adoption is demand-driven. The current architecture remains valid
+for the initial deployment while its operational requirements can be satisfied
+without additional distributed-system complexity. Broker-based event
+distribution should be introduced when multiple asynchronous consumers, scaling
+requirements, reliability requirements, or service boundaries provide a
+concrete operational justification.
 
 ---
 

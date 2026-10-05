@@ -4067,43 +4067,88 @@ Calibration Observation Freshness Guard ✅
 ↓
 Guided Calibration Backend Regression Tests (65/65) ✅
 ↓
-Automated Calibration Stability Engine ← Current
+Automated Calibration Stability Engine ✅
 ↓
-Automated Stability-Aware Point Capture
+Automated Stability-Aware Point Capture ✅
 ↓
-Animated Installer Calibration Experience
+Installer Calibration Experience ✅
 ↓
-Guided Calibration Wizard Redesign
+Unknown-Start Physical Calibration Validation ✅
 ↓
-Final Physical Guided-Calibration Workflow Validation
+Full-Tank Anchor Resolution Validation ✅
 ↓
-Fuel Intelligence Validation ✅
+Production Calibration Publication + Approval ✅
 ↓
-Operational-State Classification Hardening ✅
+Live Production Calibration Validation ✅
 ↓
-245-Test Backend Regression Validation ✅
+Unseen-Point Runtime Interpolation Validation ✅
 ↓
-Firmware Live-Telemetry / Replay Concurrency Validation ← Required Firmware Follow-Up
+Authentication + Authorization
+(Keycloak / RBAC) ← Current
 ↓
-Sensor Adapter Layer
+WhatsApp Live Event Notifications
 ↓
-Firmware Management
+ORBI Staff Management
 ↓
-Frontend Operational Intelligence Enhancements
+Installer Management + Commissions
 ↓
-Production ORBI Hardware
+Analytics Intelligence Improvements
 ↓
-Production Custom ORBI PCB
-↓
-Fleet Intelligence Expansion
-↓
-Generator Intelligence
-↓
-Cold Chain Intelligence
-↓
-Payload Intelligence
-↓
-Energy Monitoring Platform
+Message Broker / Distributed Services
+(where operationally justified)
+
+## Ghana MVP Delivery Priority
+
+The near-term platform objective is to produce a deployable ORBI system suitable
+for demonstration and early customer operation in Ghana.
+
+The immediate feature priority is therefore:
+
+1. Authentication and authorization using Keycloak and RBAC
+2. WhatsApp live event notifications
+3. ORBI staff management
+4. Installer management and commission workflows
+5. Analytics intelligence improvements
+6. Message-broker and distributed-service integration where operationally justified
+
+The first commercial deployment does not depend on completing every item in this
+roadmap.
+
+The minimum deployment-oriented ORBI capability is:
+
+```text
+Physical ORBI Hardware
+        ↓
+Device Provisioning
+        ↓
+Physical Sensor Telemetry
+        ↓
+Fuel Calibration
+        ↓
+Production-Calibrated Telemetry
+        ↓
+Operational Intelligence
+        ↓
+Event / Alert Detection
+        ↓
+Authenticated Customer Access
+        ↓
+Dashboard + WhatsApp Notifications
+        ↓
+Production Deployment
+```
+
+Production deployment preparation, observability, operational hardening, and
+Kubernetes are a parallel release track. They should be introduced when required
+for a reliable deployment rather than being artificially blocked behind all
+remaining business features.
+
+Message-broker adoption is likewise demand-driven. The existing service
+architecture remains valid for the initial deployment while its current
+operational requirements can be satisfied without additional distributed-system
+complexity. Broker-based event distribution should be introduced when multiple
+asynchronous consumers, scaling requirements, reliability requirements, or
+service boundaries provide a concrete operational justification.
 
 ### Sensor-Agnostic Hardware Strategy
 
