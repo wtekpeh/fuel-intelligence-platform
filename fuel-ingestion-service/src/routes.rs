@@ -25,16 +25,21 @@ use crate::services::telemetry::telemetry_enrichment_service::TelemetryEnrichmen
 use crate::ws::alerts_ws_handler;
 use axum::http::{Method, header};
 use axum::{
-    Router,
+    Router, middleware,
     routing::{get, patch, post},
 };
+
 use sqlx::PgPool;
 use tower_http::cors::{AllowOrigin, CorsLayer};
+
+use crate::auth::middleware::require_authentication;
+use crate::auth::state::AuthState;
 
 #[derive(Clone)]
 pub struct AppState {
     pub db_pool: PgPool,
     pub config: AppConfig,
+    pub auth: Option<Arc<AuthState>>,
     pub alert_hub: AlertHub,
     pub telemetry_pipeline: Arc<Mutex<TelemetryPipeline>>,
     pub calibration_loader: Arc<CalibrationLoader>,
@@ -43,7 +48,12 @@ pub struct AppState {
     pub behaviour_learning: Arc<OperationalBehaviourLearningService>,
 }
 
-pub fn app_routes(db_pool: PgPool, config: AppConfig, alert_hub: AlertHub) -> Router {
+pub fn app_routes(
+    db_pool: PgPool,
+    config: AppConfig,
+    alert_hub: AlertHub,
+    auth: Option<Arc<AuthState>>,
+) -> Router {
     let calibration_loader = Arc::new(CalibrationLoader::new(db_pool.clone()));
 
     let fuel_calibration_service =
@@ -57,6 +67,7 @@ pub fn app_routes(db_pool: PgPool, config: AppConfig, alert_hub: AlertHub) -> Ro
     let app_state = AppState {
         db_pool,
         config,
+        auth,
         alert_hub,
         telemetry_pipeline: Arc::new(Mutex::new(TelemetryPipeline::new())),
         calibration_loader,
@@ -81,18 +92,20 @@ pub fn app_routes(db_pool: PgPool, config: AppConfig, alert_hub: AlertHub) -> Ro
         .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::OPTIONS])
         .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]);
 
-    Router::new()
-        .merge(platform_routes())
+    let device_routes = Router::new()
         .route("/api/fuel-readings/batch", post(ingest_reading_batch))
-        .route("/api/fuel-events", get(list_recent_fuel_events))
-        .route(
-            "/api/fuel-readings/recent",
-            get(list_recent_telemetry_stream),
-        )
         .route("/api/heartbeat", post(receive_heartbeat))
         .route(
             "/api/devices/:device_code/runtime-state",
             get(get_device_runtime_state),
+        );
+
+    let human_routes = Router::new()
+        .merge(platform_routes())
+        .route("/api/fuel-events", get(list_recent_fuel_events))
+        .route(
+            "/api/fuel-readings/recent",
+            get(list_recent_telemetry_stream),
         )
         .route("/api/devices/refresh-health", post(refresh_device_health))
         .route(
@@ -152,7 +165,17 @@ pub fn app_routes(db_pool: PgPool, config: AppConfig, alert_hub: AlertHub) -> Ro
             get(list_operational_intelligence_events_handler),
         )
         .route("/api/fuel-readings/history", get(list_telemetry_history))
-        .route("/ws/alerts", get(alerts_ws_handler))
+        .route_layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            require_authentication,
+        ));
+
+    let websocket_routes = Router::new().route("/ws/alerts", get(alerts_ws_handler));
+
+    Router::new()
+        .merge(device_routes)
+        .merge(human_routes)
+        .merge(websocket_routes)
         .with_state(app_state)
         .layer(cors)
 }

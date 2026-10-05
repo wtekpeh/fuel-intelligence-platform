@@ -1,3 +1,4 @@
+mod auth;
 mod catalogue_repository;
 mod config;
 mod db;
@@ -20,6 +21,12 @@ use config::AppConfig;
 use db::create_db_pool;
 use repository::refresh_device_statuses;
 use routes::app_routes;
+
+use std::sync::Arc;
+
+use crate::auth::keycloak::KeycloakClient;
+use crate::auth::state::AuthState;
+use crate::auth::verifier::KeycloakTokenVerifier;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -61,7 +68,42 @@ async fn main() -> anyhow::Result<()> {
 
     let alert_hub = AlertHub::new();
 
-    let app = app_routes(db_pool, config.clone(), alert_hub);
+    let auth = match (
+        &config.keycloak_url,
+        &config.keycloak_realm,
+        &config.keycloak_client_id,
+    ) {
+        (Some(keycloak_url), Some(keycloak_realm), Some(keycloak_client_id)) => {
+            println!(
+                "Initializing Keycloak authentication for realm '{}'.",
+                keycloak_realm
+            );
+
+            let keycloak_client = KeycloakClient::new(keycloak_url, keycloak_realm);
+
+            let jwks = keycloak_client.fetch_jwks().await?;
+
+            let verifier =
+                KeycloakTokenVerifier::new(keycloak_url, keycloak_realm, keycloak_client_id);
+
+            println!("Keycloak authentication initialized.");
+
+            Some(Arc::new(AuthState::new(verifier, jwks)))
+        }
+
+        (None, None, None) => {
+            println!(
+                "Keycloak authentication is not configured; \
+     protected human API routes will reject requests."
+            );
+
+            None
+        }
+
+        _ => unreachable!("partial Keycloak configuration should have been rejected by AppConfig"),
+    };
+
+    let app = app_routes(db_pool, config.clone(), alert_hub, auth);
 
     let address = format!("{}:{}", config.server_host, config.server_port);
 

@@ -6,6 +6,9 @@ pub struct AppConfig {
     pub database_url: String,
     pub server_host: String,
     pub server_port: u16,
+    pub keycloak_url: Option<String>,
+    pub keycloak_realm: Option<String>,
+    pub keycloak_client_id: Option<String>,
     pub device_stale_after_seconds: i64,
     pub device_offline_after_seconds: i64,
     pub device_health_refresh_interval_seconds: u64,
@@ -30,6 +33,31 @@ impl AppConfig {
             .unwrap_or_else(|_| "8080".to_string())
             .parse::<u16>()
             .context("SERVER_PORT must be a valid number")?;
+
+        let keycloak_url = env::var("KEYCLOAK_URL").ok();
+        let keycloak_realm = env::var("KEYCLOAK_REALM").ok();
+        let keycloak_client_id = env::var("KEYCLOAK_CLIENT_ID").ok();
+
+        let keycloak_values_configured = [
+            keycloak_url.is_some(),
+            keycloak_realm.is_some(),
+            keycloak_client_id.is_some(),
+        ];
+
+        let configured_keycloak_value_count = keycloak_values_configured
+            .iter()
+            .filter(|configured| **configured)
+            .count();
+
+        if configured_keycloak_value_count != 0
+            && configured_keycloak_value_count != keycloak_values_configured.len()
+        {
+            anyhow::bail!(
+                "Keycloak configuration is incomplete: KEYCLOAK_URL, \
+         KEYCLOAK_REALM, and KEYCLOAK_CLIENT_ID must either all be set \
+         or all be unset"
+            );
+        }
 
         let device_stale_after_seconds = env::var("DEVICE_STALE_AFTER_SECONDS")
             .unwrap_or_else(|_| "120".to_string())
@@ -84,6 +112,9 @@ impl AppConfig {
             database_url,
             server_host,
             server_port,
+            keycloak_url,
+            keycloak_realm,
+            keycloak_client_id,
             device_stale_after_seconds,
             device_offline_after_seconds,
             device_health_refresh_interval_seconds,
