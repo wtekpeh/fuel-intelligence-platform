@@ -13,6 +13,7 @@
     "@turf/helpers": "^7.3.5",
     "@turf/length": "^7.3.5",
     "axios": "^1.16.1",
+    "keycloak-js": "^26.2.4",
     "leaflet": "^1.9.4",
     "leaflet-draw": "^1.0.4",
     "react": "^19.2.6",
