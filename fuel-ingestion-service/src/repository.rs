@@ -13,7 +13,7 @@ use crate::models::{
     DeviceStateEventResponse, DeviceSummary, FuelEventResponse, Geofence,
     GeofenceActivityTrendPoint, GeofenceActivityTrendResponse, GeofencePositionMatch,
     GeofenceTransitionEventResponse, GeofenceUtilizationResponse, GeofenceUtilizationZone,
-    HardwareProfile, HardwareProfileSensor, OrganizationFleetOverviewResponse,
+    HardwareProfile, HardwareProfileSensor, OrbiUser, OrganizationFleetOverviewResponse,
     OrganizationOverviewResponse, ProvisionInventoryDeviceRequest, SensorCalibration,
     SensorHealthEventResponse, TelemetryStreamResponse, UpdateAssetRequest, UpdateDeviceRequest,
     UpdateOrganizationRequest,
@@ -1124,36 +1124,65 @@ pub async fn get_recent_fuel_events(
     db_pool: &PgPool,
     limit: i64,
     device_id: Option<Uuid>,
+    orbi_user: &OrbiUser,
 ) -> Result<Vec<FuelEventResponse>> {
+    let is_super_admin = orbi_user.platform_role.as_deref() == Some("SUPER_ADMIN");
+
     let rows = sqlx::query!(
         r#"
         SELECT
-            id,
-            event_type,
-            event_time,
-            detected_at,
-            fuel_before,
-            fuel_after,
-            fuel_difference,
-            duration_seconds,
-            latitude,
-            longitude,
-            is_delayed_detection,
-            sync_delay_seconds,
-            severity,
-            confidence,
-            correlation_status,
-            correlation_reason,
-            message
+            fuel_events.id,
+            fuel_events.event_type,
+            fuel_events.event_time,
+            fuel_events.detected_at,
+            fuel_events.fuel_before,
+            fuel_events.fuel_after,
+            fuel_events.fuel_difference,
+            fuel_events.duration_seconds,
+            fuel_events.latitude,
+            fuel_events.longitude,
+            fuel_events.is_delayed_detection,
+            fuel_events.sync_delay_seconds,
+            fuel_events.severity,
+            fuel_events.confidence,
+            fuel_events.correlation_status,
+            fuel_events.correlation_reason,
+            fuel_events.message
+
         FROM fuel_events
+
+        JOIN devices
+            ON devices.id = fuel_events.device_id
+
+        JOIN assets
+            ON assets.id = devices.asset_id
+
         WHERE
-            $2::uuid IS NULL
-            OR device_id = $2
-        ORDER BY created_at DESC
+            ($2::uuid IS NULL OR fuel_events.device_id = $2)
+
+            AND (
+                $3::BOOLEAN = TRUE
+
+                OR EXISTS (
+                    SELECT 1
+                    FROM organizations
+                    JOIN organization_memberships AS membership
+                        ON membership.organization_id = organizations.id
+
+                    WHERE organizations.id = assets.organization_id
+                      AND organizations.is_active = TRUE
+                      AND membership.user_id = $4
+                      AND membership.is_active = TRUE
+                )
+            )
+
+        ORDER BY fuel_events.created_at DESC
         LIMIT $1
         "#,
         limit,
-        device_id
+        device_id,
+        is_super_admin,
+        orbi_user.id
     )
     .fetch_all(db_pool)
     .await?;
@@ -2046,7 +2075,10 @@ pub async fn get_recent_telemetry_stream(
 
 pub async fn get_organization_overview(
     db_pool: &PgPool,
+    orbi_user: &OrbiUser,
 ) -> Result<Vec<OrganizationOverviewResponse>, sqlx::Error> {
+    let is_super_admin = orbi_user.platform_role.as_deref() == Some("SUPER_ADMIN");
+
     let rows = sqlx::query!(
         r#"
         SELECT
@@ -2074,14 +2106,31 @@ pub async fn get_organization_overview(
             ) AS open_alert_count
 
         FROM organizations
+
         LEFT JOIN assets
             ON assets.organization_id = organizations.id
+
         LEFT JOIN devices
             ON devices.asset_id = assets.id
+
         LEFT JOIN fuel_events
             ON fuel_events.device_id = devices.id
+
         LEFT JOIN alerts
             ON alerts.fuel_event_id = fuel_events.id
+
+        WHERE
+            $1::BOOLEAN = TRUE
+            OR (
+                organizations.is_active = TRUE
+                AND EXISTS (
+                    SELECT 1
+                    FROM organization_memberships AS membership
+                    WHERE membership.organization_id = organizations.id
+                    AND membership.user_id = $2
+                    AND membership.is_active = TRUE
+                )
+            )
 
         GROUP BY
             organizations.id,
@@ -2089,7 +2138,9 @@ pub async fn get_organization_overview(
             organizations.industry
 
         ORDER BY organizations.name ASC
-        "#
+        "#,
+        is_super_admin,
+        orbi_user.id,
     )
     .fetch_all(db_pool)
     .await?;
@@ -2115,7 +2166,10 @@ pub async fn get_organization_overview(
 pub async fn get_organization_fleet_overview(
     db_pool: &PgPool,
     organization_id: Uuid,
+    orbi_user: &OrbiUser,
 ) -> Result<Vec<OrganizationFleetOverviewResponse>, sqlx::Error> {
+    let is_super_admin = orbi_user.platform_role.as_deref() == Some("SUPER_ADMIN");
+
     let rows = sqlx::query!(
         r#"
         SELECT
@@ -2156,6 +2210,19 @@ pub async fn get_organization_fleet_overview(
             ON alerts.fuel_event_id = fuel_events.id
 
         WHERE assets.organization_id = $1
+          AND (
+              $2::BOOLEAN = TRUE
+              OR EXISTS (
+                  SELECT 1
+                  FROM organizations
+                  JOIN organization_memberships AS membership
+                    ON membership.organization_id = organizations.id
+                  WHERE organizations.id = assets.organization_id
+                    AND organizations.is_active = TRUE
+                    AND membership.user_id = $3
+                    AND membership.is_active = TRUE
+              )
+          )
 
         GROUP BY
             assets.id,
@@ -2171,7 +2238,9 @@ pub async fn get_organization_fleet_overview(
             assets.name ASC,
             devices.device_code ASC
         "#,
-        organization_id
+        organization_id,
+        is_super_admin,
+        orbi_user.id
     )
     .fetch_all(db_pool)
     .await?;
@@ -2198,6 +2267,39 @@ pub async fn get_organization_fleet_overview(
         .collect();
 
     Ok(overview)
+}
+
+/// Find an ORBI application user using the immutable Keycloak subject.
+///
+/// Returns:
+/// - Some(user): matching ORBI user exists
+/// - None: no matching ORBI user exists
+/// - Err: database query failed
+///
+/// Authorization decisions are deliberately not made here.
+pub async fn find_orbi_user_by_keycloak_subject(
+    db_pool: &PgPool,
+    keycloak_subject: &str,
+) -> Result<Option<OrbiUser>> {
+    let user = sqlx::query_as!(
+        OrbiUser,
+        r#"
+        SELECT
+            id,
+            keycloak_subject,
+            username,
+            email,
+            platform_role,
+            is_active
+        FROM orbi_users
+        WHERE keycloak_subject = $1
+        "#,
+        keycloak_subject
+    )
+    .fetch_optional(db_pool)
+    .await?;
+
+    Ok(user)
 }
 
 pub async fn create_organization(

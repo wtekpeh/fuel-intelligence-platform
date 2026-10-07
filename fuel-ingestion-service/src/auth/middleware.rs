@@ -5,21 +5,21 @@ use axum::{
     response::Response,
 };
 
-use crate::routes::AppState;
+use crate::{repository::find_orbi_user_by_keycloak_subject, routes::AppState};
 
-/// Authenticate a human API request using a Keycloak Bearer access token.
+/// Authenticate a human API request and resolve its ORBI identity.
 ///
-/// This middleware establishes identity only. ORBI-specific roles,
-/// permissions, and organization scope are enforced separately.
+/// Keycloak verifies who the user is.
+/// ORBI determines whether that identity has an active application account.
+///
+/// Roles, permissions, and organization scope are enforced separately.
 pub async fn require_authentication(
     State(app_state): State<AppState>,
     mut request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
     /*
-     * Once this middleware is attached to a route, authentication must fail
-     * closed. Missing runtime auth state must never turn into an authentication
-     * bypass.
+     * Authentication must fail closed.
      */
     let auth = app_state
         .auth
@@ -41,8 +41,7 @@ pub async fn require_authentication(
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     /*
-     * Normal verification is entirely local against the cached Keycloak
-     * public keys. No network request to Keycloak occurs here.
+     * Verify the JWT locally using cached Keycloak public keys.
      */
     let jwks = auth.jwks.read().await;
 
@@ -54,10 +53,34 @@ pub async fn require_authentication(
     drop(jwks);
 
     /*
-     * Make the authenticated identity available to later middleware and
-     * handlers without decoding the JWT again.
+     * Resolve the authenticated Keycloak subject to an ORBI user.
+     *
+     * A valid Keycloak account alone does not grant ORBI access.
+     */
+    let orbi_user = find_orbi_user_by_keycloak_subject(&app_state.db_pool, &claims.sub)
+        .await
+        .map_err(|error| {
+            eprintln!("Failed to resolve ORBI user: {error}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::FORBIDDEN)?;
+
+    /*
+     * Disabled ORBI accounts cannot access protected APIs,
+     * even when their Keycloak token remains valid.
+     */
+    if !orbi_user.is_active {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    /*
+     * Make both identities available to downstream middleware and handlers.
+     *
+     * KeycloakClaims: verified external identity.
+     * OrbiUser: resolved internal application identity.
      */
     request.extensions_mut().insert(claims);
+    request.extensions_mut().insert(orbi_user);
 
     Ok(next.run(request).await)
 }

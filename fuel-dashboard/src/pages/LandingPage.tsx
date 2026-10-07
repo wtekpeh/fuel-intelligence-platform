@@ -4,6 +4,8 @@ import { useOrganizationStore } from "../store/organizationStore";
 
 import { useNavigate } from "react-router-dom";
 
+import { logout } from "../auth/logout";
+
 import "../styles/landing.css";
 
 export function LandingPage() {
@@ -36,6 +38,14 @@ export function LandingPage() {
             onClick={() => navigate("/platform")}
           >
             Platform Management
+          </button>
+
+          <button
+            type="button"
+            className="landing-platform-button"
+            onClick={() => void logout()}
+          >
+            Sign Out
           </button>
         </div>
       </section>

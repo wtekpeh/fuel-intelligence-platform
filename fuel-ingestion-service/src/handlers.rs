@@ -7,6 +7,7 @@ use crate::{
 };
 
 use axum::{
+    Extension,
     extract::{Json, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
@@ -23,7 +24,7 @@ use crate::{
         AnalyticsGeofenceUtilizationQuery, ApiResponse, CheckPositionRequest,
         CheckPositionResponse, CreateGeofenceRequest, DeviceHealthTrendResponse,
         DeviceRuntimeStateResponse, DeviceStateEventResponse, GeofenceActivityTrendResponse,
-        GeofenceUtilizationResponse, HeartbeatRequest, HeartbeatResponse, ReadingBatch,
+        GeofenceUtilizationResponse, HeartbeatRequest, HeartbeatResponse, OrbiUser, ReadingBatch,
     },
     repository::{
         StoredTelemetryPosition, acknowledge_alert, check_position_against_geofences,
@@ -255,11 +256,12 @@ pub async fn ingest_reading_batch(
 
 pub async fn list_recent_fuel_events(
     State(app_state): State<AppState>,
+    Extension(orbi_user): Extension<OrbiUser>,
     Query(query): Query<crate::models::TelemetryQueryParams>,
 ) -> impl IntoResponse {
     let db_pool = &app_state.db_pool;
 
-    match get_recent_fuel_events(db_pool, 50, query.device_id).await {
+    match get_recent_fuel_events(db_pool, 50, query.device_id, &orbi_user).await {
         Ok(events) => (StatusCode::OK, Json(events)).into_response(),
         Err(err) => {
             eprintln!("Failed to fetch fuel events: {}", err);
@@ -520,19 +522,20 @@ pub async fn list_recent_telemetry_stream(
 
 pub async fn list_organization_overview(
     State(app_state): State<AppState>,
+    Extension(orbi_user): Extension<OrbiUser>,
 ) -> Result<Json<Vec<crate::models::OrganizationOverviewResponse>>, StatusCode> {
-    let overview = get_organization_overview(&app_state.db_pool)
+    let overview = get_organization_overview(&app_state.db_pool, &orbi_user)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(overview))
 }
-
 pub async fn list_organization_fleet_overview(
     State(app_state): State<AppState>,
     Path(organization_id): Path<uuid::Uuid>,
+    Extension(orbi_user): Extension<OrbiUser>,
 ) -> Result<Json<Vec<crate::models::OrganizationFleetOverviewResponse>>, StatusCode> {
-    let overview = get_organization_fleet_overview(&app_state.db_pool, organization_id)
+    let overview = get_organization_fleet_overview(&app_state.db_pool, organization_id, &orbi_user)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 

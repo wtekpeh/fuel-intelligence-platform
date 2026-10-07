@@ -825,6 +825,20 @@ pub struct FuelCalibrationProfileResponse {
     pub updated_at: DateTime<Utc>,
 }
 
+/// ORBI application identity linked to an authenticated Keycloak user.
+///
+/// Keycloak owns authentication. ORBI uses the immutable Keycloak `sub`
+/// claim to resolve that external identity into its own authorization model.
+#[derive(Debug, Clone)]
+pub struct OrbiUser {
+    pub id: Uuid,
+    pub keycloak_subject: String,
+    pub username: Option<String>,
+    pub email: Option<String>,
+    pub platform_role: Option<String>,
+    pub is_active: bool,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CreateOrganizationRequest {
     pub organization_name: String,
