@@ -45,7 +45,7 @@ export function useAlertsController() {
 
         lastReceivedAt = alerts[0]?.created_at;
 
-        socket = connectAlertsWebSocket({
+        const connectedSocket = await connectAlertsWebSocket({
           since: lastReceivedAt,
 
           onOpen: () => {
@@ -112,6 +112,13 @@ export function useAlertsController() {
             setStatus("error");
           },
         });
+
+        if (isUnmounted) {
+          connectedSocket.close();
+          return;
+        }
+
+        socket = connectedSocket;
       } catch (error) {
         console.error("[Dashboard] Bootstrap failed.", error);
 

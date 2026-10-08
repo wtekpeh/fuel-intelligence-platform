@@ -1,3 +1,4 @@
+import { httpClient } from "../api/httpClient";
 import type { AlertWebSocketMessage } from "../types";
 
 interface ConnectAlertsWebSocketOptions {
@@ -12,11 +13,24 @@ interface ConnectAlertsWebSocketOptions {
   onError?: () => void;
 }
 
-export function connectAlertsWebSocket(options: ConnectAlertsWebSocketOptions) {
+interface WebSocketTicketResponse {
+  ticket: string;
+  expires_in_seconds: number;
+}
+
+export async function connectAlertsWebSocket(
+  options: ConnectAlertsWebSocketOptions,
+): Promise<WebSocket> {
+  // Obtain a fresh, single-use ticket through authenticated HTTP.
+  const response =
+    await httpClient.post<WebSocketTicketResponse>("/api/ws-tickets");
+
   const websocketBaseUrl =
     import.meta.env.VITE_WS_BASE_URL ?? "ws://127.0.0.1:8080";
 
   const websocketUrl = new URL("/ws/alerts", websocketBaseUrl);
+
+  websocketUrl.searchParams.set("ticket", response.data.ticket);
 
   if (options.since) {
     websocketUrl.searchParams.set("since", options.since);
@@ -26,14 +40,12 @@ export function connectAlertsWebSocket(options: ConnectAlertsWebSocketOptions) {
 
   socket.onopen = () => {
     console.log("[WebSocket] Connected to alerts stream.");
-
     options.onOpen?.();
   };
 
   socket.onmessage = (event) => {
     try {
       const parsedMessage: AlertWebSocketMessage = JSON.parse(event.data);
-
       options.onMessage(parsedMessage);
     } catch (error) {
       console.error("[WebSocket] Failed to parse message.", error);
@@ -42,13 +54,11 @@ export function connectAlertsWebSocket(options: ConnectAlertsWebSocketOptions) {
 
   socket.onerror = () => {
     console.error("[WebSocket] Connection error.");
-
     options.onError?.();
   };
 
   socket.onclose = () => {
     console.warn("[WebSocket] Connection closed.");
-
     options.onClose?.();
   };
 

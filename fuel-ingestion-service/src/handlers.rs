@@ -13,6 +13,9 @@ use axum::{
     response::IntoResponse,
 };
 
+use serde::Serialize;
+use uuid::Uuid;
+
 use crate::domain::telemetry::conversions::map_legacy_readings;
 use crate::services::fuel_detection::{detect_fuel_event, detect_possible_leak};
 use crate::services::platform::fuel_calibration::get_device_calibration_mode;
@@ -28,7 +31,8 @@ use crate::{
     },
     repository::{
         StoredTelemetryPosition, acknowledge_alert, check_position_against_geofences,
-        create_geofence, detect_and_store_geofence_transitions_from_previous_position,
+        create_geofence, create_websocket_ticket,
+        detect_and_store_geofence_transitions_from_previous_position,
         find_registered_telemetry_context, get_alert_trends, get_device_health_trends,
         get_geofence_activity_trends, get_geofence_utilization, get_latest_sensor_position,
         get_organization_fleet_overview, get_organization_id_for_device, get_organization_overview,
@@ -439,11 +443,13 @@ pub async fn list_device_state_events(
 
 pub async fn list_alerts(
     State(app_state): State<AppState>,
+    Extension(orbi_user): Extension<OrbiUser>,
     Query(query): Query<crate::models::AlertQueryParams>,
 ) -> Result<Json<Vec<AlertResponse>>, StatusCode> {
-    let alerts: Vec<AlertResponse> = get_recent_alerts(&app_state.db_pool, query.device_id)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let alerts: Vec<AlertResponse> =
+        get_recent_alerts(&app_state.db_pool, query.device_id, &orbi_user)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(alerts))
 }
@@ -474,9 +480,10 @@ pub async fn get_alert_trends_handler(
 
 pub async fn acknowledge_alert_handler(
     State(app_state): State<AppState>,
+    Extension(orbi_user): Extension<OrbiUser>,
     Path(alert_id): Path<uuid::Uuid>,
 ) -> Result<Json<crate::models::AlertAcknowledgementResponse>, StatusCode> {
-    let acknowledged_alert = acknowledge_alert(&app_state.db_pool, alert_id)
+    let acknowledged_alert = acknowledge_alert(&app_state.db_pool, alert_id, &orbi_user)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -492,9 +499,10 @@ pub async fn acknowledge_alert_handler(
 
 pub async fn resolve_alert_handler(
     State(app_state): State<AppState>,
+    Extension(orbi_user): Extension<OrbiUser>,
     Path(alert_id): Path<uuid::Uuid>,
 ) -> Result<Json<crate::models::AlertAcknowledgementResponse>, StatusCode> {
-    let resolved_alert = resolve_alert(&app_state.db_pool, alert_id)
+    let resolved_alert = resolve_alert(&app_state.db_pool, alert_id, &orbi_user)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -733,4 +741,31 @@ pub async fn get_geofence_utilization_handler(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(response))
+}
+
+#[derive(Debug, Serialize)]
+pub struct WebSocketTicketResponse {
+    pub ticket: Uuid,
+    pub expires_in_seconds: u64,
+}
+
+/// Issue a temporary WebSocket credential for the authenticated ORBI user.
+///
+/// The user identity comes from the verified authentication middleware,
+/// never from client-supplied input.
+pub async fn issue_websocket_ticket_handler(
+    State(app_state): State<AppState>,
+    Extension(orbi_user): Extension<OrbiUser>,
+) -> Result<Json<WebSocketTicketResponse>, StatusCode> {
+    let ticket = create_websocket_ticket(&app_state.db_pool, orbi_user.id)
+        .await
+        .map_err(|error| {
+            eprintln!("Failed to issue WebSocket ticket: {error}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(WebSocketTicketResponse {
+        ticket,
+        expires_in_seconds: 30,
+    }))
 }

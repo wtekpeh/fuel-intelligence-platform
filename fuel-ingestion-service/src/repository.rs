@@ -1742,29 +1742,57 @@ pub async fn create_alert(
 pub async fn get_recent_alerts(
     db_pool: &PgPool,
     device_id: Option<Uuid>,
+    orbi_user: &OrbiUser,
 ) -> Result<Vec<AlertResponse>, sqlx::Error> {
+    let is_super_admin = orbi_user.platform_role.as_deref() == Some("SUPER_ADMIN");
+
     let rows = sqlx::query!(
         r#"
-    SELECT
-        alerts.id,
-        alerts.fuel_event_id,
-        fuel_events.device_id,
-        alerts.alert_type,
-        alerts.severity,
-        alerts.reason,
-        alerts.is_acknowledged,
-        alerts.status,
-        alerts.created_at
-    FROM alerts
-    LEFT JOIN fuel_events
-        ON fuel_events.id = alerts.fuel_event_id
-    WHERE
-        $1::uuid IS NULL
-        OR fuel_events.device_id = $1
-    ORDER BY alerts.created_at DESC
-    LIMIT 100
-    "#,
-        device_id
+        SELECT
+            alerts.id,
+            alerts.fuel_event_id,
+            fuel_events.device_id,
+            alerts.alert_type,
+            alerts.severity,
+            alerts.reason,
+            alerts.is_acknowledged,
+            alerts.status,
+            alerts.created_at
+
+        FROM alerts
+
+        LEFT JOIN fuel_events
+            ON fuel_events.id = alerts.fuel_event_id
+
+        WHERE
+            ($1::uuid IS NULL OR fuel_events.device_id = $1)
+
+            AND (
+                $2::BOOLEAN = TRUE
+
+                OR EXISTS (
+                    SELECT 1
+                    FROM devices
+                    JOIN assets
+                        ON assets.id = devices.asset_id
+                    JOIN organizations
+                        ON organizations.id = assets.organization_id
+                    JOIN organization_memberships AS membership
+                        ON membership.organization_id = organizations.id
+
+                    WHERE devices.id = fuel_events.device_id
+                      AND organizations.is_active = TRUE
+                      AND membership.user_id = $3
+                      AND membership.is_active = TRUE
+                )
+            )
+
+        ORDER BY alerts.created_at DESC
+        LIMIT 100
+        "#,
+        device_id,
+        is_super_admin,
+        orbi_user.id
     )
     .fetch_all(db_pool)
     .await?;
@@ -1783,6 +1811,67 @@ pub async fn get_recent_alerts(
             created_at: row.created_at,
         })
         .collect())
+}
+
+/// Determine whether an ORBI user may receive an alert.
+///
+/// Used at the WebSocket delivery boundary for both live alerts
+/// and alert lifecycle notifications.
+pub async fn can_user_access_alert(
+    db_pool: &PgPool,
+    alert_id: Uuid,
+    orbi_user: &OrbiUser,
+) -> Result<bool, sqlx::Error> {
+    let is_super_admin = orbi_user.platform_role.as_deref() == Some("SUPER_ADMIN");
+
+    let allowed = sqlx::query_scalar!(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM alerts
+            WHERE alerts.id = $1
+              AND (
+                  (
+                      $2::BOOLEAN = TRUE
+                      AND EXISTS (
+                          SELECT 1
+                          FROM orbi_users
+                          WHERE id = $3
+                            AND is_active = TRUE
+                      )
+                  )
+
+                  OR EXISTS (
+                      SELECT 1
+                      FROM fuel_events
+                      JOIN devices
+                          ON devices.id = fuel_events.device_id
+                      JOIN assets
+                          ON assets.id = devices.asset_id
+                      JOIN organizations
+                          ON organizations.id = assets.organization_id
+                      JOIN organization_memberships AS membership
+                          ON membership.organization_id = organizations.id
+                      JOIN orbi_users
+                          ON orbi_users.id = membership.user_id
+
+                      WHERE fuel_events.id = alerts.fuel_event_id
+                        AND organizations.is_active = TRUE
+                        AND membership.user_id = $3
+                        AND membership.is_active = TRUE
+                        AND orbi_users.is_active = TRUE
+                  )
+              )
+        )
+        "#,
+        alert_id,
+        is_super_admin,
+        orbi_user.id
+    )
+    .fetch_one(db_pool)
+    .await?;
+
+    Ok(allowed.unwrap_or(false))
 }
 
 pub async fn get_alert_trends(
@@ -1885,36 +1974,72 @@ pub async fn get_alert_trends(
 pub async fn list_alerts_since(
     db_pool: &PgPool,
     since: chrono::DateTime<chrono::Utc>,
+    orbi_user: &OrbiUser,
 ) -> Result<Vec<AlertResponse>, sqlx::Error> {
+    let is_super_admin = orbi_user.platform_role.as_deref() == Some("SUPER_ADMIN");
+
     let rows = sqlx::query!(
         r#"
         SELECT
             alerts.id,
             alerts.fuel_event_id,
-            fuel_events.device_id,
+            fuel_events.device_id AS "device_id?",
             alerts.alert_type,
             alerts.severity,
             alerts.reason,
             alerts.is_acknowledged,
             alerts.status,
             alerts.created_at
+
         FROM alerts
+
         LEFT JOIN fuel_events
             ON fuel_events.id = alerts.fuel_event_id
+
         WHERE alerts.created_at > $1
+
+          AND EXISTS (
+              SELECT 1
+              FROM orbi_users
+              WHERE id = $3
+                AND is_active = TRUE
+          )
+
+          AND (
+              $2::BOOLEAN = TRUE
+
+              OR EXISTS (
+                  SELECT 1
+                  FROM devices
+                  JOIN assets
+                      ON assets.id = devices.asset_id
+                  JOIN organizations
+                      ON organizations.id = assets.organization_id
+                  JOIN organization_memberships AS membership
+                      ON membership.organization_id = organizations.id
+
+                  WHERE devices.id = fuel_events.device_id
+                    AND organizations.is_active = TRUE
+                    AND membership.user_id = $3
+                    AND membership.is_active = TRUE
+              )
+          )
+
         ORDER BY alerts.created_at ASC
         "#,
-        since
+        since,
+        is_super_admin,
+        orbi_user.id
     )
     .fetch_all(db_pool)
     .await?;
 
-    let alerts = rows
+    Ok(rows
         .into_iter()
         .map(|row| AlertResponse {
             id: row.id,
             fuel_event_id: row.fuel_event_id,
-            device_id: Some(row.device_id),
+            device_id: row.device_id,
             alert_type: row.alert_type,
             severity: row.severity,
             reason: row.reason,
@@ -1922,22 +2047,48 @@ pub async fn list_alerts_since(
             status: row.status,
             created_at: row.created_at,
         })
-        .collect();
-
-    Ok(alerts)
+        .collect())
 }
 
 pub async fn acknowledge_alert(
     db_pool: &PgPool,
     alert_id: Uuid,
+    orbi_user: &OrbiUser,
 ) -> Result<Option<AlertAcknowledgementResponse>, sqlx::Error> {
+    let is_super_admin = orbi_user.platform_role.as_deref() == Some("SUPER_ADMIN");
+
     let row = sqlx::query!(
         r#"
         UPDATE alerts
         SET
-            is_acknowledged = true,
+            is_acknowledged = TRUE,
             status = 'ACKNOWLEDGED'
-        WHERE id = $1
+        WHERE
+            alerts.id = $1
+            AND (
+                $2::BOOLEAN = TRUE
+                OR EXISTS (
+                    SELECT 1
+                    FROM fuel_events
+                    JOIN devices
+                        ON devices.id = fuel_events.device_id
+                    JOIN assets
+                        ON assets.id = devices.asset_id
+                    JOIN organizations
+                        ON organizations.id = assets.organization_id
+                    JOIN organization_memberships AS membership
+                        ON membership.organization_id = organizations.id
+                    WHERE fuel_events.id = alerts.fuel_event_id
+                      AND organizations.is_active = TRUE
+                      AND membership.user_id = $3
+                      AND membership.is_active = TRUE
+                      AND membership.role IN (
+                          'ADMIN',
+                          'FLEET_MANAGER',
+                          'OPERATOR'
+                      )
+                )
+            )
         RETURNING
             id,
             alert_type,
@@ -1946,7 +2097,9 @@ pub async fn acknowledge_alert(
             status,
             created_at
         "#,
-        alert_id
+        alert_id,
+        is_super_admin,
+        orbi_user.id
     )
     .fetch_optional(db_pool)
     .await?;
@@ -1964,14 +2117,42 @@ pub async fn acknowledge_alert(
 pub async fn resolve_alert(
     db_pool: &PgPool,
     alert_id: Uuid,
+    orbi_user: &OrbiUser,
 ) -> Result<Option<AlertAcknowledgementResponse>, sqlx::Error> {
+    let is_super_admin = orbi_user.platform_role.as_deref() == Some("SUPER_ADMIN");
+
     let row = sqlx::query!(
         r#"
         UPDATE alerts
         SET
-            is_acknowledged = true,
+            is_acknowledged = TRUE,
             status = 'RESOLVED'
-        WHERE id = $1
+        WHERE
+            alerts.id = $1
+            AND (
+                $2::BOOLEAN = TRUE
+                OR EXISTS (
+                    SELECT 1
+                    FROM fuel_events
+                    JOIN devices
+                        ON devices.id = fuel_events.device_id
+                    JOIN assets
+                        ON assets.id = devices.asset_id
+                    JOIN organizations
+                        ON organizations.id = assets.organization_id
+                    JOIN organization_memberships AS membership
+                        ON membership.organization_id = organizations.id
+                    WHERE fuel_events.id = alerts.fuel_event_id
+                      AND organizations.is_active = TRUE
+                      AND membership.user_id = $3
+                      AND membership.is_active = TRUE
+                      AND membership.role IN (
+                          'ADMIN',
+                          'FLEET_MANAGER',
+                          'OPERATOR'
+                      )
+                )
+            )
         RETURNING
             id,
             alert_type,
@@ -1980,7 +2161,9 @@ pub async fn resolve_alert(
             status,
             created_at
         "#,
-        alert_id
+        alert_id,
+        is_super_admin,
+        orbi_user.id
     )
     .fetch_optional(db_pool)
     .await?;
@@ -3160,4 +3343,73 @@ pub async fn list_operational_intelligence_events(
     .await?;
 
     Ok(events)
+}
+
+/// Issue a short-lived, single-use WebSocket authentication ticket.
+///
+/// The ticket is associated with an authenticated ORBI user.
+/// PostgreSQL makes the ticket available across API replicas.
+pub async fn create_websocket_ticket(db_pool: &PgPool, user_id: Uuid) -> Result<Uuid, sqlx::Error> {
+    let ticket_id = Uuid::new_v4();
+
+    sqlx::query!(
+        r#"
+        INSERT INTO websocket_tickets (
+            id,
+            user_id,
+            expires_at
+        )
+        VALUES (
+            $1,
+            $2,
+            NOW() + INTERVAL '30 seconds'
+        )
+        "#,
+        ticket_id,
+        user_id
+    )
+    .execute(db_pool)
+    .await?;
+
+    Ok(ticket_id)
+}
+
+/// Atomically consume a WebSocket authentication ticket.
+///
+/// A ticket can be used only once, even when multiple ORBI API
+/// replicas attempt to consume it simultaneously.
+///
+/// Expired tickets and tickets belonging to inactive users
+/// cannot authenticate a WebSocket connection.
+pub async fn consume_websocket_ticket(
+    db_pool: &PgPool,
+    ticket_id: Uuid,
+) -> Result<Option<OrbiUser>, sqlx::Error> {
+    let user = sqlx::query_as!(
+        OrbiUser,
+        r#"
+        WITH consumed_ticket AS (
+            DELETE FROM websocket_tickets
+            WHERE id = $1
+            RETURNING user_id, expires_at
+        )
+        SELECT
+            users.id,
+            users.keycloak_subject,
+            users.username,
+            users.email,
+            users.platform_role,
+            users.is_active
+        FROM consumed_ticket
+        JOIN orbi_users AS users
+            ON users.id = consumed_ticket.user_id
+        WHERE consumed_ticket.expires_at > NOW()
+          AND users.is_active = TRUE
+        "#,
+        ticket_id
+    )
+    .fetch_optional(db_pool)
+    .await?;
+
+    Ok(user)
 }

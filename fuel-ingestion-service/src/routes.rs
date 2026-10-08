@@ -8,11 +8,12 @@ use crate::handlers::{
     acknowledge_alert_handler, check_position_against_geofences_handler, create_geofence_handler,
     get_alert_trends_handler, get_device_health_trends_handler, get_device_runtime_state,
     get_geofence_activity_trends_handler, get_geofence_utilization_handler, ingest_reading_batch,
-    list_alerts, list_device_state_events, list_geofence_transition_events_handler,
-    list_geofences_handler, list_operational_intelligence_events_handler,
-    list_organization_fleet_overview, list_organization_overview, list_recent_device_health_events,
-    list_recent_fuel_events, list_recent_sensor_health_events, list_recent_telemetry_stream,
-    list_telemetry_history, receive_heartbeat, refresh_device_health, resolve_alert_handler,
+    issue_websocket_ticket_handler, list_alerts, list_device_state_events,
+    list_geofence_transition_events_handler, list_geofences_handler,
+    list_operational_intelligence_events_handler, list_organization_fleet_overview,
+    list_organization_overview, list_recent_device_health_events, list_recent_fuel_events,
+    list_recent_sensor_health_events, list_recent_telemetry_stream, list_telemetry_history,
+    receive_heartbeat, refresh_device_health, resolve_alert_handler,
 };
 use crate::platform_routes::platform_routes;
 
@@ -102,6 +103,7 @@ pub fn app_routes(
 
     let human_routes = Router::new()
         .merge(platform_routes())
+        .route("/api/ws-tickets", post(issue_websocket_ticket_handler))
         .route("/api/fuel-events", get(list_recent_fuel_events))
         .route(
             "/api/fuel-readings/recent",
