@@ -384,11 +384,12 @@ pub async fn get_device_runtime_state(
 
 pub async fn list_recent_device_health_events(
     State(app_state): State<AppState>,
+    Extension(orbi_user): Extension<OrbiUser>,
     Query(query): Query<crate::models::TelemetryQueryParams>,
 ) -> impl IntoResponse {
     let db_pool = &app_state.db_pool;
 
-    match get_recent_device_health_events(db_pool, 50, query.device_id).await {
+    match get_recent_device_health_events(db_pool, 50, query.device_id, &orbi_user).await {
         Ok(events) => (StatusCode::OK, Json(events)).into_response(),
 
         Err(err) => {
@@ -408,11 +409,12 @@ pub async fn list_recent_device_health_events(
 
 pub async fn list_recent_sensor_health_events(
     State(app_state): State<AppState>,
+    Extension(orbi_user): Extension<OrbiUser>,
     Query(query): Query<crate::models::TelemetryQueryParams>,
 ) -> impl IntoResponse {
     let db_pool = &app_state.db_pool;
 
-    match get_recent_sensor_health_events(db_pool, 50, query.device_id).await {
+    match get_recent_sensor_health_events(db_pool, 50, query.device_id, &orbi_user).await {
         Ok(events) => (StatusCode::OK, Json(events)).into_response(),
 
         Err(err) => {
@@ -432,11 +434,13 @@ pub async fn list_recent_sensor_health_events(
 
 pub async fn list_device_state_events(
     State(app_state): State<AppState>,
+    Extension(orbi_user): Extension<OrbiUser>,
     Query(query): Query<crate::models::TelemetryQueryParams>,
 ) -> Result<Json<Vec<DeviceStateEventResponse>>, StatusCode> {
-    let events = get_recent_device_state_events(&app_state.db_pool, 100, query.device_id)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let events =
+        get_recent_device_state_events(&app_state.db_pool, 100, query.device_id, &orbi_user)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(events))
 }
@@ -456,11 +460,19 @@ pub async fn list_alerts(
 
 pub async fn get_alert_trends_handler(
     State(app_state): State<AppState>,
+    Extension(orbi_user): Extension<OrbiUser>,
     Query(query): Query<crate::models::AnalyticsAlertTrendQuery>,
 ) -> impl IntoResponse {
     let requested_days = query.days.unwrap_or(30);
 
-    match get_alert_trends(&app_state.db_pool, query.device_id, requested_days).await {
+    match get_alert_trends(
+        &app_state.db_pool,
+        query.device_id,
+        requested_days,
+        &orbi_user,
+    )
+    .await
+    {
         Ok(response) => (StatusCode::OK, Json(response)).into_response(),
 
         Err(err) => {
@@ -519,9 +531,10 @@ pub async fn resolve_alert_handler(
 
 pub async fn list_recent_telemetry_stream(
     State(app_state): State<AppState>,
+    Extension(orbi_user): Extension<OrbiUser>,
     Query(query): Query<crate::models::TelemetryQueryParams>,
 ) -> Result<Json<Vec<crate::models::TelemetryStreamResponse>>, StatusCode> {
-    let readings = get_recent_telemetry_stream(&app_state.db_pool, query.device_id)
+    let readings = get_recent_telemetry_stream(&app_state.db_pool, query.device_id, &orbi_user)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -552,11 +565,12 @@ pub async fn list_organization_fleet_overview(
 
 pub async fn create_geofence_handler(
     State(app_state): State<AppState>,
+    Extension(orbi_user): Extension<OrbiUser>,
     Json(payload): Json<CreateGeofenceRequest>,
 ) -> impl IntoResponse {
     let db_pool = &app_state.db_pool;
 
-    match create_geofence(db_pool, payload).await {
+    match create_geofence(db_pool, payload, &orbi_user).await {
         Ok(geofence) => (StatusCode::CREATED, Json(geofence)).into_response(),
 
         Err(err) => {
@@ -577,10 +591,11 @@ pub async fn create_geofence_handler(
 pub async fn list_geofences_handler(
     State(app_state): State<AppState>,
     Path(organization_id): Path<uuid::Uuid>,
+    Extension(orbi_user): Extension<OrbiUser>,
 ) -> impl IntoResponse {
     let db_pool = &app_state.db_pool;
 
-    match list_geofences(db_pool, organization_id).await {
+    match list_geofences(db_pool, organization_id, &orbi_user).await {
         Ok(geofences) => (StatusCode::OK, Json(geofences)).into_response(),
 
         Err(err) => {
@@ -600,6 +615,7 @@ pub async fn list_geofences_handler(
 
 pub async fn check_position_against_geofences_handler(
     State(app_state): State<AppState>,
+    Extension(orbi_user): Extension<OrbiUser>,
     Json(payload): Json<CheckPositionRequest>,
 ) -> impl IntoResponse {
     let db_pool = &app_state.db_pool;
@@ -610,6 +626,7 @@ pub async fn check_position_against_geofences_handler(
         payload.device_id,
         payload.latitude,
         payload.longitude,
+        &orbi_user,
     )
     .await
     {
@@ -639,11 +656,12 @@ pub async fn check_position_against_geofences_handler(
 
 pub async fn list_geofence_transition_events_handler(
     State(app_state): State<AppState>,
+    Extension(orbi_user): Extension<OrbiUser>,
     Query(query): Query<crate::models::TelemetryQueryParams>,
 ) -> impl IntoResponse {
     let db_pool = &app_state.db_pool;
 
-    match list_recent_geofence_transition_events(db_pool, query.device_id).await {
+    match list_recent_geofence_transition_events(db_pool, query.device_id, &orbi_user).await {
         Ok(events) => (StatusCode::OK, Json(events)).into_response(),
 
         Err(err) => {
@@ -663,10 +681,11 @@ pub async fn list_geofence_transition_events_handler(
 
 pub async fn list_operational_intelligence_events_handler(
     State(app_state): State<AppState>,
+    Extension(orbi_user): Extension<OrbiUser>,
 ) -> impl IntoResponse {
     let db_pool = &app_state.db_pool;
 
-    match list_operational_intelligence_events(db_pool).await {
+    match list_operational_intelligence_events(db_pool, &orbi_user).await {
         Ok(events) => (StatusCode::OK, Json(events)).into_response(),
 
         Err(err) => {
@@ -686,6 +705,7 @@ pub async fn list_operational_intelligence_events_handler(
 
 pub async fn list_telemetry_history(
     State(app_state): State<AppState>,
+    Extension(orbi_user): Extension<OrbiUser>,
     Query(query): Query<crate::models::TelemetryHistoryQueryParams>,
 ) -> Result<Json<Vec<crate::models::TelemetryStreamResponse>>, StatusCode> {
     if query.start_time > query.end_time {
@@ -697,6 +717,7 @@ pub async fn list_telemetry_history(
         query.device_id,
         query.start_time,
         query.end_time,
+        &orbi_user,
     )
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -706,11 +727,12 @@ pub async fn list_telemetry_history(
 
 pub async fn get_geofence_activity_trends_handler(
     State(state): State<AppState>,
+    Extension(orbi_user): Extension<OrbiUser>,
     Query(query): Query<AnalyticsGeofenceActivityQuery>,
 ) -> Result<Json<GeofenceActivityTrendResponse>, StatusCode> {
     let days = query.days.unwrap_or(30);
 
-    let response = get_geofence_activity_trends(&state.db_pool, query.device_id, days)
+    let response = get_geofence_activity_trends(&state.db_pool, query.device_id, days, &orbi_user)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -719,11 +741,12 @@ pub async fn get_geofence_activity_trends_handler(
 
 pub async fn get_device_health_trends_handler(
     State(state): State<AppState>,
+    Extension(orbi_user): Extension<OrbiUser>,
     Query(query): Query<AnalyticsDeviceHealthTrendQuery>,
 ) -> Result<Json<DeviceHealthTrendResponse>, StatusCode> {
     let days = query.days.unwrap_or(30);
 
-    let response = get_device_health_trends(&state.db_pool, days)
+    let response = get_device_health_trends(&state.db_pool, days, &orbi_user)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -732,11 +755,12 @@ pub async fn get_device_health_trends_handler(
 
 pub async fn get_geofence_utilization_handler(
     State(state): State<AppState>,
+    Extension(orbi_user): Extension<OrbiUser>,
     Query(query): Query<AnalyticsGeofenceUtilizationQuery>,
 ) -> Result<Json<GeofenceUtilizationResponse>, StatusCode> {
     let days = query.days.unwrap_or(30);
 
-    let response = get_geofence_utilization(&state.db_pool, days)
+    let response = get_geofence_utilization(&state.db_pool, days, &orbi_user)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 

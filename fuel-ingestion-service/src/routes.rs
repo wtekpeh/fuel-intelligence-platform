@@ -4,6 +4,11 @@ use tokio::sync::Mutex;
 
 use crate::domain::telemetry::telemetry_pipeline::TelemetryPipeline;
 
+use crate::auth::middleware::require_keycloak_authentication;
+use crate::platform_handlers::{
+    create_client_onboarding_handler, get_client_onboarding_status_handler,
+};
+
 use crate::handlers::{
     acknowledge_alert_handler, check_position_against_geofences_handler, create_geofence_handler,
     get_alert_trends_handler, get_device_health_trends_handler, get_device_runtime_state,
@@ -13,7 +18,7 @@ use crate::handlers::{
     list_operational_intelligence_events_handler, list_organization_fleet_overview,
     list_organization_overview, list_recent_device_health_events, list_recent_fuel_events,
     list_recent_sensor_health_events, list_recent_telemetry_stream, list_telemetry_history,
-    receive_heartbeat, refresh_device_health, resolve_alert_handler,
+    receive_heartbeat, resolve_alert_handler,
 };
 use crate::platform_routes::platform_routes;
 
@@ -93,6 +98,20 @@ pub fn app_routes(
         .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::OPTIONS])
         .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]);
 
+    let onboarding_routes = Router::new()
+        .route(
+            "/api/onboarding/client",
+            post(create_client_onboarding_handler),
+        )
+        .route(
+            "/api/onboarding/status",
+            get(get_client_onboarding_status_handler),
+        )
+        .route_layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            require_keycloak_authentication,
+        ));
+
     let device_routes = Router::new()
         .route("/api/fuel-readings/batch", post(ingest_reading_batch))
         .route("/api/heartbeat", post(receive_heartbeat))
@@ -109,7 +128,6 @@ pub fn app_routes(
             "/api/fuel-readings/recent",
             get(list_recent_telemetry_stream),
         )
-        .route("/api/devices/refresh-health", post(refresh_device_health))
         .route(
             "/api/device-health-events",
             get(list_recent_device_health_events),
@@ -175,6 +193,7 @@ pub fn app_routes(
     let websocket_routes = Router::new().route("/ws/alerts", get(alerts_ws_handler));
 
     Router::new()
+        .merge(onboarding_routes)
         .merge(device_routes)
         .merge(human_routes)
         .merge(websocket_routes)

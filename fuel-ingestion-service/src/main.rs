@@ -2,6 +2,7 @@ mod auth;
 mod catalogue_repository;
 mod config;
 mod db;
+mod device_activation_repository;
 mod domain;
 mod fuel_calibration_repository;
 mod handlers;

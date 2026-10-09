@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { useOrganizationStore } from "../store/organizationStore";
 import { useDeviceOnboardingStore } from "../store/deviceOnboardingStore";
 import { useAssetStore } from "../store/assetStore";
 import { useDeviceCatalogueStore } from "../store/deviceCatalogueStore";
@@ -25,17 +24,11 @@ export default function DeviceOnboardingWizard({
   onClose,
   organizations,
 }: DeviceOnboardingWizardProps) {
-  const [showCreateOrganization, setShowCreateOrganization] = useState(false);
-  const [organizationName, setOrganizationName] = useState("");
-  const [industry, setIndustry] = useState("");
   const [showCreateAsset, setShowCreateAsset] = useState(false);
   const [assetName, setAssetName] = useState("");
   const [assetType, setAssetType] = useState("");
   const [registrationNumber, setRegistrationNumber] = useState("");
 
-  const createOrganization = useOrganizationStore(
-    (state) => state.createOrganization,
-  );
   const {
     assets,
     loadAssets,
@@ -142,84 +135,6 @@ export default function DeviceOnboardingWizard({
               <h3>Select Organization</h3>
 
               <p>Choose the customer account that will own this device.</p>
-
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "flex-end",
-                  marginTop: "18px",
-                  marginBottom: "18px",
-                }}
-              >
-                <button
-                  type="button"
-                  className="platform-primary-button"
-                  onClick={() =>
-                    setShowCreateOrganization(!showCreateOrganization)
-                  }
-                >
-                  + Create Organization
-                </button>
-              </div>
-
-              {showCreateOrganization && (
-                <div className="platform-form">
-                  <label>
-                    Organization Name
-                    <input
-                      value={organizationName}
-                      onChange={(event) =>
-                        setOrganizationName(event.target.value)
-                      }
-                    />
-                  </label>
-
-                  <label>
-                    Business Type / Sector
-                    <input
-                      value={industry}
-                      onChange={(event) => setIndustry(event.target.value)}
-                      placeholder="Example: Transport, Mining, Logistics"
-                    />
-                  </label>
-
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "flex-end",
-                      gap: "12px",
-                    }}
-                  >
-                    <button
-                      type="button"
-                      className="platform-secondary-button"
-                      onClick={() => setShowCreateOrganization(false)}
-                    >
-                      Cancel
-                    </button>
-
-                    <button
-                      type="button"
-                      className="platform-primary-button"
-                      onClick={async () => {
-                        const id = await createOrganization({
-                          name: organizationName,
-                          industry,
-                        });
-
-                        if (id) {
-                          selectOrganization(id);
-                          setOrganizationName("");
-                          setIndustry("");
-                          setShowCreateOrganization(false);
-                        }
-                      }}
-                    >
-                      Create Organization
-                    </button>
-                  </div>
-                </div>
-              )}
 
               <div className="platform-list" style={{ marginTop: "24px" }}>
                 {organizations.map((organization) => (

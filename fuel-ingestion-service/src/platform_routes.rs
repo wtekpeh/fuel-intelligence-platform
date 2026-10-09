@@ -1,12 +1,13 @@
 use crate::platform_handlers::{
-    abandon_fuel_calibration_session_handler,
+    abandon_fuel_calibration_session_handler, activate_device_handler,
     activate_fuel_calibration_profile_for_production_handler,
     apply_fuel_calibration_anchor_handler, assign_device_asset_handler,
     capture_fuel_calibration_point_handler, complete_fuel_calibration_session_handler,
-    create_asset_handler, create_fuel_calibration_profile_handler,
-    create_operational_behaviour_learning_session_handler, create_orbi_inventory_device_handler,
-    create_organization_handler, create_sensor_calibration_handler, delete_asset_handler,
-    delete_device_handler, delete_organization_handler, get_active_sensor_calibration_handler,
+    create_asset_handler, create_device_activation_entitlement_handler,
+    create_fuel_calibration_profile_handler, create_operational_behaviour_learning_session_handler,
+    create_orbi_inventory_device_handler, create_organization_handler,
+    create_sensor_calibration_handler, delete_asset_handler, delete_device_handler,
+    delete_organization_handler, get_active_sensor_calibration_handler,
     get_fuel_calibration_profile_handler, get_latest_fuel_sensor_observation_handler,
     get_orbi_inventory_device_handler, list_device_catalogue_handler, list_device_models_handler,
     list_device_sensors_handler, list_devices_handler, list_hardware_profile_sensors_handler,
@@ -20,6 +21,9 @@ use crate::platform_handlers::{
     verify_orbi_inventory_device_handler,
 };
 
+use crate::auth::middleware::require_platform_admin;
+use axum::middleware;
+
 use crate::routes::AppState;
 use axum::{
     Router,
@@ -27,8 +31,51 @@ use axum::{
 };
 
 pub fn platform_routes() -> Router<AppState> {
+    let internal_management_routes = Router::new()
+        .route("/api/devices", post(register_device_handler))
+        .route(
+            "/api/devices/:device_id",
+            axum::routing::patch(update_device_handler),
+        )
+        .route(
+            "/api/devices/:device_id",
+            axum::routing::delete(delete_device_handler),
+        )
+        .route(
+            "/api/devices/:device_id/assign-asset",
+            axum::routing::patch(assign_device_asset_handler),
+        )
+        .route(
+            "/api/devices/provision-from-inventory",
+            post(provision_inventory_device_handler),
+        )
+        //Orbi Inventory
+        .route(
+            "/api/device-inventory",
+            post(create_orbi_inventory_device_handler).get(list_orbi_inventory_devices_handler),
+        )
+        .route(
+            "/api/device-inventory/verify/:device_code",
+            get(verify_orbi_inventory_device_handler),
+        )
+        .route(
+            "/api/device-inventory/:inventory_device_id/status",
+            axum::routing::patch(update_orbi_inventory_status_handler),
+        )
+        .route(
+            "/api/device-inventory/:inventory_device_id",
+            get(get_orbi_inventory_device_handler),
+        )
+        // Device Activation Entitlements
+        .route(
+            "/api/device-activation-entitlements",
+            post(create_device_activation_entitlement_handler),
+        )
+        .route_layer(middleware::from_fn(require_platform_admin));
+
     Router::new()
         .route("/api/organizations", post(create_organization_handler))
+        .route("/api/devices/activate", post(activate_device_handler))
         .route(
             "/api/organizations/:organization_id",
             axum::routing::patch(update_organization_handler),
@@ -54,47 +101,13 @@ pub fn platform_routes() -> Router<AppState> {
             "/api/hardware-profiles/:hardware_profile_id/sensors",
             get(list_hardware_profile_sensors_handler),
         )
-        .route("/api/devices", post(register_device_handler))
         .route("/api/devices", get(list_devices_handler))
-        .route(
-            "/api/devices/:device_id",
-            axum::routing::patch(update_device_handler),
-        )
-        .route(
-            "/api/devices/:device_id",
-            axum::routing::delete(delete_device_handler),
-        )
-        .route(
-            "/api/devices/:device_id/assign-asset",
-            axum::routing::patch(assign_device_asset_handler),
-        )
         .route(
             "/api/devices/:device_id/sensors",
             get(list_device_sensors_handler),
         )
         .route("/api/device-models", get(list_device_models_handler))
         .route("/api/device-catalogue", get(list_device_catalogue_handler))
-        //Orbi Inventory
-        .route(
-            "/api/device-inventory",
-            post(create_orbi_inventory_device_handler).get(list_orbi_inventory_devices_handler),
-        )
-        .route(
-            "/api/device-inventory/verify/:device_code",
-            get(verify_orbi_inventory_device_handler),
-        )
-        .route(
-            "/api/device-inventory/:inventory_device_id/status",
-            axum::routing::patch(update_orbi_inventory_status_handler),
-        )
-        .route(
-            "/api/device-inventory/:inventory_device_id",
-            get(get_orbi_inventory_device_handler),
-        )
-        .route(
-            "/api/devices/provision-from-inventory",
-            post(provision_inventory_device_handler),
-        )
         // Sensor Calibration
         .route(
             "/api/sensors/:sensor_id/calibrations",
@@ -161,4 +174,5 @@ pub fn platform_routes() -> Router<AppState> {
             "/api/fuel-calibration/profiles/:profile_id/production",
             post(activate_fuel_calibration_profile_for_production_handler),
         )
+        .merge(internal_management_routes)
 }

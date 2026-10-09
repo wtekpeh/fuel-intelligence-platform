@@ -46,7 +46,7 @@ export function useAlertsController() {
         lastReceivedAt = alerts[0]?.created_at;
 
         const connectedSocket = await connectAlertsWebSocket({
-          since: "2026-06-01T00:00:00Z",
+          since: lastReceivedAt,
 
           onOpen: () => {
             setStatus("connected");

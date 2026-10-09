@@ -544,6 +544,33 @@ pub struct VerifyOrbiDeviceResponse {
 }
 
 // -----------------------------------------------------------------------------
+// ORBI Device Activation Entitlements
+// -----------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct CreateDeviceActivationEntitlementRequest {
+    pub inventory_device_id: Uuid,
+    pub organization_id: Uuid,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ActivateDeviceRequest {
+    pub inventory_device_id: Uuid,
+    pub asset_id: Uuid,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct DeviceActivationEntitlement {
+    pub id: Uuid,
+    pub inventory_device_id: Uuid,
+    pub organization_id: Uuid,
+    pub status: String,
+    pub activated_device_id: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+    pub activated_at: Option<DateTime<Utc>>,
+}
+
+// -----------------------------------------------------------------------------
 // Device Management
 // -----------------------------------------------------------------------------
 
@@ -843,6 +870,26 @@ pub struct OrbiUser {
 pub struct CreateOrganizationRequest {
     pub organization_name: String,
     pub industry: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ClientOnboardingRequest {
+    pub organization_name: String,
+    pub industry: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ClientOnboardingResponse {
+    pub user_id: Uuid,
+    pub organization_id: Uuid,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ClientOnboardingStatusResponse {
+    pub status: String,
+    pub onboarding_complete: bool,
+    pub user_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize)]

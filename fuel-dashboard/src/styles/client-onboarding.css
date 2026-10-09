@@ -1,0 +1,137 @@
+.client-onboarding {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: linear-gradient(135deg, #0b172a, #142b45);
+}
+
+.client-onboarding__card {
+  width: 100%;
+  max-width: 480px;
+  padding: 40px;
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+}
+
+.client-onboarding__header {
+  margin-bottom: 32px;
+}
+
+.client-onboarding__eyebrow {
+  margin-bottom: 12px;
+  color: #147d92;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+
+.client-onboarding__header h1 {
+  margin: 0 0 12px;
+  color: #102238;
+  font-size: 30px;
+}
+
+.client-onboarding__header > p:last-child {
+  color: #617084;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.client-onboarding__field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.client-onboarding__field label {
+  color: #26394e;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.client-onboarding__field input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 13px 14px;
+  border: 1px solid #d2dce6;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #102238;
+  font: inherit;
+  font-size: 14px;
+}
+
+.client-onboarding__field input:focus {
+  outline: 2px solid #147d92;
+  outline-offset: 1px;
+}
+
+.client-onboarding__field input:disabled {
+  background: #f1f4f7;
+}
+
+.client-onboarding__error {
+  margin-bottom: 16px;
+  color: #b42318;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.client-onboarding__submit {
+  width: 100%;
+  padding: 14px;
+  border: none;
+  border-radius: 8px;
+  background: #147d92;
+  color: #ffffff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.client-onboarding__submit:hover:not(:disabled) {
+  background: #10677a;
+}
+
+.client-onboarding__submit:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.client-onboarding__signout {
+  display: block;
+  margin: 20px auto 0;
+  padding: 8px;
+  border: none;
+  background: transparent;
+  color: #617084;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.client-onboarding__signout:hover:not(:disabled) {
+  color: #102238;
+}
+
+@media (max-width: 600px) {
+  .client-onboarding {
+    padding: 16px;
+  }
+
+  .client-onboarding__card {
+    padding: 28px 22px;
+    border-radius: 12px;
+  }
+
+  .client-onboarding__header h1 {
+    font-size: 25px;
+  }
+}

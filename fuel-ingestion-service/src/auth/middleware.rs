@@ -5,6 +5,9 @@ use axum::{
     response::Response,
 };
 
+use crate::models::OrbiUser;
+use axum::Extension;
+
 use crate::{repository::find_orbi_user_by_keycloak_subject, routes::AppState};
 
 /// Authenticate a human API request and resolve its ORBI identity.
@@ -81,6 +84,64 @@ pub async fn require_authentication(
      */
     request.extensions_mut().insert(claims);
     request.extensions_mut().insert(orbi_user);
+
+    Ok(next.run(request).await)
+}
+
+/// Authenticate a Keycloak identity without requiring an existing ORBI user.
+///
+/// Used by client onboarding, where the ORBI application account
+/// and organization membership have not yet been created.
+pub async fn require_keycloak_authentication(
+    State(app_state): State<AppState>,
+    mut request: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    let auth = app_state
+        .auth
+        .as_ref()
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+
+    let authorization = request
+        .headers()
+        .get(header::AUTHORIZATION)
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let authorization = authorization
+        .to_str()
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    let token = authorization
+        .strip_prefix("Bearer ")
+        .filter(|token| !token.is_empty())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let jwks = auth.jwks.read().await;
+
+    let claims = auth
+        .verifier
+        .verify(token, &jwks)
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    drop(jwks);
+
+    request.extensions_mut().insert(claims);
+
+    Ok(next.run(request).await)
+}
+
+/// Authorize internal ORBI hardware-management operations.
+///
+/// This middleware must run after require_authentication,
+/// which resolves the authenticated ORBI user.
+pub async fn require_platform_admin(
+    Extension(orbi_user): Extension<OrbiUser>,
+    request: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    if orbi_user.platform_role.as_deref() != Some("SUPER_ADMIN") {
+        return Err(StatusCode::FORBIDDEN);
+    }
 
     Ok(next.run(request).await)
 }

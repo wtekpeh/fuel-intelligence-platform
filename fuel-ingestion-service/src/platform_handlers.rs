@@ -1,9 +1,14 @@
+use crate::auth::claims::KeycloakClaims;
 use crate::catalogue_repository;
+use crate::device_activation_repository;
 use crate::domain::operational_behaviour::BehaviourType;
+use crate::models::OrbiUser;
 use crate::operational_behaviour_repository;
 use crate::orbi_inventory_repository;
 use crate::repository;
 use crate::routes::AppState;
+
+use axum::Extension;
 use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
@@ -101,99 +106,406 @@ pub async fn list_device_sensors_handler(
     Json(sensors)
 }
 
-pub async fn create_organization_handler(
+/// Complete self-service onboarding for a verified Keycloak identity.
+///
+/// Creates an ORBI user, organization, and initial ADMIN membership
+/// through a single PostgreSQL transaction.
+pub async fn create_client_onboarding_handler(
     State(app_state): State<AppState>,
-    Json(payload): Json<crate::models::CreateOrganizationRequest>,
-) -> (
-    StatusCode,
-    Json<crate::models::OrganizationMutationResponse>,
-) {
-    let organization_id = repository::create_organization(&app_state.db_pool, &payload)
+    Extension(claims): Extension<KeycloakClaims>,
+    Json(payload): Json<crate::models::ClientOnboardingRequest>,
+) -> impl IntoResponse {
+    let organization_name = payload.organization_name.trim();
+    let industry = payload.industry.trim();
+
+    // Validate organization information.
+    if organization_name.is_empty() || industry.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(crate::models::ApiErrorResponse {
+                message: "Organization name and industry are required.".to_string(),
+            }),
+        )
+            .into_response();
+    }
+
+    if organization_name.len() > 200 || industry.len() > 100 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(crate::models::ApiErrorResponse {
+                message: "Organization information exceeds allowed length.".to_string(),
+            }),
+        )
+            .into_response();
+    }
+
+    let result = repository::create_client_onboarding(
+        &app_state.db_pool,
+        &claims.sub,
+        claims.preferred_username.as_deref(),
+        claims.email.as_deref(),
+        organization_name,
+        industry,
+    )
+    .await;
+
+    match result {
+        Ok((user_id, organization_id)) => (
+            StatusCode::CREATED,
+            Json(crate::models::ClientOnboardingResponse {
+                user_id,
+                organization_id,
+                message: "Client onboarding completed successfully.".to_string(),
+            }),
+        )
+            .into_response(),
+
+        Err(error) => {
+            // The unique Keycloak subject prevents an existing ORBI
+            // identity from registering another organization.
+            //
+            // This also prevents disabled accounts from re-registering.
+            let duplicate_identity = error
+                .downcast_ref::<sqlx::Error>()
+                .and_then(|sqlx_error| match sqlx_error {
+                    sqlx::Error::Database(database_error) => {
+                        Some(database_error.constraint() == Some("orbi_users_keycloak_subject_key"))
+                    }
+                    _ => None,
+                })
+                .unwrap_or(false);
+
+            if duplicate_identity {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(crate::models::ApiErrorResponse {
+                        message: "This account has already been registered with ORBI.".to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+
+            eprintln!("Client onboarding failed: {error}");
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Unable to complete client onboarding.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// Determine whether a verified Keycloak identity has completed
+/// ORBI customer onboarding.
+pub async fn get_client_onboarding_status_handler(
+    State(app_state): State<AppState>,
+    Extension(claims): Extension<KeycloakClaims>,
+) -> impl IntoResponse {
+    let user = match repository::find_orbi_user_by_keycloak_subject(&app_state.db_pool, &claims.sub)
         .await
-        .expect("Failed to create organization");
+    {
+        Ok(user) => user,
+
+        Err(error) => {
+            eprintln!("Failed to resolve onboarding status: {error}");
+
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    let Some(user) = user else {
+        return (
+            StatusCode::OK,
+            Json(crate::models::ClientOnboardingStatusResponse {
+                status: "onboarding_required".to_string(),
+                onboarding_complete: false,
+                user_id: None,
+            }),
+        )
+            .into_response();
+    };
+
+    if !user.is_active {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
+    // Internal platform identities are not customer onboarding accounts.
+    if user.platform_role.is_some() {
+        return (
+            StatusCode::OK,
+            Json(crate::models::ClientOnboardingStatusResponse {
+                status: "platform_user".to_string(),
+                onboarding_complete: true,
+                user_id: Some(user.id),
+            }),
+        )
+            .into_response();
+    }
+
+    let has_membership =
+        match repository::has_active_organization_membership(&app_state.db_pool, user.id).await {
+            Ok(has_membership) => has_membership,
+
+            Err(error) => {
+                eprintln!("Failed to check onboarding membership: {error}");
+
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+        };
+
+    if !has_membership {
+        return StatusCode::FORBIDDEN.into_response();
+    }
 
     (
-        StatusCode::CREATED,
-        Json(crate::models::OrganizationMutationResponse {
-            organization_id,
-            message: "Organization created successfully.".to_string(),
+        StatusCode::OK,
+        Json(crate::models::ClientOnboardingStatusResponse {
+            status: "active".to_string(),
+            onboarding_complete: true,
+            user_id: Some(user.id),
         }),
     )
+        .into_response()
+}
+
+pub async fn create_organization_handler(
+    State(app_state): State<AppState>,
+    Extension(orbi_user): Extension<OrbiUser>,
+    Json(payload): Json<crate::models::CreateOrganizationRequest>,
+) -> impl IntoResponse {
+    // Only ORBI platform administrators may create organizations
+    // through the management API.
+    //
+    // Customers create their initial organization through onboarding.
+    if orbi_user.platform_role.as_deref() != Some("SUPER_ADMIN") {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(crate::models::ApiErrorResponse {
+                message: "You are not authorized to create organizations.".to_string(),
+            }),
+        )
+            .into_response();
+    }
+
+    match repository::create_organization(&app_state.db_pool, &payload).await {
+        Ok(organization_id) => (
+            StatusCode::CREATED,
+            Json(crate::models::OrganizationMutationResponse {
+                organization_id,
+                message: "Organization created successfully.".to_string(),
+            }),
+        )
+            .into_response(),
+
+        Err(error) => {
+            eprintln!("Failed to create organization: {error}");
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to create organization.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
 }
 
 pub async fn update_organization_handler(
     State(app_state): State<AppState>,
+    Extension(orbi_user): Extension<OrbiUser>,
     Path(organization_id): Path<Uuid>,
     Json(payload): Json<crate::models::UpdateOrganizationRequest>,
-) -> Json<crate::models::OrganizationMutationResponse> {
-    repository::update_organization(&app_state.db_pool, organization_id, &payload)
-        .await
-        .expect("Failed to update organization");
+) -> impl IntoResponse {
+    if orbi_user.platform_role.as_deref() != Some("SUPER_ADMIN") {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(crate::models::ApiErrorResponse {
+                message: "You are not authorized to update organizations.".to_string(),
+            }),
+        )
+            .into_response();
+    }
 
-    Json(crate::models::OrganizationMutationResponse {
-        organization_id,
-        message: "Organization updated successfully.".to_string(),
-    })
+    match repository::update_organization(&app_state.db_pool, organization_id, &payload).await {
+        Ok(_) => (
+            StatusCode::OK,
+            Json(crate::models::OrganizationMutationResponse {
+                organization_id,
+                message: "Organization updated successfully.".to_string(),
+            }),
+        )
+            .into_response(),
+
+        Err(error) => {
+            eprintln!("Failed to update organization: {error}");
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to update organization.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
 }
 
 pub async fn delete_organization_handler(
     State(app_state): State<AppState>,
+    Extension(orbi_user): Extension<OrbiUser>,
     Path(organization_id): Path<Uuid>,
-) -> Json<crate::models::OrganizationMutationResponse> {
-    repository::archive_organization(&app_state.db_pool, organization_id)
-        .await
-        .expect("Failed to delete organization");
+) -> impl IntoResponse {
+    if orbi_user.platform_role.as_deref() != Some("SUPER_ADMIN") {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(crate::models::ApiErrorResponse {
+                message: "You are not authorized to deactivate organizations.".to_string(),
+            }),
+        )
+            .into_response();
+    }
 
-    Json(crate::models::OrganizationMutationResponse {
-        organization_id,
-        message: "Organization deactivated successfully.".to_string(),
-    })
+    match repository::archive_organization(&app_state.db_pool, organization_id).await {
+        Ok(_) => (
+            StatusCode::OK,
+            Json(crate::models::OrganizationMutationResponse {
+                organization_id,
+                message: "Organization deactivated successfully.".to_string(),
+            }),
+        )
+            .into_response(),
+
+        Err(error) => {
+            eprintln!("Failed to deactivate organization: {error}");
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to deactivate organization.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
 }
 
 pub async fn create_asset_handler(
     State(app_state): State<AppState>,
+    Extension(orbi_user): Extension<OrbiUser>,
     Json(payload): Json<crate::models::CreateAssetRequest>,
-) -> (StatusCode, Json<crate::models::AssetMutationResponse>) {
-    let asset_id = repository::create_asset(&app_state.db_pool, &payload)
-        .await
-        .expect("Failed to create asset");
+) -> impl IntoResponse {
+    match repository::create_asset(&app_state.db_pool, &payload, &orbi_user).await {
+        Ok(Some(asset_id)) => (
+            StatusCode::CREATED,
+            Json(crate::models::AssetMutationResponse {
+                asset_id,
+                message: "Asset created successfully.".to_string(),
+            }),
+        )
+            .into_response(),
 
-    (
-        StatusCode::CREATED,
-        Json(crate::models::AssetMutationResponse {
-            asset_id,
-            message: "Asset created successfully.".to_string(),
-        }),
-    )
+        Ok(None) => (
+            StatusCode::FORBIDDEN,
+            Json(crate::models::ApiErrorResponse {
+                message: "You are not authorized to create an asset in this organization."
+                    .to_string(),
+            }),
+        )
+            .into_response(),
+
+        Err(error) => {
+            eprintln!("Failed to create asset: {error}");
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to create asset.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
 }
 
 pub async fn update_asset_handler(
     State(app_state): State<AppState>,
+    Extension(orbi_user): Extension<OrbiUser>,
     Path(asset_id): Path<Uuid>,
     Json(payload): Json<crate::models::UpdateAssetRequest>,
-) -> Json<crate::models::AssetMutationResponse> {
-    repository::update_asset(&app_state.db_pool, asset_id, &payload)
-        .await
-        .expect("Failed to update asset");
+) -> impl IntoResponse {
+    match repository::update_asset(&app_state.db_pool, asset_id, &payload, &orbi_user).await {
+        Ok(true) => (
+            StatusCode::OK,
+            Json(crate::models::AssetMutationResponse {
+                asset_id,
+                message: "Asset updated successfully.".to_string(),
+            }),
+        )
+            .into_response(),
 
-    Json(crate::models::AssetMutationResponse {
-        asset_id,
-        message: "Asset updated successfully.".to_string(),
-    })
+        Ok(false) => (
+            StatusCode::FORBIDDEN,
+            Json(crate::models::ApiErrorResponse {
+                message: "You are not authorized to update this asset, or it is unavailable."
+                    .to_string(),
+            }),
+        )
+            .into_response(),
+
+        Err(error) => {
+            eprintln!("Failed to update asset: {error}");
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to update asset.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
 }
 
 pub async fn delete_asset_handler(
     State(app_state): State<AppState>,
+    Extension(orbi_user): Extension<OrbiUser>,
     Path(asset_id): Path<Uuid>,
-) -> Json<crate::models::AssetMutationResponse> {
-    repository::archive_asset(&app_state.db_pool, asset_id)
-        .await
-        .expect("Failed to deactivate asset");
+) -> impl IntoResponse {
+    match repository::archive_asset(&app_state.db_pool, asset_id, &orbi_user).await {
+        Ok(true) => (
+            StatusCode::OK,
+            Json(crate::models::AssetMutationResponse {
+                asset_id,
+                message: "Asset deactivated successfully.".to_string(),
+            }),
+        )
+            .into_response(),
 
-    Json(crate::models::AssetMutationResponse {
-        asset_id,
-        message: "Asset deactivated successfully.".to_string(),
-    })
+        Ok(false) => (
+            StatusCode::FORBIDDEN,
+            Json(crate::models::ApiErrorResponse {
+                message: "You are not authorized to deactivate this asset, or it is unavailable."
+                    .to_string(),
+            }),
+        )
+            .into_response(),
+
+        Err(error) => {
+            eprintln!("Failed to deactivate asset: {error}");
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to deactivate asset.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
 }
 
 pub async fn update_device_handler(
@@ -473,6 +785,9 @@ pub async fn provision_inventory_device_handler(
             if message.contains("already been provisioned")
                 || message.contains("Retired inventory device")
                 || message.contains("Device code already exists")
+                || message.contains("has an activation entitlement")
+                || message.contains("must be READY_FOR_DEPLOYMENT")
+                || message.contains("inactive asset")
             {
                 return (
                     StatusCode::CONFLICT,
@@ -485,6 +800,133 @@ pub async fn provision_inventory_device_handler(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(crate::models::ApiErrorResponse {
                     message: "Failed to provision inventory device.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
+//--------Device Activation Entitlement Management
+
+pub async fn create_device_activation_entitlement_handler(
+    State(app_state): State<AppState>,
+    Json(payload): Json<crate::models::CreateDeviceActivationEntitlementRequest>,
+) -> impl IntoResponse {
+    match device_activation_repository::create_device_activation_entitlement(
+        &app_state.db_pool,
+        &payload,
+    )
+    .await
+    {
+        Ok(entitlement) => (StatusCode::CREATED, Json(entitlement)).into_response(),
+
+        Err(error) => {
+            let message = error.to_string();
+
+            if message.contains("Inventory device not found")
+                || message.contains("Organization not found")
+            {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(crate::models::ApiErrorResponse { message }),
+                )
+                    .into_response();
+            }
+
+            if message.contains("Inventory device is not ready for deployment")
+                || message.contains("Organization is inactive")
+            {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(crate::models::ApiErrorResponse { message }),
+                )
+                    .into_response();
+            }
+
+            if message.contains("device_activation_entitlements_inventory_device_id_key") {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(crate::models::ApiErrorResponse {
+                        message:
+                            "An activation entitlement already exists for this inventory device."
+                                .to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+
+            eprintln!("Failed to create device activation entitlement: {}", error);
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Failed to create device activation entitlement.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
+pub async fn activate_device_handler(
+    State(app_state): State<AppState>,
+    Extension(orbi_user): Extension<OrbiUser>,
+    Json(payload): Json<crate::models::ActivateDeviceRequest>,
+) -> impl IntoResponse {
+    let result =
+        device_activation_repository::activate_device(&app_state.db_pool, orbi_user.id, &payload)
+            .await;
+
+    match result {
+        Ok(device_id) => (StatusCode::CREATED, Json(device_id)).into_response(),
+
+        Err(error) => {
+            let message = error.to_string();
+
+            if message.contains("not authorized to activate devices") {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(crate::models::ApiErrorResponse {
+                        message: "You are not authorized to activate this device.".to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+
+            if message.contains("Inventory device not found")
+                || message.contains("Device activation entitlement not found")
+            {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(crate::models::ApiErrorResponse {
+                        message: "Device activation record not found.".to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+
+            if message.contains("not pending")
+                || message.contains("READY_FOR_DEPLOYMENT")
+                || message.contains("no longer eligible for activation")
+                || message.contains("Unknown inventory status")
+                || message.contains("Asset does not belong")
+            {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(crate::models::ApiErrorResponse {
+                        message: "Device activation requirements are not satisfied.".to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+
+            eprintln!("Device activation failed: {error}");
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Unable to activate device.".to_string(),
                 }),
             )
                 .into_response()

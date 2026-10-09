@@ -3521,6 +3521,164 @@ preserving clear boundaries.
 The architecture may later evolve toward service-owned read models and
 configuration-change events when scale requires it.
 
+### Planned ORBI Management Platform Separation — Architectural Decision (October 2026)
+
+**Decision:** ORBI will have two separate web applications and, ultimately, two
+independently deployable backend services with service-owned PostgreSQL databases.
+This is the target architecture, **not** the current deployment topology.
+
+#### Platform Ownership
+
+| Area | ORBI Management Platform (internal) | ORBI Customer Platform (external) |
+| --- | --- | --- |
+| Frontend | Dedicated React/TypeScript management application | Existing `fuel-dashboard` React/TypeScript application |
+| Backend | Future Rust/Axum management service | Existing Rust/Axum `fuel-ingestion-service` |
+| Database | Future separate PostgreSQL database | Existing PostgreSQL/PostGIS operational database |
+| Users | Authorized ORBI staff and administrators | Authenticated customer organizations and their members |
+| Responsibilities | Manufacturing inventory, factory identity records, hardware catalogue, firmware/QA records, inventory lifecycle, purchaser assignment and activation entitlements, internal staff workflows | Customer onboarding, organizations and assets, customer device activation, operational devices and sensors, telemetry, installation-specific calibration, investigation, alerts and analytics |
+
+Both applications may share the existing Keycloak identity infrastructure,
+with separate clients and role/permission policies. Customer accounts must not
+inherit internal inventory administration privileges.
+
+#### Initial Deployment and Extraction Boundary
+
+For the initial deployment, **both logical domains remain in
+`fuel-ingestion-service` and its existing PostgreSQL database**. The
+management frontend will be a separate React application that initially calls
+protected internal management APIs in the existing backend. Do not build a
+manufacturing inventory workspace inside the customer `fuel-dashboard`.
+
+Existing inventory tables, repositories, lifecycle rules and admin-only APIs
+remain in place. The management microservice and its database are **not yet
+implemented**. Avoid premature duplication, a second database, or cross-service
+calls merely to create the frontend separation.
+
+When extraction is justified, management-owned inventory and purchaser
+entitlement data will migrate behind an independently deployed Rust/Axum API
+and its own PostgreSQL database. The customer platform retains operational
+asset/device relationships and telemetry intelligence. The final ownership of
+shared hardware catalogue/reference data will be specified before migration.
+
+#### Customer Device Activation and Entitlements
+
+A Device Code identifies physical hardware; **it does not prove purchase or
+authorize activation**. ORBI staff must explicitly assign an eligible inventory
+device to the purchasing/authorized customer organization before activation.
+
+The planned assignment and activation sequence is:
+
+1. ORBI manufactures, programs and registers the device through factory tools
+   and inventory administration.
+2. Manufacturing lifecycle progresses through `ASSEMBLED` → `PROGRAMMED` →
+   `TESTED` → `READY_FOR_DEPLOYMENT`.
+3. An authorized ORBI administrator assigns the inventory device to a customer
+   organization by creating a `PENDING` activation entitlement. Assignment
+   **does not** create an operational device or change inventory status.
+4. The authenticated customer selects an organization and asset and supplies
+   the Device Code through the customer onboarding flow.
+5. The customer-safe backend validates organization membership/permissions,
+   asset ownership, organization status, matching `PENDING` entitlement,
+   device identity and inventory eligibility without exposing factory details.
+6. On successful activation, the backend creates the operational device and
+   expected sensor instances, advances inventory to `PROVISIONED`, and marks
+   the entitlement `ACTIVATED` with the created operational device ID.
+7. Installation, calibration, validation and operational monitoring follow.
+
+The initial single-database activation operation must be **transactional**,
+with appropriate row locking and database constraints to prevent duplicate
+claims, concurrent activation and partial provisioning. Activation is distinct
+from later physical installation and deployment-readiness validation.
+
+**Entitlement lifecycle:** `PENDING` → `ACTIVATED`; an unconsumed entitlement
+may be marked `REVOKED`. Transfer or revocation of already-activated devices
+requires a separate audited workflow; it is not implied by the entitlement
+assignment endpoint.
+
+**Current implementation status (October 2026):**
+
+- Existing inventory management APIs are implemented and protected
+  by platform-administrator authorization.
+- The `device_activation_entitlements` database migration has been
+  applied, enforcing unique inventory-device assignments and
+  supporting `PENDING`, `ACTIVATED`, and `REVOKED` states.
+- Administrator entitlement assignment is implemented through
+  `POST /api/device-activation-entitlements`.
+- Entitlement assignment validates inventory readiness and
+  organization status without creating an operational device.
+- Administrator entitlement assignment has been tested, including
+  successful assignment and duplicate-assignment rejection.
+- Legacy administrator provisioning is transactional and rejects
+  inventory devices with activation entitlements, preventing the
+  legacy workflow from bypassing customer activation.
+- Transaction-aware operational device registration and automatic
+  sensor provisioning helpers are implemented.
+- Customer device activation is implemented through
+  `POST /api/devices/activate`.
+- The activation endpoint requires Keycloak authentication and
+  verifies active customer membership with `ADMIN` or
+  `FLEET_MANAGER` organization permissions.
+- Activation validates the assigned `PENDING` entitlement,
+  inventory readiness, active organization, and asset ownership.
+- Activation uses a single PostgreSQL transaction with row locking
+  to create the operational device and its expected sensors,
+  transition inventory to `PROVISIONED`, and mark the entitlement
+  `ACTIVATED`.
+- Successful customer activation has been verified end-to-end
+  using an authenticated customer account.
+- Unauthorized platform-administrator activation was rejected
+  with HTTP 403, and unauthenticated activation with HTTP 401.
+- PostgreSQL verification confirmed that the operational device
+  was associated with the correct customer asset and organization,
+  and that inventory and entitlement states transitioned correctly.
+  - Duplicate customer activation attempts are rejected with
+  HTTP 409 Conflict.
+- End-to-end PostgreSQL verification confirmed that a rejected
+  duplicate activation does not create additional operational
+  devices or sensor records.
+- The tested device `ORBI-TEST-002` retained exactly one
+  operational device and three provisioned sensor instances:
+  FUEL, GPS, and VIBRATION.
+- The customer activation backend has passed its initial
+  end-to-end verification. Automated integration tests and
+  the customer-facing activation interface remain outstanding.
+- The separate management frontend, management backend service,
+  and management database have not yet been implemented.
+
+#### Future Service-to-Service Contract
+
+After extraction, the customer service must **not** read or modify the
+management service's private PostgreSQL tables. It will use authenticated,
+authorized service APIs (gRPC with Tonic/Protocol Buffers is the proposed
+option), with asynchronous events or an outbox pattern where needed.
+
+The current single-database SQL transaction cannot span independent service
+databases. Extraction therefore requires an explicit activation reservation,
+confirmation and failure-recovery/idempotency design to avoid double claims or
+orphaned operational devices. The exact protocol will be designed and tested
+before the database split; do not assume distributed atomicity.
+
+The migration must preserve immutable device identities, manufacturing and
+quality history, inventory lifecycle, entitlement/assignment history, hardware
+profile relationships, operational asset/device/sensor relationships,
+installation/calibration history and uninterrupted telemetry processing.
+
+#### Implementation Order
+
+1. Implement and validate the entitlement-assignment and transactional
+   customer activation backend within `fuel-ingestion-service`. COMPLETED.
+2. Build the customer-facing assigned-device discovery and activation
+   interface in the existing `fuel-dashboard`.
+3. Create the separate internal React management workspace using the
+   existing admin-protected management APIs.
+4. Complete automated activation integration tests, initial customer
+   deployment requirements, and operational notifications.
+5. Extract the management backend and database when service contracts,
+   migration planning, and operational requirements justify separation.
+
+This decision locks the **two-frontends / eventual two-services** architecture
+without treating the future microservice as already deployed.
+
 Sensor Adapter Relationship
 
 The Sensor Adapter Layer translates vendor-specific sensor communication

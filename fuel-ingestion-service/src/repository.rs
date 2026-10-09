@@ -374,6 +374,61 @@ pub async fn create_sensors_for_hardware_profile(
     Ok(created_sensor_ids)
 }
 
+/// Create hardware-profile sensors inside an existing transaction.
+///
+/// Used by customer device activation so that device registration,
+/// sensor provisioning, inventory updates, and entitlement activation
+/// can all succeed or fail atomically.
+pub async fn create_sensors_for_hardware_profile_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    device_id: Uuid,
+    hardware_profile_id: Uuid,
+) -> Result<Vec<Uuid>> {
+    let profile_sensors = sqlx::query!(
+        r#"
+        SELECT sensor_type, unit
+        FROM hardware_profile_sensors
+        WHERE hardware_profile_id = $1
+        ORDER BY sensor_type
+        "#,
+        hardware_profile_id
+    )
+    .fetch_all(&mut **tx)
+    .await?;
+
+    let mut sensor_ids = Vec::new();
+
+    for sensor in profile_sensors {
+        let sensor_code = sensor.sensor_type.to_lowercase();
+
+        let sensor_id = sqlx::query_scalar!(
+            r#"
+            INSERT INTO sensors (
+                device_id,
+                sensor_code,
+                sensor_type,
+                unit
+            )
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (device_id, sensor_code)
+            DO UPDATE SET
+                sensor_code = EXCLUDED.sensor_code
+            RETURNING id
+            "#,
+            device_id,
+            sensor_code,
+            sensor.sensor_type,
+            sensor.unit
+        )
+        .fetch_one(&mut **tx)
+        .await?;
+
+        sensor_ids.push(sensor_id);
+    }
+
+    Ok(sensor_ids)
+}
+
 pub async fn register_device(
     db_pool: &PgPool,
     asset_id: Uuid,
@@ -409,42 +464,148 @@ pub async fn register_device(
     Ok(row.id)
 }
 
+/// Register an operational device and its hardware-profile sensors
+/// inside an existing PostgreSQL transaction.
+///
+/// The caller is responsible for validating organization authorization,
+/// asset ownership, inventory readiness, and activation entitlement.
+pub async fn register_device_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    asset_id: Uuid,
+    device_model_id: Option<Uuid>,
+    device_code: String,
+    hardware_profile_id: Uuid,
+) -> Result<Uuid> {
+    let device_id = Uuid::new_v4();
+
+    sqlx::query!(
+        r#"
+        INSERT INTO devices (
+            id,
+            asset_id,
+            device_model_id,
+            device_code,
+            hardware_profile_id
+        )
+        VALUES ($1, $2, $3, $4, $5)
+        "#,
+        device_id,
+        asset_id,
+        device_model_id,
+        device_code,
+        hardware_profile_id,
+    )
+    .execute(&mut **tx)
+    .await?;
+
+    create_sensors_for_hardware_profile_tx(tx, device_id, hardware_profile_id).await?;
+
+    Ok(device_id)
+}
+
 pub async fn provision_inventory_device(
     db_pool: &PgPool,
     request: &ProvisionInventoryDeviceRequest,
 ) -> Result<Uuid> {
-    let inventory_device = crate::orbi_inventory_repository::get_orbi_inventory_device(
-        db_pool,
+    use crate::domain::inventory_status::InventoryStatus;
+
+    let mut tx = db_pool.begin().await?;
+
+    // 1. Lock the inventory device to prevent concurrent provisioning.
+    let inventory = sqlx::query!(
+        r#"
+        SELECT
+            device_code,
+            device_model_id,
+            hardware_profile_id,
+            inventory_status
+        FROM orbi_device_inventory
+        WHERE id = $1
+        FOR UPDATE
+        "#,
         request.inventory_device_id,
     )
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| anyhow::anyhow!("Inventory device not found."))?;
+
+    // 2. Reject inventory already assigned through an entitlement.
+    let has_entitlement = sqlx::query_scalar!(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM device_activation_entitlements
+            WHERE inventory_device_id = $1
+        )
+        "#,
+        request.inventory_device_id,
+    )
+    .fetch_one(&mut *tx)
     .await?;
 
-    let Some(inventory_device) = inventory_device else {
-        anyhow::bail!("Inventory device not found.");
-    };
-
-    if inventory_device.inventory_status != "READY_FOR_DEPLOYMENT" {
+    if has_entitlement.unwrap_or(false) {
         anyhow::bail!(
-            "Inventory device must be in READY_FOR_DEPLOYMENT status before provisioning."
+            "Inventory device has an activation entitlement and must use the customer activation workflow."
         );
     }
 
-    let device_id = register_device(
-        db_pool,
+    // 3. Validate the inventory lifecycle transition.
+    let current_status = InventoryStatus::from_str(&inventory.inventory_status)
+        .ok_or_else(|| anyhow::anyhow!("Unknown inventory status."))?;
+
+    if !current_status.can_transition_to(InventoryStatus::Provisioned) {
+        anyhow::bail!("Inventory device must be READY_FOR_DEPLOYMENT before provisioning.");
+    }
+
+    // 4. Confirm the selected asset exists and is active.
+    let asset_is_active = sqlx::query_scalar!(
+        r#"
+        SELECT is_active
+        FROM assets
+        WHERE id = $1
+        "#,
         request.asset_id,
-        Some(inventory_device.device_model_id),
-        inventory_device.device_code,
-        inventory_device.hardware_profile_id,
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| anyhow::anyhow!("Asset not found."))?;
+
+    if !asset_is_active {
+        anyhow::bail!("Cannot provision a device to an inactive asset.");
+    }
+
+    // 5. Register the operational device and its sensors.
+    let device_id = register_device_tx(
+        &mut tx,
+        request.asset_id,
+        Some(inventory.device_model_id),
+        inventory.device_code,
+        inventory.hardware_profile_id,
     )
     .await?;
 
-    crate::orbi_inventory_repository::update_orbi_inventory_status(
-        db_pool,
+    // 6. Update inventory status within the same transaction.
+    let updated = sqlx::query!(
+        r#"
+        UPDATE orbi_device_inventory
+        SET
+            inventory_status = 'PROVISIONED',
+            updated_at = NOW()
+        WHERE id = $1
+          AND inventory_status = 'READY_FOR_DEPLOYMENT'
+        RETURNING id
+        "#,
         request.inventory_device_id,
-        "PROVISIONED",
-        &inventory_device.quality_test_status,
     )
+    .fetch_optional(&mut *tx)
     .await?;
+
+    if updated.is_none() {
+        anyhow::bail!("Inventory status changed during provisioning.");
+    }
+
+    // 7. Commit all changes atomically.
+    tx.commit().await?;
 
     Ok(device_id)
 }
@@ -1377,25 +1538,54 @@ pub async fn get_recent_device_health_events(
     db_pool: &PgPool,
     limit: i64,
     device_id: Option<Uuid>,
+    orbi_user: &OrbiUser,
 ) -> Result<Vec<DeviceHealthEventResponse>> {
+    let is_super_admin = orbi_user.platform_role.as_deref() == Some("SUPER_ADMIN");
+
     let rows = sqlx::query!(
         r#"
         SELECT
-            id,
-            device_id,
-            previous_status,
-            new_status,
-            reason,
-            detected_at
-        FROM device_health_events
+            dhe.id,
+            dhe.device_id,
+            dhe.previous_status,
+            dhe.new_status,
+            dhe.reason,
+            dhe.detected_at
+
+        FROM device_health_events AS dhe
+
+        INNER JOIN devices
+            ON devices.id = dhe.device_id
+
+        INNER JOIN assets
+            ON assets.id = devices.asset_id
+
         WHERE
-            $2::uuid IS NULL
-            OR device_id = $2
-        ORDER BY detected_at DESC
+            ($2::uuid IS NULL OR dhe.device_id = $2)
+
+            AND (
+                $3::BOOLEAN = TRUE
+
+                OR EXISTS (
+                    SELECT 1
+                    FROM organizations
+                    INNER JOIN organization_memberships AS membership
+                        ON membership.organization_id = organizations.id
+
+                    WHERE organizations.id = assets.organization_id
+                      AND organizations.is_active = TRUE
+                      AND membership.user_id = $4
+                      AND membership.is_active = TRUE
+                )
+            )
+
+        ORDER BY dhe.detected_at DESC
         LIMIT $1
         "#,
         limit,
-        device_id
+        device_id,
+        is_super_admin,
+        orbi_user.id
     )
     .fetch_all(db_pool)
     .await?;
@@ -1482,28 +1672,57 @@ pub async fn get_recent_sensor_health_events(
     db_pool: &PgPool,
     limit: i64,
     device_id: Option<Uuid>,
+    orbi_user: &OrbiUser,
 ) -> Result<Vec<SensorHealthEventResponse>> {
+    let is_super_admin = orbi_user.platform_role.as_deref() == Some("SUPER_ADMIN");
+
     let rows = sqlx::query!(
         r#"
         SELECT
-            id,
-            device_id,
-            sensor_id,
-            event_type,
-            severity,
-            reason,
-            first_seen_at,
-            last_seen_at,
-            detected_at
-        FROM sensor_health_events
+            she.id,
+            she.device_id,
+            she.sensor_id,
+            she.event_type,
+            she.severity,
+            she.reason,
+            she.first_seen_at,
+            she.last_seen_at,
+            she.detected_at
+
+        FROM sensor_health_events AS she
+
+        INNER JOIN devices
+            ON devices.id = she.device_id
+
+        INNER JOIN assets
+            ON assets.id = devices.asset_id
+
         WHERE
-            $2::uuid IS NULL
-            OR device_id = $2
-        ORDER BY detected_at DESC
+            ($2::uuid IS NULL OR she.device_id = $2)
+
+            AND (
+                $3::BOOLEAN = TRUE
+
+                OR EXISTS (
+                    SELECT 1
+                    FROM organizations
+                    INNER JOIN organization_memberships AS membership
+                        ON membership.organization_id = organizations.id
+
+                    WHERE organizations.id = assets.organization_id
+                      AND organizations.is_active = TRUE
+                      AND membership.user_id = $4
+                      AND membership.is_active = TRUE
+                )
+            )
+
+        ORDER BY she.detected_at DESC
         LIMIT $1
         "#,
         limit,
-        device_id
+        device_id,
+        is_super_admin,
+        orbi_user.id
     )
     .fetch_all(db_pool)
     .await?;
@@ -1648,25 +1867,54 @@ pub async fn get_recent_device_state_events(
     db_pool: &PgPool,
     limit: i64,
     device_id: Option<Uuid>,
+    orbi_user: &OrbiUser,
 ) -> Result<Vec<DeviceStateEventResponse>> {
+    let is_super_admin = orbi_user.platform_role.as_deref() == Some("SUPER_ADMIN");
+
     let rows = sqlx::query!(
         r#"
         SELECT
-            state,
-            vibration_level,
-            motion_detected,
-            latitude,
-            longitude,
-            recorded_at
-        FROM device_state_events
+            dse.state,
+            dse.vibration_level,
+            dse.motion_detected,
+            dse.latitude,
+            dse.longitude,
+            dse.recorded_at
+
+        FROM device_state_events AS dse
+
+        INNER JOIN devices
+            ON devices.id = dse.device_id
+
+        INNER JOIN assets
+            ON assets.id = devices.asset_id
+
         WHERE
-            $2::uuid IS NULL
-            OR device_id = $2
-        ORDER BY created_at DESC
+            ($2::uuid IS NULL OR dse.device_id = $2)
+
+            AND (
+                $3::BOOLEAN = TRUE
+
+                OR EXISTS (
+                    SELECT 1
+                    FROM organizations
+                    INNER JOIN organization_memberships AS membership
+                        ON membership.organization_id = organizations.id
+
+                    WHERE organizations.id = assets.organization_id
+                      AND organizations.is_active = TRUE
+                      AND membership.user_id = $4
+                      AND membership.is_active = TRUE
+                )
+            )
+
+        ORDER BY dse.created_at DESC
         LIMIT $1
         "#,
         limit,
-        device_id
+        device_id,
+        is_super_admin,
+        orbi_user.id
     )
     .fetch_all(db_pool)
     .await?;
@@ -1878,7 +2126,10 @@ pub async fn get_alert_trends(
     db_pool: &PgPool,
     device_id: Option<Uuid>,
     days: i64,
+    orbi_user: &OrbiUser,
 ) -> Result<AlertTrendsResponse, sqlx::Error> {
+    let is_super_admin = orbi_user.platform_role.as_deref() == Some("SUPER_ADMIN");
+
     let safe_days = if days < 1 {
         30
     } else if days > 90 {
@@ -1891,24 +2142,65 @@ pub async fn get_alert_trends(
         r#"
         SELECT
             COUNT(*) AS "total_alerts!",
-            COUNT(*) FILTER (WHERE alerts.alert_type = 'THEFT') AS "theft_alerts!",
-            COUNT(*) FILTER (WHERE alerts.alert_type = 'REFILL') AS "refill_alerts!",
-            COUNT(*) FILTER (WHERE alerts.alert_type = 'LEAK') AS "leak_alerts!",
-            COUNT(*) FILTER (WHERE alerts.status = 'OPEN') AS "open_alerts!",
-            COUNT(*) FILTER (WHERE alerts.status = 'ACKNOWLEDGED') AS "acknowledged_alerts!",
-            COUNT(*) FILTER (WHERE alerts.status = 'RESOLVED') AS "resolved_alerts!"
+            COUNT(*) FILTER (
+                WHERE alerts.alert_type = 'THEFT'
+            ) AS "theft_alerts!",
+            COUNT(*) FILTER (
+                WHERE alerts.alert_type = 'REFILL'
+            ) AS "refill_alerts!",
+            COUNT(*) FILTER (
+                WHERE alerts.alert_type = 'LEAK'
+            ) AS "leak_alerts!",
+            COUNT(*) FILTER (
+                WHERE alerts.status = 'OPEN'
+            ) AS "open_alerts!",
+            COUNT(*) FILTER (
+                WHERE alerts.status = 'ACKNOWLEDGED'
+            ) AS "acknowledged_alerts!",
+            COUNT(*) FILTER (
+                WHERE alerts.status = 'RESOLVED'
+            ) AS "resolved_alerts!"
+
         FROM alerts
-        LEFT JOIN fuel_events
+
+        INNER JOIN fuel_events
             ON fuel_events.id = alerts.fuel_event_id
+
+        INNER JOIN devices
+            ON devices.id = fuel_events.device_id
+
+        INNER JOIN assets
+            ON assets.id = devices.asset_id
+
+        INNER JOIN organizations
+            ON organizations.id = assets.organization_id
+
         WHERE
             alerts.created_at >= NOW() - ($2 * INTERVAL '1 day')
+
             AND (
                 $1::uuid IS NULL
                 OR fuel_events.device_id = $1
             )
+
+            AND (
+                $3::BOOLEAN = TRUE
+                OR (
+                    organizations.is_active = TRUE
+                    AND EXISTS (
+                        SELECT 1
+                        FROM organization_memberships AS membership
+                        WHERE membership.organization_id = organizations.id
+                          AND membership.user_id = $4
+                          AND membership.is_active = TRUE
+                    )
+                )
+            )
         "#,
         device_id,
-        safe_days as f64
+        safe_days as f64,
+        is_super_admin,
+        orbi_user.id,
     )
     .fetch_one(db_pool)
     .await?;
@@ -1925,31 +2217,62 @@ pub async fn get_alert_trends(
 
     let trend_rows = sqlx::query!(
         r#"
-    SELECT
-        alerts.created_at::date AS "day!",
-        alerts.alert_type AS "alert_type!",
-        alerts.status AS "status!",
-        COUNT(*) AS "count!"
-    FROM alerts
-    LEFT JOIN fuel_events
-        ON fuel_events.id = alerts.fuel_event_id
-    WHERE
-        alerts.created_at >= NOW() - ($2 * INTERVAL '1 day')
-        AND (
-            $1::uuid IS NULL
-            OR fuel_events.device_id = $1
-        )
-    GROUP BY
-        alerts.created_at::date,
-        alerts.alert_type,
-        alerts.status
-    ORDER BY
-        alerts.created_at::date ASC,
-        alerts.alert_type ASC,
-        alerts.status ASC
-    "#,
+        SELECT
+            alerts.created_at::date AS "day!",
+            alerts.alert_type AS "alert_type!",
+            alerts.status AS "status!",
+            COUNT(*) AS "count!"
+
+        FROM alerts
+
+        INNER JOIN fuel_events
+            ON fuel_events.id = alerts.fuel_event_id
+
+        INNER JOIN devices
+            ON devices.id = fuel_events.device_id
+
+        INNER JOIN assets
+            ON assets.id = devices.asset_id
+
+        INNER JOIN organizations
+            ON organizations.id = assets.organization_id
+
+        WHERE
+            alerts.created_at >= NOW() - ($2 * INTERVAL '1 day')
+
+            AND (
+                $1::uuid IS NULL
+                OR fuel_events.device_id = $1
+            )
+
+            AND (
+                $3::BOOLEAN = TRUE
+                OR (
+                    organizations.is_active = TRUE
+                    AND EXISTS (
+                        SELECT 1
+                        FROM organization_memberships AS membership
+                        WHERE membership.organization_id = organizations.id
+                          AND membership.user_id = $4
+                          AND membership.is_active = TRUE
+                    )
+                )
+            )
+
+        GROUP BY
+            alerts.created_at::date,
+            alerts.alert_type,
+            alerts.status
+
+        ORDER BY
+            alerts.created_at::date ASC,
+            alerts.alert_type ASC,
+            alerts.status ASC
+        "#,
         device_id,
-        safe_days as f64
+        safe_days as f64,
+        is_super_admin,
+        orbi_user.id,
     )
     .fetch_all(db_pool)
     .await?;
@@ -2181,7 +2504,10 @@ pub async fn resolve_alert(
 pub async fn get_recent_telemetry_stream(
     db_pool: &PgPool,
     device_id: Option<Uuid>,
+    orbi_user: &OrbiUser,
 ) -> Result<Vec<TelemetryStreamResponse>, sqlx::Error> {
+    let is_super_admin = orbi_user.platform_role.as_deref() == Some("SUPER_ADMIN");
+
     let rows = sqlx::query!(
         r#"
         SELECT
@@ -2227,14 +2553,38 @@ pub async fn get_recent_telemetry_stream(
             ON vibration_reading.device_id = fuel_reading.device_id
             AND vibration_reading.recorded_at = fuel_reading.recorded_at
 
+        INNER JOIN devices
+            ON devices.id = fuel_reading.device_id
+
+        INNER JOIN assets
+            ON assets.id = devices.asset_id
+
         WHERE
             ($1::uuid IS NULL OR fuel_reading.device_id = $1)
+
+            AND (
+                $2::BOOLEAN = TRUE
+
+                OR EXISTS (
+                    SELECT 1
+                    FROM organizations
+                    JOIN organization_memberships AS membership
+                        ON membership.organization_id = organizations.id
+
+                    WHERE organizations.id = assets.organization_id
+                      AND organizations.is_active = TRUE
+                      AND membership.user_id = $3
+                      AND membership.is_active = TRUE
+                )
+            )
 
         ORDER BY fuel_reading.recorded_at DESC
 
         LIMIT 10
         "#,
-        device_id
+        device_id,
+        is_super_admin,
+        orbi_user.id
     )
     .fetch_all(db_pool)
     .await?;
@@ -2485,6 +2835,152 @@ pub async fn find_orbi_user_by_keycloak_subject(
     Ok(user)
 }
 
+/// Check whether an ORBI user belongs to at least one active organization
+/// through an active membership.
+pub async fn has_active_organization_membership(
+    db_pool: &PgPool,
+    user_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM organization_memberships AS membership
+            JOIN organizations
+                ON organizations.id = membership.organization_id
+            WHERE membership.user_id = $1
+              AND membership.is_active = TRUE
+              AND organizations.is_active = TRUE
+        )
+        "#,
+    )
+    .bind(user_id)
+    .fetch_one(db_pool)
+    .await
+}
+
+/// Check whether an ORBI user is authorized to activate devices
+/// for a specific active organization.
+///
+/// Device activation is restricted to organization administrators
+/// and fleet managers.
+pub async fn can_activate_devices_for_organization(
+    db_pool: &PgPool,
+    user_id: Uuid,
+    organization_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM organization_memberships AS membership
+            JOIN organizations
+                ON organizations.id = membership.organization_id
+            JOIN orbi_users
+                ON orbi_users.id = membership.user_id
+            WHERE membership.user_id = $1
+              AND membership.organization_id = $2
+              AND membership.is_active = TRUE
+              AND organizations.is_active = TRUE
+              AND orbi_users.is_active = TRUE
+              AND membership.role IN (
+                  'ADMIN',
+                  'FLEET_MANAGER'
+              )
+        )
+        "#,
+    )
+    .bind(user_id)
+    .bind(organization_id)
+    .fetch_one(db_pool)
+    .await
+}
+
+/// Register a new ORBI customer and their first organization.
+///
+/// The Keycloak subject and identity details must come from
+/// verified JWT claims, never from customer-supplied JSON.
+///
+/// All three records are created atomically.
+pub async fn create_client_onboarding(
+    db_pool: &PgPool,
+    keycloak_subject: &str,
+    username: Option<&str>,
+    email: Option<&str>,
+    organization_name: &str,
+    industry: &str,
+) -> Result<(Uuid, Uuid)> {
+    let mut transaction = db_pool.begin().await?;
+
+    // 1. Create the ORBI application user.
+    //
+    // The unique keycloak_subject constraint prevents the same
+    // identity from registering twice, including concurrent requests.
+    let user_id = Uuid::new_v4();
+
+    sqlx::query!(
+        r#"
+        INSERT INTO orbi_users (
+            id,
+            keycloak_subject,
+            username,
+            email,
+            platform_role,
+            is_active
+        )
+        VALUES ($1, $2, $3, $4, NULL, TRUE)
+        "#,
+        user_id,
+        keycloak_subject,
+        username,
+        email,
+    )
+    .execute(&mut *transaction)
+    .await?;
+
+    // 2. Create the customer's organization.
+    let organization_id = Uuid::new_v4();
+
+    sqlx::query!(
+        r#"
+        INSERT INTO organizations (
+            id,
+            name,
+            industry,
+            is_active
+        )
+        VALUES ($1, $2, $3, TRUE)
+        "#,
+        organization_id,
+        organization_name,
+        industry,
+    )
+    .execute(&mut *transaction)
+    .await?;
+
+    // 3. Assign the registering customer as organization ADMIN.
+    sqlx::query!(
+        r#"
+        INSERT INTO organization_memberships (
+            user_id,
+            organization_id,
+            role,
+            is_active
+        )
+        VALUES ($1, $2, 'ADMIN', TRUE)
+        "#,
+        user_id,
+        organization_id,
+    )
+    .execute(&mut *transaction)
+    .await?;
+
+    // 4. Commit only after all three operations succeed.
+    transaction.commit().await?;
+
+    Ok((user_id, organization_id))
+}
+
 pub async fn create_organization(
     db_pool: &PgPool,
     request: &CreateOrganizationRequest,
@@ -2548,10 +3044,16 @@ pub async fn archive_organization(db_pool: &PgPool, organization_id: Uuid) -> Re
     Ok(())
 }
 
-pub async fn create_asset(db_pool: &PgPool, request: &CreateAssetRequest) -> Result<Uuid> {
+pub async fn create_asset(
+    db_pool: &PgPool,
+    request: &CreateAssetRequest,
+    orbi_user: &OrbiUser,
+) -> Result<Option<Uuid>> {
     let asset_id = Uuid::new_v4();
 
-    sqlx::query!(
+    let is_super_admin = orbi_user.platform_role.as_deref() == Some("SUPER_ADMIN");
+
+    let row = sqlx::query!(
         r#"
         INSERT INTO assets (
             id,
@@ -2561,58 +3063,135 @@ pub async fn create_asset(db_pool: &PgPool, request: &CreateAssetRequest) -> Res
             metadata,
             is_active
         )
-        VALUES ($1, $2, $3, $4, $5, TRUE)
+        SELECT
+            $1,
+            organizations.id,
+            $2,
+            $3,
+            $4,
+            TRUE
+        FROM organizations
+        WHERE organizations.id = $5
+          AND organizations.is_active = TRUE
+          AND (
+              $6::BOOLEAN = TRUE
+              OR EXISTS (
+                  SELECT 1
+                  FROM organization_memberships AS membership
+                  WHERE membership.organization_id = organizations.id
+                    AND membership.user_id = $7
+                    AND membership.is_active = TRUE
+                    AND membership.role IN (
+                        'ADMIN',
+                        'FLEET_MANAGER'
+                    )
+              )
+          )
+        RETURNING id
         "#,
         asset_id,
-        request.organization_id,
         request.name,
         request.asset_type,
         request.metadata,
+        request.organization_id,
+        is_super_admin,
+        orbi_user.id,
     )
-    .execute(db_pool)
+    .fetch_optional(db_pool)
     .await?;
 
-    Ok(asset_id)
+    Ok(row.map(|row| row.id))
 }
 
 pub async fn update_asset(
     db_pool: &PgPool,
     asset_id: Uuid,
     request: &UpdateAssetRequest,
-) -> Result<()> {
-    sqlx::query!(
+    orbi_user: &OrbiUser,
+) -> Result<bool> {
+    let is_super_admin = orbi_user.platform_role.as_deref() == Some("SUPER_ADMIN");
+
+    let result = sqlx::query!(
         r#"
         UPDATE assets
         SET
             name = $2,
             asset_type = $3,
             metadata = $4
-        WHERE id = $1
+        WHERE assets.id = $1
+          AND assets.is_active = TRUE
+          AND EXISTS (
+              SELECT 1
+              FROM organizations
+              WHERE organizations.id = assets.organization_id
+                AND organizations.is_active = TRUE
+                AND (
+                    $5::BOOLEAN = TRUE
+                    OR EXISTS (
+                        SELECT 1
+                        FROM organization_memberships AS membership
+                        WHERE membership.organization_id = organizations.id
+                          AND membership.user_id = $6
+                          AND membership.is_active = TRUE
+                          AND membership.role IN (
+                              'ADMIN',
+                              'FLEET_MANAGER'
+                          )
+                    )
+                )
+          )
         "#,
         asset_id,
         request.name,
         request.asset_type,
         request.metadata,
+        is_super_admin,
+        orbi_user.id,
     )
     .execute(db_pool)
     .await?;
 
-    Ok(())
+    Ok(result.rows_affected() > 0)
 }
 
-pub async fn archive_asset(db_pool: &PgPool, asset_id: Uuid) -> Result<()> {
-    sqlx::query!(
+pub async fn archive_asset(db_pool: &PgPool, asset_id: Uuid, orbi_user: &OrbiUser) -> Result<bool> {
+    let is_super_admin = orbi_user.platform_role.as_deref() == Some("SUPER_ADMIN");
+
+    let result = sqlx::query!(
         r#"
         UPDATE assets
         SET is_active = FALSE
-        WHERE id = $1
+        WHERE assets.id = $1
+          AND assets.is_active = TRUE
+          AND EXISTS (
+              SELECT 1
+              FROM organizations
+              WHERE organizations.id = assets.organization_id
+                AND organizations.is_active = TRUE
+                AND (
+                    $2::BOOLEAN = TRUE
+                    OR EXISTS (
+                        SELECT 1
+                        FROM organization_memberships AS membership
+                        WHERE membership.organization_id = organizations.id
+                          AND membership.user_id = $3
+                          AND membership.is_active = TRUE
+                          AND membership.role IN (
+                              'ADMIN',
+                              'FLEET_MANAGER'
+                          )
+                    )
+                )
+          )
         "#,
         asset_id,
+        is_super_admin,
+        orbi_user.id,
     )
     .execute(db_pool)
     .await?;
 
-    Ok(())
+    Ok(result.rows_affected() > 0)
 }
 
 pub async fn update_device(
@@ -2761,7 +3340,10 @@ pub async fn assign_device_to_asset(
 pub async fn create_geofence(
     pool: &sqlx::PgPool,
     payload: CreateGeofenceRequest,
+    orbi_user: &OrbiUser,
 ) -> Result<Geofence, sqlx::Error> {
+    let is_super_admin = orbi_user.platform_role.as_deref() == Some("SUPER_ADMIN");
+
     let geofence = sqlx::query_as::<_, Geofence>(
         r#"
         INSERT INTO geofences (
@@ -2772,9 +3354,9 @@ pub async fn create_geofence(
             geometry,
             is_active
         )
-        VALUES (
+        SELECT
             $1,
-            $2,
+            organizations.id,
             $3,
             $4,
             ST_SetSRID(
@@ -2782,7 +3364,21 @@ pub async fn create_geofence(
                 4326
             ),
             TRUE
-        )
+        FROM organizations
+        WHERE organizations.id = $2
+          AND (
+              $6::BOOLEAN = TRUE
+              OR (
+                  organizations.is_active = TRUE
+                  AND EXISTS (
+                      SELECT 1
+                      FROM organization_memberships AS membership
+                      WHERE membership.organization_id = organizations.id
+                        AND membership.user_id = $7
+                        AND membership.is_active = TRUE
+                  )
+              )
+          )
         RETURNING
             id,
             organization_id,
@@ -2799,6 +3395,8 @@ pub async fn create_geofence(
     .bind(payload.name)
     .bind(payload.geofence_type)
     .bind(payload.geojson.to_string())
+    .bind(is_super_admin)
+    .bind(orbi_user.id)
     .fetch_one(pool)
     .await?;
 
@@ -2808,24 +3406,44 @@ pub async fn create_geofence(
 pub async fn list_geofences(
     pool: &sqlx::PgPool,
     organization_id: uuid::Uuid,
+    orbi_user: &OrbiUser,
 ) -> Result<Vec<Geofence>, sqlx::Error> {
+    let is_super_admin = orbi_user.platform_role.as_deref() == Some("SUPER_ADMIN");
+
     let geofences = sqlx::query_as::<_, Geofence>(
         r#"
         SELECT
-            id,
-            organization_id,
-            name,
-            geofence_type,
-            ST_AsGeoJSON(geometry)::json AS geojson,
-            is_active,
-            created_at,
-            updated_at
-        FROM geofences
-        WHERE organization_id = $1
-        ORDER BY created_at DESC
+            g.id,
+            g.organization_id,
+            g.name,
+            g.geofence_type,
+            ST_AsGeoJSON(g.geometry)::json AS geojson,
+            g.is_active,
+            g.created_at,
+            g.updated_at
+        FROM geofences AS g
+        INNER JOIN organizations
+            ON organizations.id = g.organization_id
+        WHERE g.organization_id = $1
+          AND (
+              $2::BOOLEAN = TRUE
+              OR (
+                  organizations.is_active = TRUE
+                  AND EXISTS (
+                      SELECT 1
+                      FROM organization_memberships AS membership
+                      WHERE membership.organization_id = organizations.id
+                        AND membership.user_id = $3
+                        AND membership.is_active = TRUE
+                  )
+              )
+          )
+        ORDER BY g.created_at DESC
         "#,
     )
     .bind(organization_id)
+    .bind(is_super_admin)
+    .bind(orbi_user.id)
     .fetch_all(pool)
     .await?;
 
@@ -2914,12 +3532,47 @@ pub async fn check_position_against_geofences(
     device_id: Uuid,
     latitude: f64,
     longitude: f64,
+    orbi_user: &OrbiUser,
 ) -> Result<Vec<GeofencePositionMatch>, sqlx::Error> {
-    let matches =
-        get_matching_geofences_for_position(pool, organization_id, device_id, latitude, longitude)
-            .await?;
+    let is_super_admin = orbi_user.platform_role.as_deref() == Some("SUPER_ADMIN");
 
-    Ok(matches)
+    let authorized_device = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT devices.id
+        FROM devices
+        INNER JOIN assets
+            ON assets.id = devices.asset_id
+        INNER JOIN organizations
+            ON organizations.id = assets.organization_id
+        WHERE devices.id = $1
+          AND organizations.id = $2
+          AND (
+              $3::BOOLEAN = TRUE
+              OR (
+                  organizations.is_active = TRUE
+                  AND EXISTS (
+                      SELECT 1
+                      FROM organization_memberships AS membership
+                      WHERE membership.organization_id = organizations.id
+                        AND membership.user_id = $4
+                        AND membership.is_active = TRUE
+                  )
+              )
+          )
+        "#,
+    )
+    .bind(device_id)
+    .bind(organization_id)
+    .bind(is_super_admin)
+    .bind(orbi_user.id)
+    .fetch_optional(pool)
+    .await?;
+
+    if authorized_device.is_none() {
+        return Ok(Vec::new());
+    }
+
+    get_matching_geofences_for_position(pool, organization_id, device_id, latitude, longitude).await
 }
 
 async fn insert_geofence_transition_event(
@@ -3037,7 +3690,10 @@ pub async fn detect_and_store_geofence_transitions_from_previous_position(
 pub async fn list_recent_geofence_transition_events(
     pool: &PgPool,
     device_id: Option<uuid::Uuid>,
+    orbi_user: &OrbiUser,
 ) -> Result<Vec<GeofenceTransitionEventResponse>, sqlx::Error> {
+    let is_super_admin = orbi_user.platform_role.as_deref() == Some("SUPER_ADMIN");
+
     let events = sqlx::query_as!(
         GeofenceTransitionEventResponse,
         r#"
@@ -3060,16 +3716,43 @@ pub async fn list_recent_geofence_transition_events(
             gte.created_at
 
         FROM geofence_transition_events gte
+
         INNER JOIN geofences g
             ON g.id = gte.geofence_id
 
+        INNER JOIN devices
+            ON devices.id = gte.device_id
+
+        INNER JOIN assets
+            ON assets.id = devices.asset_id
+            AND assets.organization_id = gte.organization_id
+
+        INNER JOIN organizations
+            ON organizations.id = assets.organization_id
+
         WHERE
             ($1::uuid IS NULL OR gte.device_id = $1)
+
+            AND (
+                $2::BOOLEAN = TRUE
+                OR (
+                    organizations.is_active = TRUE
+                    AND EXISTS (
+                        SELECT 1
+                        FROM organization_memberships AS membership
+                        WHERE membership.organization_id = organizations.id
+                          AND membership.user_id = $3
+                          AND membership.is_active = TRUE
+                    )
+                )
+            )
 
         ORDER BY gte.detected_at DESC
         LIMIT 100
         "#,
         device_id,
+        is_super_admin,
+        orbi_user.id,
     )
     .fetch_all(pool)
     .await?;
@@ -3082,7 +3765,10 @@ pub async fn get_telemetry_history(
     device_id: uuid::Uuid,
     start_time: chrono::DateTime<chrono::Utc>,
     end_time: chrono::DateTime<chrono::Utc>,
+    orbi_user: &OrbiUser,
 ) -> Result<Vec<TelemetryStreamResponse>, sqlx::Error> {
+    let is_super_admin = orbi_user.platform_role.as_deref() == Some("SUPER_ADMIN");
+
     let readings = sqlx::query_as!(
         TelemetryStreamResponse,
         r#"
@@ -3129,16 +3815,40 @@ pub async fn get_telemetry_history(
             ON vibration_reading.device_id = fuel_reading.device_id
             AND vibration_reading.recorded_at = fuel_reading.recorded_at
 
+        INNER JOIN devices
+            ON devices.id = fuel_reading.device_id
+
+        INNER JOIN assets
+            ON assets.id = devices.asset_id
+
         WHERE
             fuel_reading.device_id = $1
             AND fuel_reading.recorded_at >= $2
             AND fuel_reading.recorded_at <= $3
+
+            AND (
+                $4::BOOLEAN = TRUE
+
+                OR EXISTS (
+                    SELECT 1
+                    FROM organizations
+                    JOIN organization_memberships AS membership
+                        ON membership.organization_id = organizations.id
+
+                    WHERE organizations.id = assets.organization_id
+                      AND organizations.is_active = TRUE
+                      AND membership.user_id = $5
+                      AND membership.is_active = TRUE
+                )
+            )
 
         ORDER BY fuel_reading.recorded_at ASC
         "#,
         device_id,
         start_time,
         end_time,
+        is_super_admin,
+        orbi_user.id,
     )
     .fetch_all(pool)
     .await?;
@@ -3150,7 +3860,10 @@ pub async fn get_geofence_activity_trends(
     db_pool: &PgPool,
     device_id: Option<Uuid>,
     days: i64,
+    orbi_user: &OrbiUser,
 ) -> Result<GeofenceActivityTrendResponse, sqlx::Error> {
+    let is_super_admin = orbi_user.platform_role.as_deref() == Some("SUPER_ADMIN");
+
     let safe_days = if days < 1 {
         30
     } else if days > 90 {
@@ -3163,24 +3876,59 @@ pub async fn get_geofence_activity_trends(
         r#"
         SELECT
             gte.detected_at::date AS "day!",
+
             COUNT(*) FILTER (
                 WHERE gte.transition_type = 'ENTERED_ZONE'
             ) AS "entries!",
+
             COUNT(*) FILTER (
                 WHERE gte.transition_type = 'EXITED_ZONE'
             ) AS "exits!"
-        FROM geofence_transition_events gte
+
+        FROM geofence_transition_events AS gte
+
+        INNER JOIN devices
+            ON devices.id = gte.device_id
+
+        INNER JOIN assets
+            ON assets.id = devices.asset_id
+            AND assets.organization_id = gte.organization_id
+
+        INNER JOIN organizations
+            ON organizations.id = assets.organization_id
+
         WHERE
             gte.detected_at >= NOW() - ($2 * INTERVAL '1 day')
+
             AND (
                 $1::uuid IS NULL
                 OR gte.device_id = $1
             )
-        GROUP BY gte.detected_at::date
-        ORDER BY gte.detected_at::date ASC
+
+            AND (
+                $3::BOOLEAN = TRUE
+                OR (
+                    organizations.is_active = TRUE
+                    AND EXISTS (
+                        SELECT 1
+                        FROM organization_memberships AS membership
+                        WHERE membership.organization_id = organizations.id
+                          AND membership.user_id = $4
+                          AND membership.is_active = TRUE
+                    )
+                )
+            )
+
+        GROUP BY
+            gte.detected_at::date
+
+        ORDER BY
+            gte.detected_at::date ASC
         "#,
         device_id,
-        safe_days as f64
+        safe_days as f64,
+        is_super_admin,
+        orbi_user.id,
     )
     .fetch_all(db_pool)
     .await?;
@@ -3203,7 +3951,10 @@ pub async fn get_geofence_activity_trends(
 pub async fn get_device_health_trends(
     db_pool: &PgPool,
     days: i64,
+    orbi_user: &OrbiUser,
 ) -> Result<DeviceHealthTrendResponse, sqlx::Error> {
+    let is_super_admin = orbi_user.platform_role.as_deref() == Some("SUPER_ADMIN");
+
     let safe_days = if days < 1 {
         30
     } else if days > 90 {
@@ -3217,32 +3968,63 @@ pub async fn get_device_health_trends(
         SELECT
             d.id AS "device_id!",
             d.device_code AS "device_code!",
+
             COUNT(*) FILTER (
                 WHERE dhe.new_status = 'OFFLINE'
             ) AS "offline_events!",
+
             COUNT(*) FILTER (
                 WHERE dhe.new_status = 'STALE'
             ) AS "stale_events!",
+
             COUNT(*) FILTER (
                 WHERE dhe.new_status = 'ONLINE'
             ) AS "recovery_events!"
-        FROM device_health_events dhe
-        INNER JOIN devices d
+
+        FROM device_health_events AS dhe
+
+        INNER JOIN devices AS d
             ON d.id = dhe.device_id
+
+        INNER JOIN assets
+            ON assets.id = d.asset_id
+
+        INNER JOIN organizations
+            ON organizations.id = assets.organization_id
+
         WHERE
             dhe.created_at >= NOW() - ($1 * INTERVAL '1 day')
+
+            AND (
+                $2::BOOLEAN = TRUE
+                OR (
+                    organizations.is_active = TRUE
+                    AND EXISTS (
+                        SELECT 1
+                        FROM organization_memberships AS membership
+                        WHERE membership.organization_id = organizations.id
+                          AND membership.user_id = $3
+                          AND membership.is_active = TRUE
+                    )
+                )
+            )
+
         GROUP BY
             d.id,
             d.device_code
+
         ORDER BY
             (
                 COUNT(*) FILTER (
                     WHERE dhe.new_status IN ('OFFLINE', 'STALE')
                 )
             ) DESC
+
         LIMIT 10
         "#,
-        safe_days as f64
+        safe_days as f64,
+        is_super_admin,
+        orbi_user.id,
     )
     .fetch_all(db_pool)
     .await?;
@@ -3268,7 +4050,10 @@ pub async fn get_device_health_trends(
 pub async fn get_geofence_utilization(
     db_pool: &PgPool,
     days: i64,
+    orbi_user: &OrbiUser,
 ) -> Result<GeofenceUtilizationResponse, sqlx::Error> {
+    let is_super_admin = orbi_user.platform_role.as_deref() == Some("SUPER_ADMIN");
+
     let safe_days = if days < 1 {
         30
     } else if days > 90 {
@@ -3279,26 +4064,60 @@ pub async fn get_geofence_utilization(
 
     let rows = sqlx::query!(
         r#"
-    SELECT
-        g.name AS "geofence_name!",
-        COUNT(*) FILTER (
-            WHERE gte.transition_type = 'ENTERED_ZONE'
-        ) AS "visits!"
-    FROM geofence_transition_events gte
-    INNER JOIN geofences g
-        ON g.id = gte.geofence_id
-    WHERE
-        gte.detected_at >= NOW() - ($1 * INTERVAL '1 day')
-    GROUP BY
-        g.name
-    ORDER BY
-        COUNT(*) FILTER (
-            WHERE gte.transition_type = 'ENTERED_ZONE'
-        ) DESC,
-        g.name ASC
-    LIMIT 10
-    "#,
-        safe_days as f64
+        SELECT
+            g.name AS "geofence_name!",
+
+            COUNT(*) FILTER (
+                WHERE gte.transition_type = 'ENTERED_ZONE'
+            ) AS "visits!"
+
+        FROM geofence_transition_events AS gte
+
+        INNER JOIN geofences AS g
+            ON g.id = gte.geofence_id
+            AND g.organization_id = gte.organization_id
+
+        INNER JOIN devices
+            ON devices.id = gte.device_id
+
+        INNER JOIN assets
+            ON assets.id = devices.asset_id
+            AND assets.organization_id = gte.organization_id
+
+        INNER JOIN organizations
+            ON organizations.id = assets.organization_id
+
+        WHERE
+            gte.detected_at >= NOW() - ($1 * INTERVAL '1 day')
+
+            AND (
+                $2::BOOLEAN = TRUE
+                OR (
+                    organizations.is_active = TRUE
+                    AND EXISTS (
+                        SELECT 1
+                        FROM organization_memberships AS membership
+                        WHERE membership.organization_id = organizations.id
+                          AND membership.user_id = $3
+                          AND membership.is_active = TRUE
+                    )
+                )
+            )
+
+        GROUP BY
+            g.name
+
+        ORDER BY
+            COUNT(*) FILTER (
+                WHERE gte.transition_type = 'ENTERED_ZONE'
+            ) DESC,
+            g.name ASC
+
+        LIMIT 10
+        "#,
+        safe_days as f64,
+        is_super_admin,
+        orbi_user.id,
     )
     .fetch_all(db_pool)
     .await?;
@@ -3319,25 +4138,54 @@ pub async fn get_geofence_utilization(
 
 pub async fn list_operational_intelligence_events(
     db_pool: &PgPool,
+    orbi_user: &OrbiUser,
 ) -> Result<Vec<OperationalIntelligenceEventResponse>> {
+    let is_super_admin = orbi_user.platform_role.as_deref() == Some("SUPER_ADMIN");
+
     let events = sqlx::query_as!(
         OperationalIntelligenceEventResponse,
         r#"
         SELECT
-            id,
-            device_id,
-            operational_transition_event_id,
-            event_type,
-            previous_state,
-            current_state,
-            latitude,
-            longitude,
-            recorded_at,
-            detected_at
-        FROM operational_intelligence_events
-        ORDER BY recorded_at DESC
+            oie.id,
+            oie.device_id,
+            oie.operational_transition_event_id,
+            oie.event_type,
+            oie.previous_state,
+            oie.current_state,
+            oie.latitude,
+            oie.longitude,
+            oie.recorded_at,
+            oie.detected_at
+
+        FROM operational_intelligence_events AS oie
+
+        INNER JOIN devices
+            ON devices.id = oie.device_id
+
+        INNER JOIN assets
+            ON assets.id = devices.asset_id
+
+        INNER JOIN organizations
+            ON organizations.id = assets.organization_id
+
+        WHERE
+            $1::BOOLEAN = TRUE
+            OR (
+                organizations.is_active = TRUE
+                AND EXISTS (
+                    SELECT 1
+                    FROM organization_memberships AS membership
+                    WHERE membership.organization_id = organizations.id
+                      AND membership.user_id = $2
+                      AND membership.is_active = TRUE
+                )
+            )
+
+        ORDER BY oie.recorded_at DESC
         LIMIT 200
-        "#
+        "#,
+        is_super_admin,
+        orbi_user.id,
     )
     .fetch_all(db_pool)
     .await?;
