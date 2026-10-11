@@ -54,18 +54,27 @@ export const useOrganizationStore = create<OrganizationStore>((set) => ({
     try {
       const organizations = await fetchOrganizationOverview();
 
-      const developmentOrganization =
-        organizations.find(
-          (organization) =>
-            organization.organization_id === DEVELOPMENT_ORGANIZATION_ID,
-        ) ??
-        organizations[0] ??
-        null;
+      set((state) => {
+        const previousOrganizationId =
+          state.selectedOrganization?.organization_id;
 
-      set({
-        organizations,
-        selectedOrganization: developmentOrganization,
-        loading: false,
+        const selectedOrganization =
+          organizations.find(
+            (organization) =>
+              organization.organization_id === previousOrganizationId,
+          ) ??
+          organizations.find(
+            (organization) =>
+              organization.organization_id === DEVELOPMENT_ORGANIZATION_ID,
+          ) ??
+          organizations[0] ??
+          null;
+
+        return {
+          organizations,
+          selectedOrganization,
+          loading: false,
+        };
       });
     } catch {
       set({

@@ -518,7 +518,8 @@ pub async fn provision_inventory_device(
             device_code,
             device_model_id,
             hardware_profile_id,
-            inventory_status
+            inventory_status,
+            quality_test_status
         FROM orbi_device_inventory
         WHERE id = $1
         FOR UPDATE
@@ -557,6 +558,10 @@ pub async fn provision_inventory_device(
         anyhow::bail!("Inventory device must be READY_FOR_DEPLOYMENT before provisioning.");
     }
 
+    if inventory.quality_test_status != "PASSED" {
+        anyhow::bail!("Inventory device must pass quality testing before provisioning.");
+    }
+
     // 4. Confirm the selected asset exists and is active.
     let asset_is_active = sqlx::query_scalar!(
         r#"
@@ -587,14 +592,15 @@ pub async fn provision_inventory_device(
     // 6. Update inventory status within the same transaction.
     let updated = sqlx::query!(
         r#"
-        UPDATE orbi_device_inventory
-        SET
-            inventory_status = 'PROVISIONED',
-            updated_at = NOW()
-        WHERE id = $1
-          AND inventory_status = 'READY_FOR_DEPLOYMENT'
-        RETURNING id
-        "#,
+    UPDATE orbi_device_inventory
+    SET
+        inventory_status = 'PROVISIONED',
+        updated_at = NOW()
+    WHERE id = $1
+      AND inventory_status = 'READY_FOR_DEPLOYMENT'
+      AND quality_test_status = 'PASSED'
+    RETURNING id
+    "#,
         request.inventory_device_id,
     )
     .fetch_optional(&mut *tx)

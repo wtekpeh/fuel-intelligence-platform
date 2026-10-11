@@ -321,6 +321,7 @@ export default function PlatformManagementPage() {
             );
 
             void loadDevices();
+            void loadOrganizations();
 
             if (activatedOrganization) {
               if (

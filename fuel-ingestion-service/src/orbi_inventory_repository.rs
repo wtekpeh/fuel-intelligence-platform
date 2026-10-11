@@ -107,24 +107,33 @@ pub async fn verify_orbi_inventory_device_by_code(
 pub async fn update_orbi_inventory_status(
     db_pool: &PgPool,
     inventory_device_id: Uuid,
+    expected_current_status: &str,
     inventory_status: &str,
     quality_test_status: &str,
 ) -> Result<()> {
-    sqlx::query!(
+    let result = sqlx::query!(
         r#"
         UPDATE orbi_device_inventory
         SET
-            inventory_status = $2,
-            quality_test_status = $3,
+            inventory_status = $3,
+            quality_test_status = $4,
             updated_at = NOW()
         WHERE id = $1
+          AND inventory_status = $2
         "#,
         inventory_device_id,
+        expected_current_status,
         inventory_status,
         quality_test_status,
     )
     .execute(db_pool)
     .await?;
+
+    if result.rows_affected() != 1 {
+        return Err(anyhow::anyhow!(
+            "Inventory lifecycle changed concurrently. Please refresh and retry."
+        ));
+    }
 
     Ok(())
 }

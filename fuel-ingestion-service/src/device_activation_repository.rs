@@ -16,11 +16,11 @@ pub async fn create_device_activation_entitlement(
     // Lock the inventory device while validating assignment eligibility.
     let inventory = sqlx::query!(
         r#"
-        SELECT inventory_status
-        FROM orbi_device_inventory
-        WHERE id = $1
-        FOR UPDATE
-        "#,
+    SELECT inventory_status, quality_test_status
+    FROM orbi_device_inventory
+    WHERE id = $1
+    FOR UPDATE
+    "#,
         request.inventory_device_id,
     )
     .fetch_optional(&mut *tx)
@@ -29,6 +29,35 @@ pub async fn create_device_activation_entitlement(
 
     if inventory.inventory_status != "READY_FOR_DEPLOYMENT" {
         return Err(anyhow!("Inventory device is not ready for deployment."));
+    }
+
+    if inventory.quality_test_status != "PASSED" {
+        return Err(anyhow!(
+            "Inventory device must pass quality testing before an activation entitlement can be created."
+        ));
+    }
+
+    // Prevent activation entitlements for devices already
+    // registered in the operational device registry.
+    let already_registered = sqlx::query_scalar!(
+        r#"
+    SELECT EXISTS (
+        SELECT 1
+        FROM devices AS operational_device
+        JOIN orbi_device_inventory AS inventory
+            ON inventory.device_code = operational_device.device_code
+        WHERE inventory.id = $1
+    ) AS "already_registered!"
+    "#,
+        request.inventory_device_id,
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if already_registered {
+        return Err(anyhow!(
+            "Device is already registered in the operational device registry."
+        ));
     }
 
     // Confirm that the customer organization exists and is active.
@@ -98,7 +127,8 @@ pub async fn activate_device(
             device_code,
             device_model_id,
             hardware_profile_id,
-            inventory_status
+            inventory_status,
+            quality_test_status
         FROM orbi_device_inventory
         WHERE id = $1
         FOR UPDATE
@@ -139,6 +169,12 @@ pub async fn activate_device(
     if current_status != InventoryStatus::ReadyForDeployment {
         return Err(anyhow!(
             "Inventory device must be READY_FOR_DEPLOYMENT before activation."
+        ));
+    }
+
+    if inventory.quality_test_status != "PASSED" {
+        return Err(anyhow!(
+            "Inventory device must pass quality testing before activation."
         ));
     }
 
@@ -206,6 +242,29 @@ pub async fn activate_device(
     }
 
     // 6. Register the operational device and its sensors.
+
+    // Prevent duplicate operational registration.
+    //
+    // Inventory and entitlement eligibility alone do not guarantee
+    // that the device code is absent from the operational registry.
+    let already_registered = sqlx::query_scalar!(
+        r#"
+    SELECT EXISTS (
+        SELECT 1
+        FROM devices
+        WHERE device_code = $1
+    ) AS "already_registered!"
+    "#,
+        inventory.device_code,
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if already_registered {
+        return Err(anyhow!(
+            "Device is already registered in the operational device registry."
+        ));
+    }
     //
     // The device and all hardware-profile sensors are created
     // inside the existing activation transaction.
@@ -219,7 +278,22 @@ pub async fn activate_device(
         inventory.device_code,
         inventory.hardware_profile_id,
     )
-    .await?;
+    .await
+    .map_err(|error| {
+        let is_duplicate_device_code = error
+            .downcast_ref::<sqlx::Error>()
+            .and_then(|sqlx_error| sqlx_error.as_database_error())
+            .is_some_and(|database_error| {
+                database_error.code().as_deref() == Some("23505")
+                    && database_error.constraint() == Some("devices_device_code_key")
+            });
+
+        if is_duplicate_device_code {
+            anyhow!("Device is already registered in the operational device registry.")
+        } else {
+            error
+        }
+    })?;
 
     // 7. Mark the inventory device as PROVISIONED.
     //
@@ -229,14 +303,15 @@ pub async fn activate_device(
     // We deliberately preserve the existing quality_test_status.
     let updated_inventory = sqlx::query!(
         r#"
-    UPDATE orbi_device_inventory
-    SET
-        inventory_status = 'PROVISIONED',
-        updated_at = NOW()
-    WHERE id = $1
-      AND inventory_status = 'READY_FOR_DEPLOYMENT'
-    RETURNING id
-    "#,
+        UPDATE orbi_device_inventory
+        SET
+            inventory_status = 'PROVISIONED',
+            updated_at = NOW()
+        WHERE id = $1
+        AND inventory_status = 'READY_FOR_DEPLOYMENT'
+        AND quality_test_status = 'PASSED'
+        RETURNING id
+        "#,
         request.inventory_device_id,
     )
     .fetch_optional(&mut *tx)
@@ -317,7 +392,13 @@ pub async fn list_activation_eligible_devices(
           AND organizations.is_active = TRUE
           AND orbi_users.is_active = TRUE
           AND entitlement.status = 'PENDING'
-          AND inventory.inventory_status = 'READY_FOR_DEPLOYMENT'
+        AND inventory.inventory_status = 'READY_FOR_DEPLOYMENT'
+        AND inventory.quality_test_status = 'PASSED'
+        AND NOT EXISTS (
+            SELECT 1
+            FROM devices AS operational_device
+            WHERE operational_device.device_code = inventory.device_code
+        )
         ORDER BY organizations.name, inventory.device_code
         "#,
         user_id,

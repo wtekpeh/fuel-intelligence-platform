@@ -698,6 +698,16 @@ pub async fn update_orbi_inventory_status_handler(
         Err(error) => {
             let message = error.to_string();
 
+            if message.contains("cannot become READY_FOR_DEPLOYMENT")
+                || message.contains("Inventory lifecycle changed concurrently")
+            {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(crate::models::ApiErrorResponse { message }),
+                )
+                    .into_response();
+            }
+
             if message.contains("Invalid inventory lifecycle transition")
                 || message.contains("Unknown current inventory status")
                 || message.contains("Unknown requested inventory status")
@@ -787,6 +797,8 @@ pub async fn provision_inventory_device_handler(
                 || message.contains("Device code already exists")
                 || message.contains("has an activation entitlement")
                 || message.contains("must be READY_FOR_DEPLOYMENT")
+                || message.contains("must pass quality testing")
+                || message.contains("Inventory status changed during provisioning")
                 || message.contains("inactive asset")
             {
                 return (
@@ -836,6 +848,8 @@ pub async fn create_device_activation_entitlement_handler(
 
             if message.contains("Inventory device is not ready for deployment")
                 || message.contains("Organization is inactive")
+                || message.contains("must pass quality testing")
+                || message.contains("already registered in the operational device registry")
             {
                 return (
                     StatusCode::CONFLICT,
@@ -908,9 +922,11 @@ pub async fn activate_device_handler(
 
             if message.contains("not pending")
                 || message.contains("READY_FOR_DEPLOYMENT")
+                || message.contains("must pass quality testing")
                 || message.contains("no longer eligible for activation")
                 || message.contains("Unknown inventory status")
                 || message.contains("Asset does not belong")
+                || message.contains("already registered in the operational device registry")
             {
                 return (
                     StatusCode::CONFLICT,

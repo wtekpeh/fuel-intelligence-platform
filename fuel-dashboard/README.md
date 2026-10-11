@@ -782,38 +782,64 @@ every analytics surface is selected-device-specific.
 
 Platform Administration is conceptually separate from Operational Intelligence.
 
-Its responsibilities include:
+Within the customer-facing `fuel-dashboard`, platform management covers
+customer organizations, assets, assigned-device discovery, device activation,
+and access to registered operational devices.
 
-```text
-Organizations
-Assets
-ORBI Product Catalogue
-Hardware Profiles
-Device Inventory
-Device Verification
-Provisioning
-Device Lifecycle
-Provisioned Devices
-```
+Manufacturing inventory, hardware catalogue administration, quality testing,
+and factory provisioning are internal ORBI management responsibilities.
 
-The existing `orbi-provision` application contains provisioning and
-device-management capabilities.
 
-A future integration phase will establish a coherent ORBI Administration
-experience so administrators can move between platform administration and
-operational intelligence without treating them as unrelated products.
+The existing `fuel-dashboard` is the ORBI customer-facing platform.
 
-This integration must preserve the architectural separation between:
+Its platform-management responsibilities include:
 
-```text
-Administration
-→ manages platform and deployment relationships
+- Customer organization and asset management
+- Discovery of devices assigned to the customer organization
+- Customer device activation through the Register Device wizard
+- Viewing activated operational devices and their sensors
+- Access to telemetry, device health, investigation, alerts, and analytics
 
-Operational Intelligence
-→ monitors and investigates deployed physical devices
-```
+Manufacturing inventory, factory programming, quality testing, device
+allocation, internal provisioning administration, and staff workflows
+belong to the planned separate **ORBI Management Platform**.
+
+The internal management application will be a dedicated React/TypeScript
+frontend. Initially, it will use the existing Rust/Axum
+`fuel-ingestion-service` backend and PostgreSQL database through
+appropriately authorized management APIs.
+
+The longer-term architecture allows the management domain to be
+extracted into its own Rust backend service and PostgreSQL database
+when operational requirements justify that separation.
+
+The existing `orbi-provision` application remains part of the
+provisioning tooling and will be assessed for integration into
+the internal management workflow.
+
+The customer dashboard must not expose internal manufacturing
+inventory or factory administration capabilities.
+
+The architectural separation is:
+
+
+ORBI Management Platform (Internal)
+    Inventory / Manufacturing / Quality Control
+    Factory Provisioning / Device Allocation
+                    |
+                    | Authorized device assignment
+                    v
+ORBI Customer Platform (fuel-dashboard)
+    Organizations / Assets / Device Activation
+    Telemetry / Investigation / Alerts / Analytics
+
+Customer device activation and physical hardware provisioning are distinct
+operations. Activation associates eligible hardware with an authorized
+customer organization and asset; it does not establish physical installation,
+calibration readiness, or live telemetry health.
 
 ---
+
 
 # ORBI Product Catalogue
 
@@ -879,6 +905,53 @@ Operational Intelligence
 ```
 
 ---
+
+## Customer Device Activation V1
+
+**Status: Implemented and manually verified (October 2026).**
+
+Customer device activation is integrated into the existing Register Device
+wizard in `fuel-dashboard`.
+
+The activation workflow is:
+
+1. Authorized ORBI staff assign an eligible physical device to a
+   customer organization through an activation entitlement.
+2. The authenticated customer selects their organization and asset.
+3. The dashboard retrieves activation-eligible devices using
+   `GET /api/devices/activation-eligible`.
+4. The customer selects the assigned device and completes activation
+   using `POST /api/devices/activate`.
+5. The backend transaction creates the operational device and expected
+   sensor instances, transitions inventory to `PROVISIONED`, and marks
+   the entitlement `ACTIVATED`.
+6. The dashboard refreshes operational device and organization data
+   after successful activation.
+
+The backend enforces organization membership, asset ownership,
+inventory eligibility, quality approval, entitlement validity, and
+duplicate-registration protection.
+
+Activation does not guarantee that a device is physically installed,
+calibrated, online, or transmitting telemetry.
+
+### Verification
+
+- `ORBI-TEST-003` was activated successfully through the customer workflow.
+- PostgreSQL verification confirmed the operational device, four sensor
+  instances, inventory state, and entitlement state.
+- Existing operational device registrations are protected against
+  duplicate activation without deleting historical telemetry.
+- The frontend build completed successfully using `npm run build`.
+- The backend test suite passed: **267 tests, 0 failures**, including
+  four inventory lifecycle validation tests.
+
+Additional database-backed activation integration tests, security
+reviews, and production deployment validation remain outstanding.
+
+Manufacturing inventory, factory provisioning, quality control, and
+device allocation belong to the planned separate internal ORBI
+Management Platform, not the customer dashboard.
 
 # Fuel Calibration
 
@@ -1177,16 +1250,28 @@ Completed:
 - continuous vibration persistence integration
 - historical pre-vibration compatibility
 
-Current validation checkpoint:
+
+Replace that checkpoint with:
+
+
+Current validation checkpoint (October 2026):
 
 ```text
 Backend cargo test
-→ 245 passed
+→ 267 passed
+→ 0 failed
+
+Inventory lifecycle unit tests
+→ 4 passed
 → 0 failed
 
 Frontend npm run build
 → successful
 ```
+
+The four inventory lifecycle tests are included in the 267 backend tests.
+Customer Device Activation V1 has been manually verified end-to-end.
+Database-backed activation integration tests remain outstanding.
 
 The telemetry composition has also been runtime-validated using physical ORBI
 hardware and persisted PostgreSQL telemetry.
@@ -1194,10 +1279,10 @@ hardware and persisted PostgreSQL telemetry.
 The backend contract that the upcoming calibration UI will consume has also
 completed its dedicated guided-calibration regression checkpoint:
 
-```text
+
 65 calibration tests passed
 0 failed
-```
+
 
 This includes the server-authoritative physical-observation capture path and
 freshness protection required by the redesigned wizard.
@@ -1206,21 +1291,27 @@ freshness protection required by the redesigned wizard.
 
 # Pending Platform Work
 
-The fuel-calibration workflow has completed its automated stability-aware capture
-and physical production-validation phase. Authentication and authorization are
-now the immediate platform priority.
+The operational frontend, physical fuel-calibration workflow,
+authentication and authorization foundation (Keycloak/RBAC), and
+customer Device Activation V1 have been implemented.
+
+The next priority is the separate internal ORBI Management Platform.
 
 Major remaining product work includes:
 
-- Authentication and authorization using Keycloak and RBAC
-- WhatsApp live event notifications
+- Internal ORBI Management Platform for inventory, factory programming,
+  quality testing, device allocation, and provisioning administration
+- Real hardware provisioning integration and reconciliation of existing
+  physical devices with inventory, activation, and historical telemetry
+- Customer operational readiness, including device-health validation,
+  installation, calibration, and operational alert verification
+- WhatsApp Business notifications for fuel theft, geofence transitions,
+  and device-health events, with customer opt-in and delivery handling
 - ORBI staff management
 - Installer management and commission workflows
 - Analytics intelligence improvements
 - Vibration Intelligence/UI refinement
-- ORBI Administration integration with `orbi-provision`
-- Firmware Management
-- OTA Firmware Updates
+- Firmware Management and OTA Firmware Updates
 - Remote Kill Switch operational integration
 - Reporting / export
 - Capacitor Android/iOS packaging
@@ -1280,16 +1371,30 @@ Unseen-Point Runtime Interpolation Validation
                 ✅
                 ↓
 Authentication + Authorization
-(Keycloak / RBAC)
-             ← CURRENT
+(Keycloak / RBAC) ✅
                 ↓
-WhatsApp Live Event Notifications
+Customer Device Activation V1
+(Entitlements / Inventory Safeguards / Customer Dashboard) ✅
+                ↓
+Internal ORBI Management Platform
+(Inventory / Factory Programming / QC / Device Allocation) ← NEXT
+                ↓
+Real Hardware Provisioning Integration
+(Existing Device Reconciliation / Firmware / Identity)
+                ↓
+Customer Operational Readiness
+(Device Health / Installation / Calibration / Alert Validation)
+                ↓
+WhatsApp Business Event Notifications
+(Fuel Theft / Geofence / Device Health)
                 ↓
 ORBI Staff Management
                 ↓
 Installer Management + Commissions
                 ↓
 Analytics Intelligence Improvements
+                ↓
+Production Hardening / Observability
                 ↓
 Message Broker / Distributed Services
 (where operationally justified)
@@ -1300,14 +1405,25 @@ Message Broker / Distributed Services
 The near-term objective is to produce a deployable ORBI system suitable for
 demonstration and early customer operation in Ghana.
 
-The immediate feature priority is:
+The authentication and authorization foundation and customer Device
+Activation V1 are implemented.
 
-1. Authentication and authorization using Keycloak and RBAC
-2. WhatsApp live event notifications
-3. ORBI staff management
-4. Installer management and commission workflows
-5. Analytics intelligence improvements
-6. Message-broker and distributed-service integration where operationally justified
+The remaining feature priorities are:
+
+1. Internal ORBI Management Platform for inventory, factory programming,
+   quality testing, device allocation, and provisioning administration.
+2. Real hardware provisioning integration and reconciliation of existing
+   physical ORBI devices with inventory and operational registrations.
+3. Customer operational readiness, including device health, installation,
+   calibration, and alert validation using real hardware.
+4. WhatsApp Business notifications for fuel theft, geofence transitions,
+   and device-health events, with customer opt-in and delivery handling.
+5. ORBI staff management and installer management workflows.
+6. Analytics intelligence improvements.
+7. Production hardening, observability, security reviews, and automated
+   database-backed integration testing.
+8. Message-broker and distributed-service integration where operationally
+   justified.
 
 The first commercial deployment does not depend on completing every remaining
 platform feature.
