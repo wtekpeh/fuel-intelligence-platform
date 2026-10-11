@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { useDeviceOnboardingStore } from "../store/deviceOnboardingStore";
 import { useAssetStore } from "../store/assetStore";
-import { useDeviceCatalogueStore } from "../store/deviceCatalogueStore";
 
 interface WizardOrganization {
   organization_id: string;
@@ -38,8 +37,6 @@ export default function DeviceOnboardingWizard({
     createAsset,
   } = useAssetStore();
 
-  const { models, loadCatalogue } = useDeviceCatalogueStore();
-
   const {
     step,
     selectedOrganizationId,
@@ -50,6 +47,7 @@ export default function DeviceOnboardingWizard({
     verificationError,
     isProvisioningDevice,
     provisioningError,
+    provisionedDeviceId,
     setDeviceCode,
     verifyDeviceCode,
     provisionVerifiedDevice,
@@ -64,29 +62,6 @@ export default function DeviceOnboardingWizard({
       loadAssets(selectedOrganizationId);
     }
   }, [step, selectedOrganizationId, loadAssets]);
-
-  useEffect(() => {
-    loadCatalogue();
-  }, [loadCatalogue]);
-
-  const verifiedModel = verifiedInventoryDevice
-    ? models.find(
-        (model) => model.id === verifiedInventoryDevice.device_model_id,
-      )
-    : null;
-
-  const verifiedProfile =
-    verifiedModel?.profiles.find(
-      (profile) => profile.id === verifiedInventoryDevice?.hardware_profile_id,
-    ) ?? null;
-
-  const lifecycle = [
-    "ASSEMBLED",
-    "PROGRAMMED",
-    "TESTED",
-    "READY_FOR_DEPLOYMENT",
-    "PROVISIONED",
-  ];
 
   const canProceed =
     (step === "organization" && selectedOrganizationId !== null) ||
@@ -105,7 +80,7 @@ export default function DeviceOnboardingWizard({
         <header className="platform-wizard__header">
           <div>
             <p className="platform-eyebrow">Device Onboarding</p>
-            <h2>Provision a New Device</h2>
+            <h2>Register Your ORBI Device</h2>
           </div>
 
           <button type="button" onClick={onClose}>
@@ -432,135 +407,38 @@ export default function DeviceOnboardingWizard({
 
                   {verifiedInventoryDevice && (
                     <div
+                      className="platform-panel"
                       style={{
                         marginTop: "24px",
                         display: "grid",
-                        gap: "14px",
+                        gap: "12px",
                       }}
                     >
-                      <span>
-                        ✅ Device Code: {verifiedInventoryDevice.device_code}
-                      </span>
-
-                      <span>
-                        ✅ Serial: {verifiedInventoryDevice.serial_number}
-                      </span>
-
-                      <span>✅ IMEI: {verifiedInventoryDevice.imei}</span>
-
-                      <span>
-                        ✅ Firmware: {verifiedInventoryDevice.firmware_version}
-                      </span>
-
-                      <span>
-                        ✅ Production Batch:{" "}
-                        {verifiedInventoryDevice.production_batch}
-                      </span>
-
-                      <div
+                      <p
                         style={{
-                          marginTop: "10px",
-                          display: "grid",
-                          gap: "12px",
+                          margin: 0,
+                          color: "#166534",
+                          fontWeight: 700,
                         }}
                       >
-                        <div>
-                          <p className="platform-eyebrow">Inventory Status</p>
+                        ✓ ORBI Device Verified
+                      </p>
 
-                          <span
-                            className="platform-tag"
-                            style={{
-                              display: "inline-flex",
-                              marginTop: "8px",
-                              background:
-                                verifiedInventoryDevice.inventory_status ===
-                                "READY_FOR_DEPLOYMENT"
-                                  ? "#dcfce7"
-                                  : "#fef3c7",
-                              color:
-                                verifiedInventoryDevice.inventory_status ===
-                                "READY_FOR_DEPLOYMENT"
-                                  ? "#166534"
-                                  : "#92400e",
-                            }}
-                          >
-                            {verifiedInventoryDevice.inventory_status.replaceAll(
-                              "_",
-                              " ",
-                            )}
-                          </span>
-                        </div>
+                      <span>
+                        <strong>Device Code:</strong>{" "}
+                        {verifiedInventoryDevice.device_code}
+                      </span>
 
-                        {verifiedInventoryDevice.inventory_status !==
-                          "READY_FOR_DEPLOYMENT" && (
-                          <p
-                            style={{
-                              margin: 0,
-                              color: "#b45309",
-                              fontWeight: 600,
-                              lineHeight: 1.5,
-                            }}
-                          >
-                            This device cannot be provisioned until it reaches
-                            READY FOR DEPLOYMENT.
-                          </p>
-                        )}
-                      </div>
+                      <span>
+                        <strong>Assignment:</strong> Confirmed for the selected
+                        organization
+                      </span>
 
-                      <div
-                        style={{
-                          marginTop: "24px",
-                        }}
-                      >
-                        <p className="platform-eyebrow">
-                          Manufacturing Progress
-                        </p>
-
-                        <div
-                          style={{
-                            display: "grid",
-                            gap: "7px",
-                            marginTop: "10px",
-                          }}
-                        >
-                          {lifecycle.map((status) => {
-                            const currentIndex = lifecycle.indexOf(
-                              verifiedInventoryDevice.inventory_status,
-                            );
-
-                            const statusIndex = lifecycle.indexOf(status);
-
-                            const completed = statusIndex < currentIndex;
-
-                            const current = statusIndex === currentIndex;
-
-                            return (
-                              <div
-                                key={status}
-                                style={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: "9px",
-                                  minHeight: "22px",
-                                }}
-                              >
-                                <span style={{ width: "20px" }}>
-                                  {completed ? "🟢" : current ? "🟡" : "⚪"}
-                                </span>
-
-                                <span
-                                  style={{
-                                    fontWeight: current ? 700 : 500,
-                                    opacity: completed || current ? 1 : 0.6,
-                                  }}
-                                >
-                                  {status.replaceAll("_", " ")}
-                                </span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
+                      <p style={{ margin: 0, lineHeight: 1.5 }}>
+                        This device is assigned to your organization and is
+                        eligible for activation. Continue to link it to your
+                        selected asset.
+                      </p>
                     </div>
                   )}
 
@@ -578,64 +456,46 @@ export default function DeviceOnboardingWizard({
                 </div>
 
                 <div className="platform-panel">
-                  <p className="platform-eyebrow">Installed Capabilities</p>
+                  <p className="platform-eyebrow">Device Assignment</p>
 
                   <h3 style={{ marginTop: "8px" }}>
-                    {verifiedModel?.modelName ?? "Verify device first"}
+                    {verifiedInventoryDevice
+                      ? "Ready for Activation"
+                      : "Awaiting Device Verification"}
                   </h3>
 
                   <div
                     style={{
                       display: "grid",
-                      gap: "8px",
+                      gap: "12px",
                       marginTop: "18px",
                     }}
                   >
                     <span>
-                      <strong>Product Code:</strong>{" "}
-                      {verifiedModel?.modelCode ?? "Pending"}
+                      <strong>Device Code:</strong>{" "}
+                      {verifiedInventoryDevice?.device_code ?? "Not verified"}
                     </span>
 
                     <span>
-                      <strong>Profile:</strong>{" "}
-                      {verifiedProfile?.name ?? "Pending"}
+                      <strong>Organization:</strong>{" "}
+                      {organizations.find(
+                        (organization) =>
+                          organization.organization_id ===
+                          selectedOrganizationId,
+                      )?.organization_name ?? "Not selected"}
                     </span>
 
                     <span>
-                      <strong>Firmware:</strong>{" "}
-                      {verifiedInventoryDevice?.firmware_version ?? "Pending"}
+                      <strong>Activation Status:</strong>{" "}
+                      {verifiedInventoryDevice
+                        ? "Eligible for activation"
+                        : "Verification required"}
                     </span>
-                  </div>
-
-                  <div
-                    style={{
-                      marginTop: "20px",
-                    }}
-                  >
-                    <p className="platform-eyebrow">Installed Capabilities</p>
-
-                    <div
-                      className="platform-chip-row"
-                      style={{ marginTop: "12px" }}
-                    >
-                      {(verifiedProfile?.sensors ?? []).map((sensor) => (
-                        <span key={sensor.id} className="platform-tag">
-                          {sensor.sensorType === "GPS" && "GPS Tracking"}
-                          {sensor.sensorType === "FUEL" && "Fuel Monitoring"}
-                          {sensor.sensorType === "VIBRATION" &&
-                            "Vibration Detection"}
-                        </span>
-                      ))}
-
-                      {verifiedModel?.modelCode === "ORBI-FULL-KIT" && (
-                        <span className="platform-tag">Remote Kill Switch</span>
-                      )}
-                    </div>
                   </div>
                 </div>
 
                 <div className="platform-panel">
-                  <p className="platform-eyebrow">Provisioning Summary</p>
+                  <p className="platform-eyebrow">Activation Summary</p>
 
                   <div
                     style={{
@@ -658,50 +518,92 @@ export default function DeviceOnboardingWizard({
               </div>
             </>
           )}
+
+          {step === "complete" && (
+            <div
+              className="platform-panel"
+              style={{
+                padding: "28px",
+                display: "grid",
+                gap: "16px",
+                textAlign: "center",
+              }}
+            >
+              <h3 style={{ color: "#166534", margin: 0 }}>
+                ✓ ORBI Device Activated Successfully
+              </h3>
+
+              <p style={{ margin: 0 }}>
+                Your ORBI device has been registered and linked to your selected
+                asset.
+              </p>
+
+              <p style={{ margin: 0 }}>
+                <strong>Device Code:</strong> {deviceCode}
+              </p>
+
+              {provisionedDeviceId && (
+                <p style={{ margin: 0, overflowWrap: "anywhere" }}>
+                  <strong>Operational Device ID:</strong> {provisionedDeviceId}
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         <footer className="platform-wizard__footer">
-          <button type="button" onClick={onClose}>
-            Cancel
-          </button>
-
-          <div>
-            <button
-              type="button"
-              className="platform-secondary-button"
-              disabled={step === "organization"}
-              onClick={previousStep}
-            >
-              Back
-            </button>
-
+          {step === "complete" ? (
             <button
               type="button"
               className="platform-primary-button"
-              disabled={
-                step === "review"
-                  ? !verifiedInventoryDevice ||
-                    verifiedInventoryDevice.inventory_status !==
-                      "READY_FOR_DEPLOYMENT" ||
-                    isProvisioningDevice
-                  : !canProceed
-              }
-              onClick={async () => {
-                if (step === "organization" || step === "asset") {
-                  nextStep();
-                  return;
-                }
-
-                const success = await provisionVerifiedDevice();
-
-                if (success) {
-                  nextStep();
-                }
-              }}
+              onClick={onClose}
             >
-              {step == "review" ? "Provision Device" : "Next"}
+              Close
             </button>
-          </div>
+          ) : (
+            <>
+              <button type="button" onClick={onClose}>
+                Cancel
+              </button>
+
+              <div>
+                <button
+                  type="button"
+                  className="platform-secondary-button"
+                  disabled={step === "organization" || isProvisioningDevice}
+                  onClick={previousStep}
+                >
+                  Back
+                </button>
+
+                <button
+                  type="button"
+                  className="platform-primary-button"
+                  disabled={
+                    step === "review"
+                      ? !verifiedInventoryDevice || isProvisioningDevice
+                      : !canProceed
+                  }
+                  onClick={async () => {
+                    if (step === "organization" || step === "asset") {
+                      nextStep();
+                      return;
+                    }
+
+                    if (step === "review") {
+                      await provisionVerifiedDevice();
+                    }
+                  }}
+                >
+                  {step === "review"
+                    ? isProvisioningDevice
+                      ? "Activating..."
+                      : "Activate Device"
+                    : "Next"}
+                </button>
+              </div>
+            </>
+          )}
         </footer>
       </section>
     </div>

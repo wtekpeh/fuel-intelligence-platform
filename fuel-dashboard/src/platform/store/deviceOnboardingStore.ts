@@ -1,25 +1,14 @@
 import { create } from "zustand";
 import {
-  provisionInventoryDevice,
-  verifyInventoryDevice,
-} from "../../api/platformApi";
+  activateCustomerDevice,
+  listActivationEligibleDevices,
+} from "../../api/deviceActivationApi";
 
 type OnboardingStep = "organization" | "asset" | "review" | "complete";
 
 interface VerifiedInventoryDevice {
   id: string;
   device_code: string;
-  serial_number: string;
-  imei: string | null;
-  device_model_id: string;
-  hardware_profile_id: string;
-  firmware_version: string | null;
-  production_batch: string | null;
-  inventory_status: string;
-  quality_test_status: string;
-  notes: string | null;
-  created_at: string;
-  updated_at: string;
 }
 
 interface DeviceOnboardingStore {
@@ -155,14 +144,24 @@ export const useDeviceOnboardingStore = create<DeviceOnboardingStore>(
       }),
 
     verifyDeviceCode: async () => {
-      const deviceCode = get().deviceCode.trim();
+      const { deviceCode, selectedOrganizationId } = get();
 
-      if (!deviceCode) {
+      const normalizedCode = deviceCode.trim();
+
+      if (!selectedOrganizationId) {
+        set({
+          verificationError:
+            "Select an organization before verifying a device.",
+          verifiedInventoryDevice: null,
+        });
+        return;
+      }
+
+      if (!normalizedCode) {
         set({
           verificationError: "Enter a device code before verification.",
           verifiedInventoryDevice: null,
         });
-
         return;
       }
 
@@ -173,24 +172,33 @@ export const useDeviceOnboardingStore = create<DeviceOnboardingStore>(
       });
 
       try {
-        const response = await verifyInventoryDevice(deviceCode);
+        const eligibleDevices = await listActivationEligibleDevices();
 
-        if (!response.found || !response.device) {
+        const matchedDevice = eligibleDevices.find(
+          (device) =>
+            device.organization_id === selectedOrganizationId &&
+            device.device_code.toLowerCase() === normalizedCode.toLowerCase(),
+        );
+
+        if (!matchedDevice) {
           set({
-            verificationError: "No ORBI inventory device found for this code.",
+            verificationError:
+              "This device is not assigned to your organization or is not eligible for activation.",
             verifiedInventoryDevice: null,
           });
-
           return;
         }
 
         set({
-          verifiedInventoryDevice: response.device,
+          verifiedInventoryDevice: {
+            id: matchedDevice.inventory_device_id,
+            device_code: matchedDevice.device_code,
+          },
           verificationError: null,
         });
       } catch {
         set({
-          verificationError: "Failed to verify ORBI inventory device.",
+          verificationError: "Unable to verify the assigned ORBI device.",
           verifiedInventoryDevice: null,
         });
       } finally {
@@ -199,22 +207,25 @@ export const useDeviceOnboardingStore = create<DeviceOnboardingStore>(
     },
 
     provisionVerifiedDevice: async () => {
-      const selectedAssetId = get().selectedAssetId;
-      const verifiedInventoryDevice = get().verifiedInventoryDevice;
+      const {
+        selectedAssetId,
+        selectedOrganizationId,
+        verifiedInventoryDevice,
+      } = get();
 
-      if (!selectedAssetId) {
+      if (!selectedOrganizationId || !selectedAssetId) {
         set({
-          provisioningError: "Select an asset before provisioning.",
+          provisioningError:
+            "Select an organization and asset before activation.",
         });
-
         return false;
       }
 
       if (!verifiedInventoryDevice) {
         set({
-          provisioningError: "Verify an inventory device before provisioning.",
+          provisioningError:
+            "Verify your assigned ORBI device before activation.",
         });
-
         return false;
       }
 
@@ -225,13 +236,13 @@ export const useDeviceOnboardingStore = create<DeviceOnboardingStore>(
       });
 
       try {
-        const response = await provisionInventoryDevice({
-          inventoryDeviceId: verifiedInventoryDevice.id,
-          assetId: selectedAssetId,
+        const operationalDeviceId = await activateCustomerDevice({
+          inventory_device_id: verifiedInventoryDevice.id,
+          asset_id: selectedAssetId,
         });
 
         set({
-          provisionedDeviceId: response.deviceId,
+          provisionedDeviceId: operationalDeviceId,
           provisioningError: null,
           step: "complete",
         });
@@ -239,7 +250,8 @@ export const useDeviceOnboardingStore = create<DeviceOnboardingStore>(
         return true;
       } catch {
         set({
-          provisioningError: "Failed to provision inventory device.",
+          provisioningError:
+            "Device activation failed. Check your organization assignment and try again.",
         });
 
         return false;

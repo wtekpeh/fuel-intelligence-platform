@@ -3,7 +3,8 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::models::{
-    ActivateDeviceRequest, CreateDeviceActivationEntitlementRequest, DeviceActivationEntitlement,
+    ActivateDeviceRequest, ActivationEligibleDevice, CreateDeviceActivationEntitlementRequest,
+    DeviceActivationEntitlement,
 };
 
 pub async fn create_device_activation_entitlement(
@@ -283,4 +284,46 @@ pub async fn activate_device(
     tx.commit().await?;
 
     Ok(device_id)
+}
+
+/// Return devices eligible for activation by the authenticated customer.
+///
+/// Only active ADMIN or FLEET_MANAGER memberships are permitted.
+/// No internal manufacturing details are returned.
+pub async fn list_activation_eligible_devices(
+    db_pool: &PgPool,
+    user_id: Uuid,
+) -> Result<Vec<ActivationEligibleDevice>> {
+    let devices = sqlx::query_as!(
+        ActivationEligibleDevice,
+        r#"
+        SELECT
+            inventory.id AS inventory_device_id,
+            inventory.device_code,
+            organizations.id AS organization_id,
+            organizations.name AS organization_name
+        FROM device_activation_entitlements AS entitlement
+        JOIN orbi_device_inventory AS inventory
+            ON inventory.id = entitlement.inventory_device_id
+        JOIN organizations
+            ON organizations.id = entitlement.organization_id
+        JOIN organization_memberships AS membership
+            ON membership.organization_id = organizations.id
+        JOIN orbi_users
+            ON orbi_users.id = membership.user_id
+        WHERE membership.user_id = $1
+          AND membership.is_active = TRUE
+          AND membership.role IN ('ADMIN', 'FLEET_MANAGER')
+          AND organizations.is_active = TRUE
+          AND orbi_users.is_active = TRUE
+          AND entitlement.status = 'PENDING'
+          AND inventory.inventory_status = 'READY_FOR_DEPLOYMENT'
+        ORDER BY organizations.name, inventory.device_code
+        "#,
+        user_id,
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    Ok(devices)
 }

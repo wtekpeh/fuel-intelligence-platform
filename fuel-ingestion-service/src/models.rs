@@ -570,6 +570,19 @@ pub struct DeviceActivationEntitlement {
     pub activated_at: Option<DateTime<Utc>>,
 }
 
+/// Customer-safe representation of an inventory device
+/// assigned to an organization for activation.
+///
+/// Manufacturing identifiers and internal inventory details
+/// must not be exposed through this response.
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct ActivationEligibleDevice {
+    pub inventory_device_id: Uuid,
+    pub device_code: String,
+    pub organization_id: Uuid,
+    pub organization_name: String,
+}
+
 // -----------------------------------------------------------------------------
 // Device Management
 // -----------------------------------------------------------------------------

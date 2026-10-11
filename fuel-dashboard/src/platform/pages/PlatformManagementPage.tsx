@@ -7,14 +7,19 @@ import { useDeviceStore } from "../store/deviceStore";
 import { useDeviceModelStore } from "../store/deviceModelStore";
 import { useHardwareStore } from "../store/hardwareStore";
 import { useOrganizationStore } from "../store/organizationStore";
+import { useDeviceOnboardingStore } from "../store/deviceOnboardingStore";
 import "../styles/platform.css";
 
 export default function PlatformManagementPage() {
   const [registerDeviceOpen, setRegisterDeviceOpen] = useState(false);
   const [deviceOnboardingOpen, setDeviceOnboardingOpen] = useState(false);
 
-  const { organizations, selectedOrganization, loadOrganizations } =
-    useOrganizationStore();
+  const {
+    organizations,
+    selectedOrganization,
+    loadOrganizations,
+    selectOrganization,
+  } = useOrganizationStore();
 
   const { assets, selectedAsset, selectedAssetRows, loadAssets, selectAsset } =
     useAssetStore();
@@ -22,9 +27,19 @@ export default function PlatformManagementPage() {
   const { devices, selectedDevice, deviceSensors, loadDevices, selectDevice } =
     useDeviceStore();
 
+  const resetDeviceOnboarding = useDeviceOnboardingStore(
+    (state) => state.reset,
+  );
+
+  const onboardingStep = useDeviceOnboardingStore((state) => state.step);
+
   const { loadHardwareProfiles } = useHardwareStore();
 
   const { deviceModels, loadDeviceModels } = useDeviceModelStore();
+
+  const onboardingOrganizationId = useDeviceOnboardingStore(
+    (state) => state.selectedOrganizationId,
+  );
 
   useEffect(() => {
     loadOrganizations();
@@ -298,7 +313,30 @@ export default function PlatformManagementPage() {
 
       <DeviceOnboardingWizard
         open={deviceOnboardingOpen}
-        onClose={() => setDeviceOnboardingOpen(false)}
+        onClose={() => {
+          if (onboardingStep === "complete") {
+            const activatedOrganization = organizations.find(
+              (organization) =>
+                organization.organization_id === onboardingOrganizationId,
+            );
+
+            void loadDevices();
+
+            if (activatedOrganization) {
+              if (
+                selectedOrganization?.organization_id !==
+                activatedOrganization.organization_id
+              ) {
+                selectOrganization(activatedOrganization);
+              } else {
+                void loadAssets(activatedOrganization.organization_id);
+              }
+            }
+          }
+
+          setDeviceOnboardingOpen(false);
+          resetDeviceOnboarding();
+        }}
         organizations={organizations}
       />
 

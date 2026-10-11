@@ -934,6 +934,34 @@ pub async fn activate_device_handler(
     }
 }
 
+/// Return devices assigned to organizations where the authenticated
+/// customer has permission to activate devices.
+pub async fn list_activation_eligible_devices_handler(
+    State(app_state): State<AppState>,
+    Extension(orbi_user): Extension<OrbiUser>,
+) -> impl IntoResponse {
+    match device_activation_repository::list_activation_eligible_devices(
+        &app_state.db_pool,
+        orbi_user.id,
+    )
+    .await
+    {
+        Ok(devices) => (StatusCode::OK, Json(devices)).into_response(),
+
+        Err(error) => {
+            eprintln!("Failed to retrieve activation-eligible devices: {error}");
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(crate::models::ApiErrorResponse {
+                    message: "Unable to retrieve devices available for activation.".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
 //--------Guided Fuel Calibration Management
 
 pub async fn create_fuel_calibration_profile_handler(
