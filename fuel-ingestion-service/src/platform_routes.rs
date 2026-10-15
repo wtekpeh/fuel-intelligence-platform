@@ -9,9 +9,10 @@ use crate::platform_handlers::{
     create_sensor_calibration_handler, delete_asset_handler, delete_device_handler,
     delete_organization_handler, get_active_sensor_calibration_handler,
     get_fuel_calibration_profile_handler, get_latest_fuel_sensor_observation_handler,
-    get_orbi_inventory_device_handler, list_activation_eligible_devices_handler,
-    list_device_catalogue_handler, list_device_models_handler, list_device_sensors_handler,
-    list_devices_handler, list_hardware_profile_sensors_handler, list_hardware_profiles_handler,
+    get_orbi_inventory_device_handler, get_platform_identity_handler,
+    list_activation_eligible_devices_handler, list_device_catalogue_handler,
+    list_device_models_handler, list_device_sensors_handler, list_devices_handler,
+    list_hardware_profile_sensors_handler, list_hardware_profiles_handler,
     list_orbi_inventory_devices_handler, list_sensor_calibrations_handler,
     pause_fuel_calibration_session_handler, provision_inventory_device_handler,
     publish_fuel_calibration_profile_handler, register_device_handler,
@@ -33,6 +34,7 @@ use axum::{
 
 pub fn platform_routes() -> Router<AppState> {
     let internal_management_routes = Router::new()
+        .route("/api/platform/me", get(get_platform_identity_handler))
         .route("/api/devices", post(register_device_handler))
         .route(
             "/api/devices/:device_id",

@@ -314,6 +314,22 @@ pub async fn create_organization_handler(
     }
 }
 
+/// Return the authenticated ORBI platform administrator's identity.
+///
+/// Access is restricted by the require_platform_admin middleware.
+pub async fn get_platform_identity_handler(
+    Extension(orbi_user): Extension<OrbiUser>,
+) -> Json<crate::models::PlatformIdentityResponse> {
+    Json(crate::models::PlatformIdentityResponse {
+        user_id: orbi_user.id,
+        username: orbi_user.username,
+        email: orbi_user.email,
+        platform_role: orbi_user
+            .platform_role
+            .expect("Platform administrator role must be present"),
+    })
+}
+
 pub async fn update_organization_handler(
     State(app_state): State<AppState>,
     Extension(orbi_user): Extension<OrbiUser>,

@@ -879,6 +879,17 @@ pub struct OrbiUser {
     pub is_active: bool,
 }
 
+/// Authenticated ORBI internal management identity.
+///
+/// Returned only after platform administrator authorization.
+#[derive(Debug, Serialize)]
+pub struct PlatformIdentityResponse {
+    pub user_id: Uuid,
+    pub username: Option<String>,
+    pub email: Option<String>,
+    pub platform_role: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CreateOrganizationRequest {
     pub organization_name: String,
