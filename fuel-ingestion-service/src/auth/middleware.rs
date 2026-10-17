@@ -145,3 +145,68 @@ pub async fn require_platform_admin(
 
     Ok(next.run(request).await)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{
+        Router,
+        body::Body,
+        http::{Request, StatusCode},
+        middleware,
+        routing::get,
+    };
+    use tower::ServiceExt;
+    use uuid::Uuid;
+
+    fn test_user(platform_role: Option<&str>) -> OrbiUser {
+        OrbiUser {
+            id: Uuid::new_v4(),
+            keycloak_subject: "test-keycloak-subject".to_string(),
+            username: Some("test-user".to_string()),
+            email: Some("test@example.com".to_string()),
+            platform_role: platform_role.map(str::to_string),
+            is_active: true,
+        }
+    }
+
+    async fn check_access(user: OrbiUser) -> StatusCode {
+        let app = Router::new()
+            .route("/api/platform/me", get(|| async { StatusCode::OK }))
+            .route_layer(middleware::from_fn(require_platform_admin))
+            .layer(Extension(user));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/platform/me")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        response.status()
+    }
+
+    #[tokio::test]
+    async fn super_admin_can_access_management() {
+        let status = check_access(test_user(Some("SUPER_ADMIN"))).await;
+
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn non_admin_platform_user_is_forbidden() {
+        let status = check_access(test_user(Some("PLATFORM_USER"))).await;
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn customer_without_platform_role_is_forbidden() {
+        let status = check_access(test_user(None)).await;
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+}

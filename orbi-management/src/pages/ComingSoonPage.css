@@ -1,0 +1,21 @@
+.coming-soon-page > p {
+  color: var(--color-text-secondary);
+}
+
+.coming-soon-card {
+  margin-top: var(--spacing-lg);
+  padding: var(--spacing-xl);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+}
+
+.coming-soon-card h3 {
+  color: var(--color-text);
+}
+
+.coming-soon-card p {
+  color: var(--color-text-secondary);
+  margin-bottom: 0;
+}

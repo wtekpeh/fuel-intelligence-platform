@@ -4199,6 +4199,130 @@ Sensors remain modular.
 Operational Intelligence consumes resolved configuration but never owns
 installation or calibration workflows.
 
+# Production Observability and Monitoring Architecture (Planned)
+
+## Purpose and implementation status
+
+ORBI will maintain a dedicated **internal engineering observability** capability to
+measure production reliability, diagnose incidents, and retain evidence of system
+performance. **This observability stack is planned; this section does not claim
+that any of the listed tools, exporters, dashboards, or alerts are deployed.**
+
+This is separate from the **customer-facing Operational Intelligence** already
+documented above (device/sensor health, fuel and geofence events, investigation,
+and customer analytics). Operational events remain in the ORBI operational data
+model; monitoring metrics, logs, and traces support engineers operating ORBI.
+Internal monitoring endpoints and dashboards must not be publicly exposed or
+implicitly accessible to customer organizations.
+
+## Target stack and responsibilities
+
+| Component | Intended responsibility | Rollout |
+| --- | --- | --- |
+| Prometheus | Scrape and retain application and infrastructure time-series metrics | Initial observability phase |
+| Grafana | Internal dashboards for reliability, capacity, and incident investigation | Initial observability phase |
+| Structured Rust logs | Correlated application events with levels and request/trace context | Initial observability phase |
+| Loki | Centralized, searchable logs with bounded retention | Subsequent phase |
+| OpenTelemetry | Vendor-neutral instrumentation for traces and selected metrics/log correlation | Incremental service instrumentation |
+| Tempo | Store and query distributed traces once multiple service hops justify it | Distributed-services phase |
+| Alertmanager / Grafana Alerting | Route actionable engineering alerts to authorized operators | Initial alerting phase |
+| PostgreSQL exporter / database metrics | Database availability, connections, locks, and query performance | As deployment requires |
+| Kubernetes metrics / exporters | Node, pod, workload, restart, and resource utilization signals | When Kubernetes is deployed |
+| Kafka or NATS/JetStream metrics | Broker availability, consumer backlog/lag, failures, and redelivery | When the chosen broker is integrated |
+
+**Deployment note:** The exact telemetry collection path (direct Prometheus
+scraping versus an OpenTelemetry Collector or Grafana Alloy) will be selected
+when infrastructure is configured. A collector is not a prerequisite for a
+minimal Prometheus deployment. Kafka and JetStream have different exporter and
+consumer metrics; do not treat their lag/delivery semantics as identical.
+
+## Proposed telemetry flow
+
+```text
+Physical ORBI devices
+  └── existing heartbeat, health, and telemetry APIs
+       └── ORBI operational database / customer intelligence
+                         │
+                         └── selected aggregate engineering metrics
+
+Rust/Axum services ── metrics endpoint ──────────> Prometheus ─┐
+Host / Kubernetes / database exporters ─────────> Prometheus ─┤
+Structured application logs ── log collector ───> Loki ───────┤
+Service spans ── OpenTelemetry collector ───────> Tempo ──────┤
+                                                              v
+                                                    Internal Grafana
+                                                              │
+                                                Engineering alert routing
+```
+
+Physical firmware is **not** expected to run Prometheus, Loki, or a tracing
+collector. Firmware may report diagnostics such as reconnect counts, queue
+depth, replay delay, and firmware version through existing or future device
+telemetry contracts. Their backend-derived aggregates can then be exported as
+engineering metrics without duplicating the customer-facing health engine.
+
+## Proposed measurements
+
+| Area | Initial measurements / evidence |
+| --- | --- |
+| Ingestion | Accepted/rejected readings, batches and readings per second, validation failures, processing duration, ingestion-to-persistence delay |
+| Rust APIs | Request rate, status/error rate, p50/p95/p99 request duration, in-flight requests, WebSocket connection count |
+| Device communication | ONLINE/STALE/OFFLINE counts, last-contact age distributions, offline queue/replay delay where firmware exposes them |
+| PostgreSQL/PostGIS | Connection utilization, transaction errors, slow-query diagnostics, spatial-query latency, database storage growth |
+| Broker (when introduced) | Publish/consume rate, consumer backlog or lag, redelivery, retries, poison messages / dead-letter handling where configured |
+| Kubernetes (when introduced) | Pod restarts, workload availability, CPU/memory saturation, deployment rollout and recovery outcomes |
+| Operational impact | Number of deployed/active devices, customer-reported incidents and time to resolution, derived from authoritative business records |
+
+Metric names, label sets, dashboards, and alert thresholds are **proposals**
+until validated against actual ORBI traffic and deployment conditions.
+Avoid unbounded Prometheus label cardinality: do not label general request
+metrics with raw device IDs, customer IDs, URLs containing IDs, IMEIs, or
+other high-cardinality identifiers. Use normalized route templates and
+aggregated fleet counts; retain detailed investigations in controlled logs or
+the operational database.
+
+## Production evidence and incident management
+
+The observability rollout should produce reproducible engineering evidence:
+
+1. Establish a baseline for ingestion throughput, API latency, error rates,
+   resource usage, and database performance under known workloads.
+2. Validate failure recovery, including device reconnect and offline replay,
+   database interruptions, broker restarts (once deployed), and rolling
+   application updates (once Kubernetes is deployed).
+3. Record incident start/end times, detection time, customer impact,
+   remediation, and follow-up actions in an internal incident record.
+4. Retain versioned dashboard definitions, load-test results, deployment
+   revisions, and dated benchmark notes. Report only measured results.
+5. Configure bounded metric/log/trace retention, backup requirements where
+   applicable, access control, and sensitive-data redaction before production.
+
+Suggested initial engineering alerts include sustained ingestion failures,
+API error-rate spikes, service unavailability, database saturation, and
+unexpected increases in offline devices. Alerts must be tested and tuned to
+avoid paging for expected intermittent connectivity or scheduled maintenance.
+Engineering alerts are distinct from customer fuel-theft and geofence alerts.
+
+## Incremental implementation sequence
+
+1. **Phase 1 — baseline:** Instrument `fuel-ingestion-service` with structured
+   logs and an internal metrics endpoint; deploy Prometheus and Grafana;
+   measure HTTP latency/errors, ingestion throughput, and service health.
+2. **Phase 2 — operations:** Add PostgreSQL/host metrics, actionable alerts,
+   runbooks, retention policies, and a repeatable performance test baseline.
+3. **Phase 3 — correlation:** Introduce Loki and OpenTelemetry tracing where
+   log centralization or cross-component diagnostics provide clear value.
+4. **Phase 4 — distributed infrastructure:** Add Kubernetes monitoring and
+   broker-specific metrics as those components enter ORBI production; use
+   Tempo when tracing across independently deployed services is useful.
+
+All phases remain **planned** pending implementation, validation, and a
+production deployment decision. Keep the initial stack small enough to fit
+the available AWS resources; monitor the monitoring stack's own resource
+consumption and cost.
+
+---
+
 # Next Platform Milestones
 
 Platform Foundation ✅
@@ -4300,6 +4424,7 @@ Installer Management + Commissions
 Analytics Intelligence Improvements
 ↓
 Production Hardening / Observability
+(Prometheus / Grafana baseline, alerts, reliability evidence)
 ↓
 Message Broker / Distributed Services
 (where operationally justified)
